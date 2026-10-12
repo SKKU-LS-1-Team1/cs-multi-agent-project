@@ -4,9 +4,11 @@ C/S 멀티 에이전트 시스템.
 
 ## 개발
 
+[uv](https://docs.astral.sh/uv/getting-started/installation/) 설치 후:
+
 ```bash
-pip install -e ".[dev]"
-ruff check . && ruff format --check . && pytest
+uv sync
+uv run ruff check . && uv run ruff format --check . && uv run pytest
 ```
 
 - CI: GitHub Actions (`.github/workflows/ci.yml`)
