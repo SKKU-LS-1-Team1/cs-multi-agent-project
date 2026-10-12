@@ -45,6 +45,6 @@ CSA-12 #done
 로컬에서 동일하게 실행:
 
 ```bash
-pip install -e ".[dev]"
-ruff check . && ruff format --check . && pytest
+uv sync
+uv run ruff check . && uv run ruff format --check . && uv run pytest
 ```
