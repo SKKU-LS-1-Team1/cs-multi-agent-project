@@ -10,8 +10,8 @@
 # 할 일
 # 1. Retriever 규약: search(query, k, where) → list[Evidence]. where 는 메타데이터 필터
 #    (product_code, doc_type, family). Evidence.source 에 "docs" / "cases" 를 넣는다.
-# 2. PgVectorRetriever(table): 질문을 임베딩(pipeline/embed_docs.embed, task_type
-#    "RETRIEVAL_QUERY")해서 `ORDER BY embedding <=> :query LIMIT k` (코사인 거리, extra: rag).
+# 2. PgVectorRetriever(table): 질문을 적재와 같은 pipeline/embed_docs.embed 로 임베딩해서
+#    `ORDER BY embedding <=> :query LIMIT k` (코사인 거리, extra: rag).
 #    where 는 같은 SQL 의 WHERE 로 (product_code = … AND …). score = 1 - 거리.
 #    임베딩 모델·차원은 적재와 반드시 같은 settings.embedding_model / embedding_dim 을 쓴다.
 # 3. default_retrievers(): DB 에 연결되고 doc_chunks 가 비어 있지 않으면 pgvector 2개, 아니면 로컬

@@ -31,7 +31,8 @@
   - `doc_chunks`: 공식 문서·FAQ·정책을 절 단위로 (약 900조각). 답변 근거.
   - `resolution_cases.embedding`: 해결 사례 (train 연결 568건 + 운영 중 해결 건). 참고·문장 본보기.
 - **임베딩 = `gemini-embedding-2`, 1536차원** (`EMBEDDING_MODEL`·`EMBEDDING_DIM`). 15개 언어 문의로
-  영어 문서를 찾는 다국어 모델. 적재는 `task_type=RETRIEVAL_DOCUMENT`, 검색은 `RETRIEVAL_QUERY`.
+  영어 문서를 찾는 다국어 모델. task_type(검색용/문서용 구분)은 이 모델이 무시하므로 적재·검색에
+  같은 호출을 쓴다. 글 여러 개를 한 번에 보내면 벡터 1개로 합쳐지므로 글마다 따로 부른다.
   모델·차원을 바꾸면 전부 다시 적재한다.
 
 ## 폴더

@@ -6,15 +6,17 @@
 #   doc_chunks, resolution_cases.embedding.
 # - 임베딩 모델: settings.embedding_model = gemini-embedding-2, settings.embedding_dim = 1536.
 #   15개 언어 문의로 영어 문서를 찾는 다국어 모델. 한·영 같은 뜻 유사도 0.75, 다른 뜻 0.44 확인.
+#   비교한 gemini-embedding-001 (PR #10) 은 task_type·묶음 호출이 되지만, 팀은 2 로 간다.
 #   기본 3072차원은 pgvector HNSW 인덱스 한도(2000)를 넘어서 output_dimensionality=1536 으로 받는다.
 #
 # 할 일
-# 1. embed(texts, task_type) → list[list[float]]: google-genai (extra: llm) 로 부른다.
+# 1. embed(texts) → list[list[float]]: google-genai (extra: llm) 로 부른다.
 #      client.models.embed_content(model=settings.embedding_model, contents=text,
-#          config=EmbedContentConfig(task_type=..., output_dimensionality=settings.embedding_dim))
+#          config=EmbedContentConfig(output_dimensionality=settings.embedding_dim))
 #    ⚠️ gemini-embedding-2 는 contents 에 글 여러 개를 목록으로 넣으면 하나로 합쳐 벡터 1개만
 #    돌려준다. 글 하나당 한 번씩 부른다 (약 0.5초/건 → 1,500건 ≈ 12분, 분당 호출 제한 주의).
-#    적재 = task_type "RETRIEVAL_DOCUMENT", 검색(agents/retrieval.py) = "RETRIEVAL_QUERY".
+#    task_type(RETRIEVAL_QUERY/DOCUMENT)은 gemini-embedding-2 가 무시한다 (같은 글이면 같은 벡터,
+#    2026-10-19 확인). 적재·검색 모두 같은 embed() 를 쓰면 된다.
 # 2. docs: pipeline/chunking.py 결과(약 900조각)를 doc_chunks 에 upsert.
 #    id = "doc_id#section", text = 제목 + 본문,
 #    doc_id·section·doc_type·product_code·family 열(검색 필터용).
