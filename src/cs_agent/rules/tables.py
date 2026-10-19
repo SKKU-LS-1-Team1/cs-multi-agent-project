@@ -30,23 +30,84 @@
 #
 # 완료 기준: 김동규 님 규칙 처리(CSA-22)가 이 표만으로 valid 부서·우선순위 일치율을 낼 수 있음
 #
-# 만들 것 (이름·모양은 다른 파일이 이대로 부른다)
-#
-#   @dataclass(frozen=True)
-#   class Product:
-#       code: str
-#       name: str
-#       family: str
-#       division: str  # 원본에 없음, 할 일 4
-#
-#   @dataclass(frozen=True)
-#   class RefTables:
-#       products: dict[str, Product]
-#       routing: dict[tuple[str, str], dict[str, str]]  # (family, category) -> 행 (rule_id·dept)
-#       required: dict[tuple[str, str], tuple[list[str], list[str]]]  # -> (required, blocking)
-#       priority: list[dict[str, str]]
-#       sla: dict[tuple[str, str, str], dict[str, str]]  # (category, tier, priority) -> row
-#       navigation: dict[str, dict[str, str]]  # intent -> row (CSA-33)
-#
-#   def load_tables(ref_dir: Path | None = None) -> RefTables:
-#       """data/ref/*.csv → RefTables. 경로 기본값은 config.Settings.ref_dir."""
+# 지금 들어간 것 (CSA-22 규칙 처리를 돌리려고 김동규가 먼저 채움): 할 일 1·2.
+# TODO(CSA-19): 할 일 3 검수, 할 일 4 대분류 표 (Product.division 은 아직 빈 값).
+import csv
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+
+ALL = "ALL"  # routing_rules.csv 에서 제품군 구분 없는 규칙
+RULE_SOURCE_ORDER = ("SUBTYPE_OVERRIDE", "FAMILY_OVERRIDE", "CATEGORY_DEFAULT")
+
+
+@dataclass(frozen=True)
+class Product:
+    code: str
+    name: str
+    family: str
+    division: str = ""  # 원본에 없음, 할 일 4
+
+
+@dataclass(frozen=True)
+class RefTables:
+    products: dict[str, Product]
+    # (family, category) -> 행. SUBTYPE_OVERRIDE 는 ("ALL", category) 로 들어간다.
+    routing: dict[tuple[str, str], dict[str, str]]
+    required: dict[tuple[str, str], tuple[list[str], list[str]]]  # -> (required, blocking)
+    priority: list[dict[str, str]]  # order 순
+    sla: dict[tuple[str, str, str], dict[str, str]]  # (category, tier, priority) -> row
+    navigation: dict[str, dict[str, str]]  # intent -> row (CSA-33)
+    escalation: list[dict[str, str]] = field(default_factory=list)  # rule_source=ESCALATION 행
+
+
+def _read(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _split(value: str) -> list[str]:
+    return [v.strip() for v in value.split(";") if v.strip()]
+
+
+@lru_cache
+def _load(ref_dir: Path) -> RefTables:
+    products = {
+        r["product_code"]: Product(r["product_code"], r["product_name"], r["family"])
+        for r in _read(ref_dir / "product_master.csv")
+    }
+
+    routing: dict[tuple[str, str], dict[str, str]] = {}
+    escalation: list[dict[str, str]] = []
+    rows = _read(ref_dir / "routing_rules.csv")
+    for r in rows:
+        if r["rule_source"] == "ESCALATION":
+            escalation.append(r)
+    # 같은 키가 겹치면 우선순위 높은 rule_source 가 남도록 낮은 것부터 넣는다
+    for source in reversed(RULE_SOURCE_ORDER):
+        for r in rows:
+            if r["rule_source"] == source:
+                routing[(r["family"], r["category"])] = r
+
+    required = {
+        (r["family"], r["category"]): (_split(r["required_fields"]), _split(r["blocking_fields"]))
+        for r in _read(ref_dir / "required_info.csv")
+    }
+    priority = sorted(_read(ref_dir / "priority_rules.csv"), key=lambda r: int(r["order"]))
+    sla = {
+        (r["category"], r["customer_tier"], r["priority"]): r
+        for r in _read(ref_dir / "sla_policy.csv")
+    }
+    navigation = {r["intent"]: r for r in _read(ref_dir / "navigation_rules.csv")}
+    return RefTables(products, routing, required, priority, sla, navigation, escalation)
+
+
+def load_tables(ref_dir: Path | None = None) -> RefTables:
+    """data/ref/*.csv → RefTables. 경로 기본값은 config.Settings.ref_dir."""
+    if ref_dir is None:
+        from cs_agent.config import get_settings
+
+        ref_dir = get_settings().ref_dir
+    return _load(Path(ref_dir))
