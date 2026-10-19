@@ -1,0 +1,13 @@
+nav_rule_id,intent,tab,anchor,note
+NAV-01,PRODUCT_ONLY,info,,제품만 파악됨 → 제품 정보 탭
+NAV-02,FAMILY_ONLY,tree,family,제품 미확정 → 중분류 목록 + 제품 선택 버튼
+NAV-03,TECH_SPEC,info,spec_row,사양 행 강조
+NAV-04,COMPLIANCE,info,spec_row,인증 행 강조
+NAV-05,INSTALL,install,section,설치 가이드 해당 절
+NAV-06,DEFECT,faults,error_code,자주 발생하는 고장 탭 해당 코드
+NAV-07,FW_UPDATE,firmware,latest,최신 버전과 해결된 문제
+NAV-08,MANUAL,docs,doc_id,문서 자료실 해당 문서
+NAV-09,QUOTE,info,lead_time,납기·보증 + 문의하기 안내
+NAV-10,ORDER_LEAD,info,lead_time,납기·보증 + 문의하기 안내
+NAV-11,WARRANTY,faq,policy,정책 요약 + 문의하기 안내
+NAV-12,RETURN,faq,policy,정책 요약 + 문의하기 안내
