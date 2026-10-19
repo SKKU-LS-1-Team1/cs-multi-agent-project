@@ -12,3 +12,4 @@ build/
 data/processed/
 data/chroma/
 data/mock/
+.DS_Store
