@@ -40,9 +40,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import TypeVar
 
 ALL = "ALL"  # routing_rules.csv 에서 제품군 구분 없는 규칙
 RULE_SOURCE_ORDER = ("SUBTYPE_OVERRIDE", "FAMILY_OVERRIDE", "CATEGORY_DEFAULT")
+
+K = TypeVar("K")
+V = TypeVar("V")
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,9 @@ class Product:
     division: str = ""  # family_divisions.csv (원본에 없음, 할 일 4)
 
 
-@dataclass(frozen=True)
+# eq=False: dict 필드가 있어 값 비교 해시는 못 만든다. 같은 객체인지로 비교·해시해서
+# lru_cache 인자나 set 에 넣을 수 있게 한다 (load_tables 는 같은 경로면 같은 객체를 준다).
+@dataclass(frozen=True, eq=False)
 class RefTables:
     products: dict[str, Product]
     # (family, category) -> 행. SUBTYPE_OVERRIDE 는 ("ALL", category) 로 들어간다.
@@ -75,14 +81,36 @@ class RefTables:
 
 
 def _read(path: Path) -> list[dict[str, str]]:
+    """CSV → 행 목록. 열 개수가 머리글과 다른 줄은 파일 이름·줄 번호와 함께 멈춘다."""
     if not path.exists():
         return []
+    rows: list[dict[str, str]] = []
     with path.open(encoding="utf-8-sig", newline="") as f:
-        return list(csv.DictReader(f))
+        reader = csv.DictReader(f)
+        for row in reader:
+            # 열이 많으면 남는 값이 None 키에, 적으면 빠진 열 값이 None 으로 들어온다
+            if None in row or None in row.values():
+                columns = len(reader.fieldnames or [])
+                raise ValueError(
+                    f"{path.name}:{reader.line_num}: 열 개수가 머리글({columns}개)과 다르다."
+                    " 값에 쉼표가 있으면 큰따옴표로 감싼다"
+                )
+            rows.append(row)
+    return rows
 
 
 def _split(value: str) -> list[str]:
     return [v.strip() for v in value.split(";") if v.strip()]
+
+
+def _unique(items: Iterable[tuple[K, V]], name: str) -> dict[K, V]:
+    """(키, 값) → dict. 같은 키가 두 번 나오면 마지막 줄로 덮어쓰지 않고 멈춘다."""
+    out: dict[K, V] = {}
+    for key, value in items:
+        if key in out:
+            raise ValueError(f"{name}: 키 {key} 가 두 번 있다")
+        out[key] = value
+    return out
 
 
 def _group(rows: list[dict[str, str]], key: str) -> dict[str, list[dict[str, str]]]:
@@ -95,15 +123,34 @@ def _group(rows: list[dict[str, str]], key: str) -> dict[str, list[dict[str, str
 @lru_cache
 def _load(ref_dir: Path) -> RefTables:
     division_rows = _read(ref_dir / "family_divisions.csv")
-    family_divisions = {r["family"]: r["division"] for r in division_rows}
-    divisions = {r["division"]: r["division_label"] for r in division_rows}
+    family_divisions = _unique(
+        ((r["family"], r["division"]) for r in division_rows), "family_divisions.csv"
+    )
+    # 대분류 하나가 여러 제품군 줄에 나오므로 중복은 허용하되 표시 이름은 같아야 한다
+    divisions: dict[str, str] = {}
+    for r in division_rows:
+        label = divisions.setdefault(r["division"], r["division_label"])
+        if label != r["division_label"]:
+            raise ValueError(
+                f"family_divisions.csv: 대분류 {r['division']} 의 표시 이름이"
+                f" {label} / {r['division_label']} 로 다르다"
+            )
 
-    products = {
-        r["product_code"]: Product(
-            r["product_code"], r["product_name"], r["family"], family_divisions.get(r["family"], "")
-        )
-        for r in _read(ref_dir / "product_master.csv")
-    }
+    products = _unique(
+        (
+            (
+                r["product_code"],
+                Product(
+                    r["product_code"],
+                    r["product_name"],
+                    r["family"],
+                    family_divisions.get(r["family"], ""),
+                ),
+            )
+            for r in _read(ref_dir / "product_master.csv")
+        ),
+        "product_master.csv",
+    )
 
     routing: dict[tuple[str, str], dict[str, str]] = {}
     escalation: list[dict[str, str]] = []
@@ -111,22 +158,39 @@ def _load(ref_dir: Path) -> RefTables:
     for r in rows:
         if r["rule_source"] == "ESCALATION":
             escalation.append(r)
-    # 같은 키가 겹치면 우선순위 높은 rule_source 가 남도록 낮은 것부터 넣는다
+    # 같은 키가 겹치면 우선순위 높은 rule_source 가 남도록 낮은 것부터 넣는다.
+    # 같은 rule_source 안에서 키가 겹치는 것은 표 오류다.
     for source in reversed(RULE_SOURCE_ORDER):
-        for r in rows:
-            if r["rule_source"] == source:
-                routing[(r["family"], r["category"])] = r
+        same_source = _unique(
+            (((r["family"], r["category"]), r) for r in rows if r["rule_source"] == source),
+            f"routing_rules.csv ({source})",
+        )
+        routing.update(same_source)
 
-    required = {
-        (r["family"], r["category"]): (_split(r["required_fields"]), _split(r["blocking_fields"]))
-        for r in _read(ref_dir / "required_info.csv")
-    }
-    priority = sorted(_read(ref_dir / "priority_rules.csv"), key=lambda r: int(r["order"]))
-    sla = {
-        (r["category"], r["customer_tier"], r["priority"]): r
-        for r in _read(ref_dir / "sla_policy.csv")
-    }
-    navigation = {r["intent"]: r for r in _read(ref_dir / "navigation_rules.csv")}
+    required = _unique(
+        (
+            (
+                (r["family"], r["category"]),
+                (_split(r["required_fields"]), _split(r["blocking_fields"])),
+            )
+            for r in _read(ref_dir / "required_info.csv")
+        ),
+        "required_info.csv",
+    )
+    priority_rows = _read(ref_dir / "priority_rules.csv")
+    _unique(((r["order"], r) for r in priority_rows), "priority_rules.csv (order)")
+    priority = sorted(priority_rows, key=lambda r: int(r["order"]))
+    sla = _unique(
+        (
+            ((r["category"], r["customer_tier"], r["priority"]), r)
+            for r in _read(ref_dir / "sla_policy.csv")
+        ),
+        "sla_policy.csv",
+    )
+    navigation = _unique(
+        ((r["intent"], r) for r in _read(ref_dir / "navigation_rules.csv")),
+        "navigation_rules.csv",
+    )
     return RefTables(
         products,
         routing,
@@ -137,10 +201,20 @@ def _load(ref_dir: Path) -> RefTables:
         escalation,
         divisions=divisions,
         family_divisions=family_divisions,
-        field_labels={r["field"]: r["label"] for r in _read(ref_dir / "info_field_codebook.csv")},
-        urgency={r["urgency"]: r["description"] for r in _read(ref_dir / "urgency_codebook.csv")},
-        departments={r["dept_code"]: r for r in _read(ref_dir / "departments.csv")},
-        customers={r["customer_id"]: r for r in _read(ref_dir / "customers.csv")},
+        field_labels=_unique(
+            ((r["field"], r["label"]) for r in _read(ref_dir / "info_field_codebook.csv")),
+            "info_field_codebook.csv",
+        ),
+        urgency=_unique(
+            ((r["urgency"], r["description"]) for r in _read(ref_dir / "urgency_codebook.csv")),
+            "urgency_codebook.csv",
+        ),
+        departments=_unique(
+            ((r["dept_code"], r) for r in _read(ref_dir / "departments.csv")), "departments.csv"
+        ),
+        customers=_unique(
+            ((r["customer_id"], r) for r in _read(ref_dir / "customers.csv")), "customers.csv"
+        ),
         spec_facts=_group(_read(ref_dir / "product_spec_facts.csv"), "product_code"),
         faults=_read(ref_dir / "fault_catalog.csv"),
         firmware=_group(_read(ref_dir / "firmware_history.csv"), "product_code"),
