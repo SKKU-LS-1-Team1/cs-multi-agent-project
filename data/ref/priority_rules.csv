@@ -1,0 +1,9 @@
+priority_rule_id,urgency_flag,categories,priority,note
+PR-01,SAFETY,*,P1,안전 위험: 초안 없이 사람 큐 (C-08)
+PR-02,SITE_DOWN,DEFECT,P1,현장 정지 + 불량
+PR-03,SITE_DOWN,*,P2,현장 정지 (불량 외)
+PR-04,PROD_IMPACT,*,P2,생산 영향
+PR-04,COMMISSION,*,P2,시운전 일정 영향
+PR-06,DEADLINE,*,P3,고객 기한 명시
+PR-05,NONE,DEFECT;INSTALL;FW_UPDATE;ORDER_LEAD;WARRANTY;RETURN,P3,조치·판단 필요 유형
+PR-07,NONE,TECH_SPEC;MANUAL;COMPLIANCE;QUOTE,P4,정보 안내형

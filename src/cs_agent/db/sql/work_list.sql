@@ -1,0 +1,7 @@
+-- 상담원 작업 목록 (CSA-20 · 담당 박종석) — 관리자 화면 CSA-40 이 쓴다
+--
+-- 할 일
+-- 1. 해결·반려되지 않은 티켓을 SLA 경과 비율(경과 시간 − 고객 대기 시간) / 해결 목표 시간이 큰 순으로.
+-- 2. 열: ticket_id, category, priority, assigned_dept, status, sla_due_at, sla_ratio, at_risk(≥ 0.75)
+-- 3. :dept 파라미터로 부서 필터 (NULL 이면 전체).
+-- 4. 테이블·열 이름은 db/models.py (CSA-24) 확정본을 따른다.

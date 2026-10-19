@@ -7,7 +7,26 @@ name = "cs-agent"
 version = "0.1.0"
 description = "C/S multi-agent system"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "langgraph>=0.2.60",
+    "langchain-core>=0.3",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "redis>=5.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# 무거운 외부 연동은 extra로 분리한다. CI(테스트)는 fake 구현으로 돌고,
+# Docker 이미지는 `uv sync --all-extras`로 전부 설치한다.
+rag = ["chromadb>=1.0"]
+llm = ["langchain-google-genai>=2.0"]
+obs = ["langfuse>=2.50"]
+data = ["openpyxl>=3.1", "pandas>=2.2"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
@@ -21,6 +40,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["frontend"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

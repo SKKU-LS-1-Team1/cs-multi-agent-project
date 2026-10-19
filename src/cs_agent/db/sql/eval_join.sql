@@ -1,0 +1,6 @@
+-- 평가용 조인 (CSA-20 · 담당 박종석) — 평가 스크립트 CSA-50 이 쓴다
+--
+-- 할 일
+-- 1. 정답 테이블(tickets_gold: valid·test 분할의 원본 tickets)을 적재한다.
+-- 2. 시스템 판단(tickets, drafts, reviews) vs 정답: 유형, 부서, 우선순위, 누락 항목, 근거 문서·절.
+-- 3. KPI 정의는 analysis/kpi/KPI_설정안.md (K1~K5).
