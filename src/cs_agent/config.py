@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # Langfuse (CSA-48)
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
-    langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_host: str = "https://us.cloud.langfuse.com"  # 팀 프로젝트는 US 리전 (EU 주소면 401)
 
     # 처리 흐름
     max_verify_retries: int = 2  # 자동 점검 재작성 최대 (S-06)
