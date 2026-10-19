@@ -5,7 +5,7 @@
 #
 # 할 일
 # 1. decide_priority(category, urgency): priority_rules.csv 를 위에서부터 보고 처음 맞는 규칙.
-#    현재 임시본: SAFETY→P1(PR-01), SITE_DOWN+DEFECT→P1(PR-02), SITE_DOWN→P2(PR-03),
+#    현재 기준표: SAFETY→P1(PR-01), SITE_DOWN+DEFECT→P1(PR-02), SITE_DOWN→P2(PR-03),
 #    PROD_IMPACT/COMMISSION→P2(PR-04), DEADLINE→P3(PR-06), NONE+조치형→P3(PR-05),
 #      NONE+안내형→P4(PR-07).
 # 2. route_department(family, category): routing_rules.csv. 제품 미확인이면 기본 부서(GCS_L1) 규칙.
