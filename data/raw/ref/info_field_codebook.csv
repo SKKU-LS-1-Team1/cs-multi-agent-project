@@ -1,0 +1,33 @@
+﻿field,label
+product_model,Product model / ordering code
+serial_no,Serial number (nameplate)
+application,"Application (voltage, load, duty)"
+target_standard,Required standard / certificate
+target_country,Destination country / market
+site_condition,"Site condition (ambient temperature, altitude, humidity)"
+wiring_diagram,Wiring / single-line diagram
+photos,Photos of product and nameplate
+purchase_doc,PO or invoice number
+install_date,Installation / commissioning date
+failure_description,Failure description and occurrence time
+po_number,PO number
+quantity,Quantity
+required_date,Required delivery date
+incoterms,Incoterms and delivery destination
+document_type,Document type requested
+doc_language,Preferred document language
+error_code,Error code or symptom displayed
+operating_condition,"Operating condition at failure (load, speed, temperature)"
+logs,Event / trip log export
+current_fw,Current firmware version
+tool_version,Engineering tool / loader version
+return_reason,Reason for return
+packaging_condition,Packaging condition on arrival
+parameter_backup,Parameter backup file
+motor_nameplate,Motor nameplate data
+program_backup,PLC/HMI project backup
+battery_status,Battery SOC / cell temperature at event
+load_profile,Load current / temperature records
+oil_test,Oil test (DGA) report
+string_config,PV string configuration (modules per string)
+battery_age,Battery installation date / age

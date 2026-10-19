@@ -1,0 +1,7 @@
+﻿urgency,description
+SAFETY,안전 위험 (발연·화재·감전·과열·아크)
+SITE_DOWN,설비/라인 전체 정지
+PROD_IMPACT,생산·운전 영향 또는 반복 트립
+COMMISSION,시운전 일정 차질
+DEADLINE,고객이 명시한 기한(입찰·출하 등) 임박
+NONE,특이사항 없음

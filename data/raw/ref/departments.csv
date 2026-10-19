@@ -1,0 +1,14 @@
+﻿dept_code,dept_name_ko,dept_name_en,level,scope
+GCS_L1,글로벌 C/S 센터,Global CS Center,L1,접수·분류·일반 문의·문서 송부
+TS_LV,저압기기 기술지원,LV Distribution Technical Support,L2,MCCB·ACB·ELCB·접촉기·계전기·계측기
+TS_MV,고압·배전반 기술지원,MV & Switchgear Technical Support,L2,VCB·고압 배전반
+TS_TRF,변압기 기술지원,Transformer Engineering Support,L2,몰드·유입 변압기
+TS_AUTO,자동화 기술지원,Automation Technical Support,L2,인버터·PLC·HMI
+TS_ENERGY,에너지솔루션 기술지원,Energy Solutions Technical Support,L2,ESS PCS·BMS·태양광 인버터·UPS
+RND_FW,펌웨어 개발,Firmware R&D,L3,펌웨어 결함 분석·패치
+QA_CLAIM,품질보증/클레임,Quality Assurance & Claim,L3,불량 원인 분석·클레임 판정
+FIELD_SVC,현장 서비스,Field Service,L2,현장 출동·시운전·수리
+CERT,인증·규격,Certification & Compliance,L2,인증서·시험성적서·규격 적합성
+SALES_OPS,해외영업 운영,Overseas Sales Operations,L2,견적·가격·계약 조건
+SCM,주문·물류,Order & Logistics (SCM),L2,납기·출하·물류
+WARRANTY_DESK,보증·RMA 데스크,Warranty & RMA Desk,L2,보증 판정·RMA 발행·교환
