@@ -48,4 +48,4 @@
 `src/cs_agent/rules/tables.py` 맨 위 주석에 있다.
 `navigation_rules.csv`(기획서 5.4, CSA-33)와 `family_divisions.csv`(제품군 → 대분류, CSA-19)는
 원본에 없어서 직접 만든 표다. 기준표와 tickets 대조 검수는
-`uv run --extra data python -m cs_agent.rules.tables` 로 한다.
+`uv run python -m cs_agent.rules.tables` 로 한다.

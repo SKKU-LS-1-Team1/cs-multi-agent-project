@@ -35,5 +35,13 @@ cp .env.example .env && docker compose up --build   # 전체 구성 http://local
 - 원본 기준표(`ref/`)는 `data/ref/` 로 옮겼다.
 - 가공 결과(`data/processed/`)와 벡터 DB(`data/chroma/`)는 git에 올리지 않고 각자 만든다.
 
+상담 데이터 정제와 분리는 다음 명령으로 실행한다. `data/processed/`에
+`tickets_train.parquet`, `tickets_valid.parquet`, `tickets_test.parquet`,
+`cases_seed.parquet`, `classifier_train.parquet` (`text` / `category_code`)가 생성된다.
+
+```bash
+uv run --extra data python -m cs_agent.pipeline.prepare_data
+```
+
 - CI: GitHub Actions (`.github/workflows/ci.yml`)
 - Jira 연동 및 브랜치/커밋 규칙: [docs/JIRA_INTEGRATION.md](docs/JIRA_INTEGRATION.md)
