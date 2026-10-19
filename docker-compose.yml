@@ -1,4 +1,4 @@
-# 로컬·GCP VM 공통 구성 (CSA-44 · 김도연): React+Nginx · FastAPI · PostgreSQL · Redis · ChromaDB
+# 로컬·GCP VM 공통 구성 (CSA-44 · 김도연): React+Nginx · FastAPI · PostgreSQL(+pgvector) · Redis
 # 실행: cp .env.example .env && docker compose up --build
 services:
   nginx:
@@ -16,8 +16,6 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://cs:cs@postgres:5432/cs
       REDIS_URL: redis://redis:6379/0
-      CHROMA_HOST: chromadb
-      CHROMA_PORT: "8000"
     volumes:
       - ./data/raw:/app/data/raw:ro
     depends_on:
@@ -25,11 +23,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      chromadb:
-        condition: service_started
 
   postgres:
-    image: postgres:16-alpine
+    # 벡터 검색(RAG)도 PostgreSQL 안에서 한다 (pgvector, CSA-18). 확장은 Alembic 첫 리비전에서 켠다.
+    image: pgvector/pgvector:0.8.0-pg16
     environment:
       POSTGRES_USER: cs
       POSTGRES_PASSWORD: cs
@@ -44,11 +41,5 @@ services:
   redis:
     image: redis:7-alpine
 
-  chromadb:
-    image: chromadb/chroma:1.5.9
-    volumes:
-      - chroma:/data
-
 volumes:
   pgdata:
-  chroma:

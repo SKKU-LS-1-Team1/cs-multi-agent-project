@@ -12,7 +12,7 @@
 # 2. build_case(): 그래프 상태 → 사례 문서 (요약, 제품·유형·에러코드, 원인, 조치, 최종 답변, 근거,
 #      수정 사유).
 # 3. 개인정보 가리기: 회사명·연락처·시리얼 번호 (mask_pii).
-# 4. 저장: ChromaDB `cases` 컬렉션 upsert + PostgreSQL resolution_cases 테이블 (CSA-24).
+# 4. 저장: PostgreSQL resolution_cases 에 행 + embedding(pgvector) 을 같이 upsert (CSA-24·18).
 # 5. 재문의로 다시 열린 문의의 사례는 검색 대상에서 잠시 뺀다.
 # 6. 사실 오류(FACT_ERROR)로 고친 건은 원천(기준표·문서)도 고치도록 알림을 남긴다.
 #
@@ -26,7 +26,8 @@
 #   앞 절반 vs 뒤 절반의 approve 비율로 피드백 루프 효과를 보인다 (evaluation/run_eval.py, CSA-50).
 #
 # 지금 들어간 것: 할 일 1·2·3, 6 은 사례에 표시(source_fix_needed)만 한다.
-# TODO(CSA-15): 4 저장(ChromaDB cases, CSA-18 · PostgreSQL, CSA-24), 5 재문의 사례 제외.
+# TODO(CSA-15): 4 저장(resolution_cases + embedding, CSA-24·18),
+#   5 재문의 사례 제외(searchable=false).
 #
 # 참고: 기획서 v10 7장·7.1
 import re
