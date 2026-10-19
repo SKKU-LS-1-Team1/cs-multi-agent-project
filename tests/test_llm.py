@@ -1,3 +1,4 @@
+import json
 from contextlib import contextmanager
 
 import httpx
@@ -113,12 +114,21 @@ def test_parse_judgement(text, answer, confidence):
     assert (result.answer, result.confidence) == (answer, confidence)
 
 
-def _jev_response(content: str) -> httpx.Response:
+def _jev_response(choice: str, confidence: float) -> httpx.Response:
+    # https://docs.typesafe.ai/api 의 choice 응답 형식
     return httpx.Response(
         200,
         json={
-            "choices": [{"message": {"content": content}}],
-            "usage": {"prompt_tokens": 120, "completion_tokens": 9},
+            "model": "jev-1.13.0",
+            "answers": {
+                "answer": {
+                    "type": "choice",
+                    "choice": choice,
+                    "confidence": confidence,
+                    "probabilities": {o: (confidence if o == choice else 0.0) for o in OPTIONS},
+                }
+            },
+            "usage": {"input_tokens": 325, "output_tokens": 48},
         },
     )
 
@@ -130,7 +140,7 @@ def test_jev_client_retries_429_then_parses():
         requests.append(request)
         if len(requests) == 1:
             return httpx.Response(429, headers={"retry-after": "2"})
-        return _jev_response('{"answer": "RETURN", "confidence": 0.77}')
+        return _jev_response("RETURN", 0.77)
 
     jev = JevClient(
         "key",
@@ -142,11 +152,30 @@ def test_jev_client_retries_429_then_parses():
 
     result = jev.judge("문의", OPTIONS)
 
-    assert (result.answer, result.confidence, result.model) == ("RETURN", 0.77, "jev-1")
-    assert result.usage == {"input": 120, "output": 9}
+    assert (result.answer, result.confidence, result.model) == ("RETURN", 0.77, "jev-1.13.0")
+    assert result.usage == {"input": 325, "output": 48}
     assert waits == [2.0]
-    assert requests[-1].url == "https://jev.test/v1/chat/completions"
-    assert requests[-1].headers["authorization"] == "Bearer key"
+    sent = requests[-1]
+    assert sent.url == "https://jev.test/v1/systemone"
+    assert sent.headers["authorization"] == "Bearer key"
+    body = json.loads(sent.content)
+    assert body["model"] == "jev-1"
+    assert body["state"] == "문의"
+    assert body["questions"]["answer"]["type"] == "choice"
+    assert body["questions"]["answer"]["criteria"] == {o: None for o in OPTIONS}
+
+
+def test_jev_choice_outside_options_has_zero_confidence():
+    jev = JevClient(
+        "key",
+        "jev-1",
+        "https://jev.test/v1",
+        transport=httpx.MockTransport(lambda r: _jev_response("OTHER", 0.9)),
+    )
+
+    result = jev.judge("문의", OPTIONS)
+
+    assert (result.answer, result.confidence) == ("DEFECT", 0.0)
 
 
 def test_jev_client_gives_up_after_max_attempts():
@@ -154,7 +183,7 @@ def test_jev_client_gives_up_after_max_attempts():
         "key",
         "jev-1",
         "https://jev.test/v1",
-        transport=httpx.MockTransport(lambda r: httpx.Response(503)),
+        transport=httpx.MockTransport(lambda r: httpx.Response(529)),
         sleep=lambda s: None,
     )
 
