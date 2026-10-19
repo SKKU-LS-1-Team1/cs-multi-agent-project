@@ -9,7 +9,7 @@ dist/
 build/
 
 # 원천·가공 데이터와 로컬 벡터 DB는 git에 올리지 않는다 (data/ref 기준표만 올린다)
-data/raw/
 data/processed/
 data/chroma/
 data/mock/
+.DS_Store

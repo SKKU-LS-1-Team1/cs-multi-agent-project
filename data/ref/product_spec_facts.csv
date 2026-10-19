@@ -1,0 +1,170 @@
+﻿product_code,attribute,value,doc_id,section
+MCCB-ABS-103c,Frame size,100AF,DS-MCCB-ABS-103c,2.1
+MCCB-ABS-103c,Rated current (In),"15, 20, 30, 40, 50, 60, 75, 100 A",DS-MCCB-ABS-103c,2.1
+MCCB-ABS-103c,Rated operational voltage (Ue),AC 690 V max,DS-MCCB-ABS-103c,2.1
+MCCB-ABS-103c,Ultimate breaking capacity Icu at AC 415 V,37 kA,DS-MCCB-ABS-103c,2.2
+MCCB-ABS-103c,Service breaking capacity Ics,75% of Icu,DS-MCCB-ABS-103c,2.2
+MCCB-ABS-103c,Number of poles,2P / 3P / 4P,DS-MCCB-ABS-103c,2.1
+MCCB-ABS-103c,Mechanical endurance,"8,500 operations",DS-MCCB-ABS-103c,2.3
+MCCB-ABS-103c,Electrical endurance,"1,500 operations at In",DS-MCCB-ABS-103c,2.3
+MCCB-ABS-103c,Terminal tightening torque,3.5 N·m (M5),DS-MCCB-ABS-103c,3.1
+MCCB-ABS-103c,Magnetic trip setting,"Fixed, 10 x In",DS-MCCB-ABS-103c,2.4
+MCCB-ABS-403c,Frame size,400AF,DS-MCCB-ABS-403c,2.1
+MCCB-ABS-403c,Rated current (In),"250, 300, 350, 400 A",DS-MCCB-ABS-403c,2.1
+MCCB-ABS-403c,Ultimate breaking capacity Icu at AC 415 V,50 kA,DS-MCCB-ABS-403c,2.2
+MCCB-ABS-403c,Service breaking capacity Ics,100% of Icu,DS-MCCB-ABS-403c,2.2
+MCCB-ABS-403c,Thermal trip adjustment,0.8 to 1.0 x In,DS-MCCB-ABS-403c,2.4
+MCCB-ABS-403c,Magnetic trip adjustment,5 to 10 x In,DS-MCCB-ABS-403c,2.4
+MCCB-ABS-403c,Mechanical endurance,"7,000 operations",DS-MCCB-ABS-403c,2.3
+MCCB-ABS-403c,Terminal tightening torque,18 N·m (M10),DS-MCCB-ABS-403c,3.1
+MCCB-ABS-403c,UL 489 interrupting rating at 480 V (-U variant),35 kA,DS-MCCB-ABS-403c,2.2
+ACB-AS-2000,Rated current (In),2000 A,DS-ACB-AS-2000,2.1
+ACB-AS-2000,Ultimate breaking capacity Icu at AC 415 V,85 kA,DS-ACB-AS-2000,2.2
+ACB-AS-2000,Short-time withstand current Icw (1 s),65 kA,DS-ACB-AS-2000,2.2
+ACB-AS-2000,Trip unit protection functions,"L (long-time), S (short-time), I (instantaneous), G (ground fault)",DS-ACB-AS-2000,2.4
+ACB-AS-2000,Motor operator control voltage,AC/DC 110-240 V,DS-ACB-AS-2000,2.5
+ACB-AS-2000,Closing time,≤ 70 ms,DS-ACB-AS-2000,2.3
+ACB-AS-2000,Mechanical endurance (with maintenance),"20,000 operations",DS-ACB-AS-2000,2.3
+ACB-AS-2000,Trip unit communication,Modbus RTU (RS-485),DS-ACB-AS-2000,2.5
+VCB-25kV-1250,Rated voltage,25.8 kV,DS-VCB-25kV-1250,2.1
+VCB-25kV-1250,Rated normal current,1250 A,DS-VCB-25kV-1250,2.1
+VCB-25kV-1250,Rated short-circuit breaking current,25 kA,DS-VCB-25kV-1250,2.2
+VCB-25kV-1250,Rated short-time withstand,25 kA / 3 s,DS-VCB-25kV-1250,2.2
+VCB-25kV-1250,Lightning impulse withstand (BIL),125 kV,DS-VCB-25kV-1250,2.2
+VCB-25kV-1250,Mechanical endurance class,"M2 (10,000 operations)",DS-VCB-25kV-1250,2.3
+VCB-25kV-1250,Electrical endurance class,E2,DS-VCB-25kV-1250,2.3
+VCB-25kV-1250,Spring charging motor voltage,DC 110 V / DC 125 V / AC 220 V,DS-VCB-25kV-1250,2.4
+ELCB-EBN-203c,Rated current (In),"125, 150, 175, 200 A",DS-ELCB-EBN-203c,2.1
+ELCB-EBN-203c,Rated residual operating current IΔn,30 / 100 / 300 / 500 mA selectable,DS-ELCB-EBN-203c,2.4
+ELCB-EBN-203c,Residual current type,Type AC (Type A optional),DS-ELCB-EBN-203c,2.4
+ELCB-EBN-203c,Operating time at IΔn,≤ 0.1 s (instantaneous setting),DS-ELCB-EBN-203c,2.4
+ELCB-EBN-203c,Ultimate breaking capacity Icu at AC 415 V,37 kA,DS-ELCB-EBN-203c,2.2
+ELCB-EBN-203c,Test button operating voltage range,AC 200-460 V,DS-ELCB-EBN-203c,2.4
+CONT-MC-32a,Rated operational current AC-3 at 400 V,32 A,DS-CONT-MC-32a,2.1
+CONT-MC-32a,Motor power AC-3 at 400 V,15 kW,DS-CONT-MC-32a,2.1
+CONT-MC-32a,Coil voltage options,"AC 24/48/110/220/380/440 V, DC 24/48/110/220 V",DS-CONT-MC-32a,2.2
+CONT-MC-32a,Coil pick-up voltage,80-110% of rated coil voltage,DS-CONT-MC-32a,2.2
+CONT-MC-32a,Mechanical endurance,10 million operations,DS-CONT-MC-32a,2.3
+CONT-MC-32a,Electrical endurance AC-3,1.2 million operations,DS-CONT-MC-32a,2.3
+CONT-MC-32a,Auxiliary contacts,1a1b built-in,DS-CONT-MC-32a,2.1
+RELAY-GMR-22,Current setting ranges,0.1-0.16 A up to 16-22 A (13 ranges),DS-RELAY-GMR-22,2.1
+RELAY-GMR-22,Trip class,Class 10A,DS-RELAY-GMR-22,2.1
+RELAY-GMR-22,Phase-loss sensitivity,Yes (differential mechanism),DS-RELAY-GMR-22,2.1
+RELAY-GMR-22,Reset mode,Manual / automatic selectable,DS-RELAY-GMR-22,2.2
+RELAY-GMR-22,Ambient temperature compensation,-25 to +55 °C,DS-RELAY-GMR-22,2.2
+INV-LSLV0075-S100,Rated output (heavy duty),7.5 kW / 16 A,DS-INV-LSLV0075-S100,2.1
+INV-LSLV0075-S100,Input voltage,"3-phase AC 380-480 V (-15% to +10%), 50/60 Hz",DS-INV-LSLV0075-S100,2.1
+INV-LSLV0075-S100,Overload capacity (heavy duty),150% for 1 minute,DS-INV-LSLV0075-S100,2.1
+INV-LSLV0075-S100,Control method,"V/F, slip compensation, sensorless vector",DS-INV-LSLV0075-S100,2.2
+INV-LSLV0075-S100,Output frequency range,0.01-400 Hz,DS-INV-LSLV0075-S100,2.2
+INV-LSLV0075-S100,Built-in communication,RS-485 Modbus RTU / LS INV protocol,DS-INV-LSLV0075-S100,2.3
+INV-LSLV0075-S100,Safe Torque Off,"STO, SIL3 / PLe",DS-INV-LSLV0075-S100,2.4
+INV-LSLV0075-S100,Built-in EMC filter,Category C3,DS-INV-LSLV0075-S100,2.4
+INV-LSLV0075-S100,Braking,Built-in braking transistor (external resistor),DS-INV-LSLV0075-S100,2.4
+INV-LSLV0220-H100,Rated output (normal duty),22 kW / 45 A,DS-INV-LSLV0220-H100,2.1
+INV-LSLV0220-H100,Overload capacity (normal duty),120% for 1 minute,DS-INV-LSLV0220-H100,2.1
+INV-LSLV0220-H100,Built-in communication,"BACnet MS/TP, Modbus RTU, Metasys N2",DS-INV-LSLV0220-H100,2.3
+INV-LSLV0220-H100,Fire mode,"Yes (fault-ignore run, logged)",DS-INV-LSLV0220-H100,2.2
+INV-LSLV0220-H100,PID controllers,Main PID + 2 external PID,DS-INV-LSLV0220-H100,2.2
+INV-LSLV0220-H100,Multi-motor control,Up to 5 pumps (MMC),DS-INV-LSLV0220-H100,2.2
+INV-LSLV0220-H100,Built-in DC reactor,Yes,DS-INV-LSLV0220-H100,2.4
+INV-LSLV0750-iS7,Rated output (heavy duty),75 kW / 150 A,DS-INV-LSLV0750-iS7,2.1
+INV-LSLV0750-iS7,Overload capacity (heavy duty),150% for 1 minute,DS-INV-LSLV0750-iS7,2.1
+INV-LSLV0750-iS7,Control method,"V/F, sensorless vector, sensored vector (encoder option)",DS-INV-LSLV0750-iS7,2.2
+INV-LSLV0750-iS7,Communication options,"Profibus-DP, EtherNet/IP, Modbus TCP, CANopen",DS-INV-LSLV0750-iS7,2.3
+INV-LSLV0750-iS7,Built-in DC reactor,Yes,DS-INV-LSLV0750-iS7,2.4
+INV-LSLV0750-iS7,Encoder option input,"Line driver / open collector, up to 200 kHz",DS-INV-LSLV0750-iS7,2.3
+PLC-XGB-XBM-DR16S,Built-in I/O,8 DC inputs (24 V) / 8 relay outputs,DS-PLC-XGB-XBM-DR16S,2.1
+PLC-XGB-XBM-DR16S,Program capacity,20 k steps,DS-PLC-XGB-XBM-DR16S,2.2
+PLC-XGB-XBM-DR16S,Processing speed,0.16 µs/step (basic instruction),DS-PLC-XGB-XBM-DR16S,2.2
+PLC-XGB-XBM-DR16S,Max expansion modules,7 modules,DS-PLC-XGB-XBM-DR16S,2.1
+PLC-XGB-XBM-DR16S,Built-in communication,RS-232C 1 ch + RS-485 1 ch,DS-PLC-XGB-XBM-DR16S,2.3
+PLC-XGB-XBM-DR16S,Relay output rating,"AC 250 V / DC 24 V, 2 A per point",DS-PLC-XGB-XBM-DR16S,2.1
+PLC-XGB-XBM-DR16S,Backup battery life,Approx. 5 years (lithium),DS-PLC-XGB-XBM-DR16S,2.4
+PLC-XGI-CPUU,Programming languages,"LD, ST, SFC, FBD, IL (IEC 61131-3)",DS-PLC-XGI-CPUU,2.2
+PLC-XGI-CPUU,Program memory,1 MB,DS-PLC-XGI-CPUU,2.2
+PLC-XGI-CPUU,Processing speed,8.5 ns/step (LD basic),DS-PLC-XGI-CPUU,2.2
+PLC-XGI-CPUU,Max local I/O points,"6,144 points",DS-PLC-XGI-CPUU,2.1
+PLC-XGI-CPUU,Built-in Ethernet,"1 port, 100 Mbps, Modbus TCP server/client",DS-PLC-XGI-CPUU,2.3
+PLC-XGI-CPUU,Max expansion bases,7 bases,DS-PLC-XGI-CPUU,2.1
+HMI-XGT-eXP60,Display,"6-inch TFT, 800 x 480, 65k colors",DS-HMI-XGT-eXP60,2.1
+HMI-XGT-eXP60,Power supply,DC 24 V (19.2-28.8 V),DS-HMI-XGT-eXP60,2.1
+HMI-XGT-eXP60,Interfaces,"Ethernet 1 port, RS-232C, RS-422/485, USB host",DS-HMI-XGT-eXP60,2.3
+HMI-XGT-eXP60,Front protection,IP65,DS-HMI-XGT-eXP60,2.1
+HMI-XGT-eXP60,User memory,64 MB,DS-HMI-XGT-eXP60,2.2
+HMI-XGT-eXP60,Backlight life,"Approx. 50,000 hours",DS-HMI-XGT-eXP60,2.1
+HMI-XGT-iXP90,Display,"10.1-inch TFT, 1280 x 800, multi-touch",DS-HMI-XGT-iXP90,2.1
+HMI-XGT-iXP90,Processor,Quad-core 1.0 GHz,DS-HMI-XGT-iXP90,2.2
+HMI-XGT-iXP90,Remote access,"Web server, VNC server",DS-HMI-XGT-iXP90,2.3
+HMI-XGT-iXP90,Interfaces,"Ethernet 2 ports, RS-232C, RS-422/485, USB host 2",DS-HMI-XGT-iXP90,2.3
+HMI-XGT-iXP90,Front protection,IP66,DS-HMI-XGT-iXP90,2.1
+HMI-XGT-iXP90,Power consumption,Max 18 W,DS-HMI-XGT-iXP90,2.1
+TRF-DRY-630,Rated power,"630 kVA (AN) / 880 kVA (AF, with fans)",DS-TRF-DRY-630,2.1
+TRF-DRY-630,Voltage ratio,11 kV / 0.415 kV,DS-TRF-DRY-630,2.1
+TRF-DRY-630,Vector group,Dyn11,DS-TRF-DRY-630,2.1
+TRF-DRY-630,Impedance voltage,6% at 120 °C,DS-TRF-DRY-630,2.2
+TRF-DRY-630,Off-circuit tap range,±2 x 2.5%,DS-TRF-DRY-630,2.2
+TRF-DRY-630,Insulation class / temperature rise,Class F / 100 K,DS-TRF-DRY-630,2.2
+TRF-DRY-630,No-load loss,"1,300 W",DS-TRF-DRY-630,2.3
+TRF-DRY-630,Load loss at 120 °C,"6,500 W",DS-TRF-DRY-630,2.3
+TRF-DRY-630,Environmental / climatic / fire class,E2 / C2 / F1,DS-TRF-DRY-630,2.4
+TRF-DRY-630,Winding temperature alarm / trip,140 °C / 155 °C (PT100),DS-TRF-DRY-630,2.5
+TRF-OIL-1000,Rated power,1000 kVA (ONAN),DS-TRF-OIL-1000,2.1
+TRF-OIL-1000,Voltage ratio,11 kV / 0.433 kV,DS-TRF-OIL-1000,2.1
+TRF-OIL-1000,Vector group,Dyn11,DS-TRF-OIL-1000,2.1
+TRF-OIL-1000,Impedance voltage,5% at 75 °C,DS-TRF-OIL-1000,2.2
+TRF-OIL-1000,Off-circuit tap range,±2 x 2.5%,DS-TRF-OIL-1000,2.2
+TRF-OIL-1000,Insulating liquid,Mineral oil (IEC 60296),DS-TRF-OIL-1000,2.2
+TRF-OIL-1000,Top-oil temperature alarm / trip,90 °C / 100 °C,DS-TRF-OIL-1000,2.5
+TRF-OIL-1000,Protection devices,"Buchholz relay, pressure relief device, oil & winding temperature indicators",DS-TRF-OIL-1000,2.5
+TRF-OIL-1000,No-load loss,"1,100 W",DS-TRF-OIL-1000,2.3
+TRF-OIL-1000,Load loss at 75 °C,"9,500 W",DS-TRF-OIL-1000,2.3
+METER-LP3500-3P4W,Accuracy class (active energy),Class 0.5S (IEC 62053-22),DS-METER-LP3500-3P4W,2.1
+METER-LP3500-3P4W,Voltage input,3P4W 57.7-400 V L-N,DS-METER-LP3500-3P4W,2.1
+METER-LP3500-3P4W,Current input,CT secondary 5 A or 1 A,DS-METER-LP3500-3P4W,2.1
+METER-LP3500-3P4W,Communication,"Modbus RTU (RS-485), Modbus TCP option",DS-METER-LP3500-3P4W,2.3
+METER-LP3500-3P4W,Harmonic measurement,Up to 31st order,DS-METER-LP3500-3P4W,2.2
+METER-LP3500-3P4W,Data logging memory,8 MB (approx. 1 year at 15-min interval),DS-METER-LP3500-3P4W,2.2
+METER-LP3500-3P4W,Auxiliary supply,AC/DC 85-265 V,DS-METER-LP3500-3P4W,2.1
+METER-LPB-DIN,Accuracy class,Class 1 (IEC 62053-21) / MID class B,DS-METER-LPB-DIN,2.1
+METER-LPB-DIN,Maximum current (direct connection),80 A,DS-METER-LPB-DIN,2.1
+METER-LPB-DIN,Wiring,1P2W or 3P4W (model dependent),DS-METER-LPB-DIN,2.1
+METER-LPB-DIN,Communication,Modbus RTU (RS-485),DS-METER-LPB-DIN,2.3
+METER-LPB-DIN,Pulse output,"Open collector, 1000 imp/kWh",DS-METER-LPB-DIN,2.3
+ESS-PCS-100kW,Rated AC power,100 kW,DS-ESS-PCS-100kW,2.1
+ESS-PCS-100kW,AC grid connection,"3-phase 400 V, 50/60 Hz",DS-ESS-PCS-100kW,2.1
+ESS-PCS-100kW,DC voltage range,600-900 V,DS-ESS-PCS-100kW,2.1
+ESS-PCS-100kW,Max efficiency,97.5%,DS-ESS-PCS-100kW,2.2
+ESS-PCS-100kW,Battery interface,CAN 2.0B to BMS,DS-ESS-PCS-100kW,2.3
+ESS-PCS-100kW,SCADA interface,Modbus TCP,DS-ESS-PCS-100kW,2.3
+ESS-PCS-100kW,Anti-islanding,IEC 62116 compliant,DS-ESS-PCS-100kW,2.4
+ESS-PCS-100kW,Grid code profiles,Selectable country profiles (parameter G-01),DS-ESS-PCS-100kW,2.4
+ESS-BMS-V3,Cell chemistry,LFP,DS-ESS-BMS-V3,2.1
+ESS-BMS-V3,Cells monitored per rack,Up to 240 cells in series,DS-ESS-BMS-V3,2.1
+ESS-BMS-V3,Cell voltage accuracy,±5 mV,DS-ESS-BMS-V3,2.2
+ESS-BMS-V3,SOC estimation accuracy,±3%,DS-ESS-BMS-V3,2.2
+ESS-BMS-V3,Communication,"CAN 2.0B (PCS), Modbus TCP (EMS)",DS-ESS-BMS-V3,2.3
+ESS-BMS-V3,Cell over-voltage protection (default),3.65 V,DS-ESS-BMS-V3,2.4
+ESS-BMS-V3,Cell over-temperature protection (default),55 °C,DS-ESS-BMS-V3,2.4
+PV-INV-SOLAR-25,Rated AC output,25 kW,DS-PV-INV-SOLAR-25,2.1
+PV-INV-SOLAR-25,Max DC input voltage,1100 V,DS-PV-INV-SOLAR-25,2.1
+PV-INV-SOLAR-25,MPPT voltage range,200-1000 V,DS-PV-INV-SOLAR-25,2.1
+PV-INV-SOLAR-25,Number of MPPT / strings,3 MPPT / 2 strings each,DS-PV-INV-SOLAR-25,2.1
+PV-INV-SOLAR-25,Max efficiency,98.6%,DS-PV-INV-SOLAR-25,2.2
+PV-INV-SOLAR-25,Protection degree,IP66,DS-PV-INV-SOLAR-25,2.4
+PV-INV-SOLAR-25,Insulation resistance threshold (default),100 kΩ,DS-PV-INV-SOLAR-25,2.4
+PV-INV-SOLAR-25,Communication,"RS-485 Modbus, Wi-Fi dongle option",DS-PV-INV-SOLAR-25,2.3
+SWGR-MV-12kV,Rated voltage,12 kV,DS-SWGR-MV-12kV,2.1
+SWGR-MV-12kV,Rated busbar current,1250 A (up to 2500 A),DS-SWGR-MV-12kV,2.1
+SWGR-MV-12kV,Rated short-time withstand,25 kA / 3 s,DS-SWGR-MV-12kV,2.2
+SWGR-MV-12kV,Internal arc classification,IAC AFLR 25 kA 1 s,DS-SWGR-MV-12kV,2.2
+SWGR-MV-12kV,Loss of service continuity,LSC2B-PM,DS-SWGR-MV-12kV,2.2
+SWGR-MV-12kV,Power frequency withstand,28 kV / 1 min,DS-SWGR-MV-12kV,2.2
+SWGR-MV-12kV,Lightning impulse withstand,75 kV,DS-SWGR-MV-12kV,2.2
+UPS-LSU-10K,Rated power,10 kVA / 9 kW,DS-UPS-LSU-10K,2.1
+UPS-LSU-10K,Input / output,"1-phase 220/230/240 V, 50/60 Hz",DS-UPS-LSU-10K,2.1
+UPS-LSU-10K,Efficiency (online mode),94%,DS-UPS-LSU-10K,2.2
+UPS-LSU-10K,Transfer time (mains to battery),0 ms,DS-UPS-LSU-10K,2.2
+UPS-LSU-10K,Battery,"External, 16 x 12 V (192 V DC)",DS-UPS-LSU-10K,2.1
+UPS-LSU-10K,Communication,"RS-232, USB, SNMP card slot",DS-UPS-LSU-10K,2.3
+UPS-LSU-10K,Input voltage window (default),176-276 V at full load,DS-UPS-LSU-10K,2.2

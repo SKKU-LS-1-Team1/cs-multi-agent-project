@@ -1,4 +1,4 @@
-sla_id,category,customer_tier,priority,first_response_hours,resolution_hours,clock,resolution_definition,at_risk_threshold,pause_rule
+﻿sla_id,category,customer_tier,priority,first_response_hours,resolution_hours,clock,resolution_definition,at_risk_threshold,pause_rule
 SLA-TECH_SPEC-PLATINUM-P1,TECH_SPEC,PLATINUM,P1,1,24,24x7 calendar hours,요청 사양에 대한 확정 답변 송부,elapsed >= 75% of target,WAITING_CUSTOMER(추가정보 요청 후 고객 회신 대기) 시간은 SLA 경과시간에서 제외
 SLA-TECH_SPEC-PLATINUM-P2,TECH_SPEC,PLATINUM,P2,4,72,24x7 calendar hours,요청 사양에 대한 확정 답변 송부,elapsed >= 75% of target,WAITING_CUSTOMER(추가정보 요청 후 고객 회신 대기) 시간은 SLA 경과시간에서 제외
 SLA-TECH_SPEC-PLATINUM-P3,TECH_SPEC,PLATINUM,P3,8,120,24x7 calendar hours,요청 사양에 대한 확정 답변 송부,elapsed >= 75% of target,WAITING_CUSTOMER(추가정보 요청 후 고객 회신 대기) 시간은 SLA 경과시간에서 제외

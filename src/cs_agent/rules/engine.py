@@ -5,10 +5,11 @@
 #
 # 할 일
 # 1. decide_priority(category, urgency): priority_rules.csv 를 위에서부터 보고 처음 맞는 규칙.
-#    현재 기준표: SAFETY→P1(PR-01), SITE_DOWN+DEFECT→P1(PR-02), SITE_DOWN→P2(PR-03),
-#    PROD_IMPACT/COMMISSION→P2(PR-04), DEADLINE→P3(PR-06), NONE+조치형→P3(PR-05),
-#      NONE+안내형→P4(PR-07).
-# 2. route_department(family, category): routing_rules.csv. 제품 미확인이면 기본 부서(GCS_L1) 규칙.
+#    기준표: SAFETY→P1(PR-01), SITE_DOWN+{DEFECT,INSTALL,FW_UPDATE}→P1(PR-02),
+#      SITE_DOWN+{ORDER_LEAD,RETURN,WARRANTY}→P2(PR-03), PROD_IMPACT/COMMISSION→P2(PR-04),
+#      조치형 유형→P3(PR-05), DEADLINE+정보성→P3(PR-06), 그 외 정보 요청→P4(PR-07).
+# 2. route_department(family, category): routing_rules.csv (rule_source 우선순위는 rules/tables.py).
+#    제품 미확인이면 기본 부서(GCS_L1) 규칙.
 # 3. required_info(family, category): (필수 항목, 차단 항목). 제품군을 모르면 같은 유형의 규칙.
 #    chatbot/form_filler.py 와 chatbot/agent.py 도 이 함수를 쓴다.
 # 4. apply_rules(): 위 셋 + 누락 항목(필수 − extraction.provided_info) + 차단성 누락 + SLA 목표

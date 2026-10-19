@@ -44,13 +44,6 @@
 
 ## 기준표 (`data/ref/`)
 
-| 파일 | 상태 |
-|---|---|
-| `sla_policy.csv` | 복원본 (tickets SLA 목표값과 100% 일치) |
-| `routing_rules.csv` | tickets에서 역산 (제품군×유형 → 부서). 4,000건 중 3,824건 일치, 나머지 176건은 RETURN 비불량 → SCM 예외 |
-| `required_info.csv` | tickets에서 역산 (4,000건 모두 일치). 차단성 항목은 `missing_blocking_info` 빈도로 추정 |
-| `priority_rules.csv` | PR-01~07 을 tickets에서 역산. 규칙과 다른 등급은 상담원 조정 건 |
-| `product_master.csv` | doc_index의 데이터시트 23개. 대분류(POWER/AUTOMATION/ENERGY)는 가정 |
-| `navigation_rules.csv` | 기획서 5.4 표를 옮긴 것 |
-
-원본 `ref/` 파일은 제공되지 않으므로 이 표들이 정식 기준표다. 고칠 때는 tickets를 근거로 하고 팀에 알린다 (CSA-19).
+받은 원본 기준표(`CS_AI_Agent_Training_Data_v1/ref/`)를 그대로 둔다. 파일별 내용과 읽는 방법은
+`src/cs_agent/rules/tables.py` 맨 위 주석에 있다.
+`navigation_rules.csv`(기획서 5.4)만 원본에 없어서 직접 만든 표다 (CSA-33).
