@@ -23,7 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 # 무거운 외부 연동은 extra로 분리한다. CI(테스트)는 fake 구현으로 돌고,
 # Docker 이미지는 `uv sync --all-extras`로 전부 설치한다.
-rag = ["chromadb>=1.0"]
+rag = ["chromadb>=1.0", "google-genai>=1.0"]
 llm = ["langchain-google-genai>=2.0"]
 obs = ["langfuse>=2.50"]
 data = ["openpyxl>=3.1", "pandas>=2.2", "pyarrow>=16.0"]

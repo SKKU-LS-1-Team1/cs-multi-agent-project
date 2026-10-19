@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     # 저장소 (docker compose 안에서는 docker-compose.yml 값을 쓴다)
     database_url: str = "postgresql+psycopg://cs:cs@postgres:5432/cs"
     redis_url: str = "redis://redis:6379/0"
-    chroma_host: str = "chroma"
+    # 비어 있으면 data/chroma 에 로컬 PersistentClient (CSA-18). compose 는 CHROMA_HOST 를 넣어 준다
+    chroma_host: str = ""
     chroma_port: int = 8000
 
     # 데이터 경로
@@ -36,6 +37,9 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model_fast: str = "gemini-2.5-flash"
     gemini_model_writer: str = "gemini-2.5-pro"
+    # 임베딩 (CSA-18). 적재(pipeline/embed_docs.py)와 검색(agents/retrieval.py)이 같은 값을 쓴다
+    gemini_model_embed: str = "gemini-embedding-001"
+    gemini_embed_dim: int = 768
     jev_api_key: str = ""
     jev_base_url: str = "https://inference.do-ai.run/v1"
     jev_model: str = ""

@@ -43,5 +43,13 @@ cp .env.example .env && docker compose up --build   # 전체 구성 http://local
 uv run --extra data python -m cs_agent.pipeline.prepare_data
 ```
 
+기술문서(`data/raw/docs`)와 해결 사례(`cases_seed.parquet`)를 ChromaDB `docs`·`cases` 컬렉션에
+적재한다. `.env` 에 `GEMINI_API_KEY` 가 필요하고, `CHROMA_HOST` 가 비어 있으면 `data/chroma/` 에
+로컬 DB 를 만든다. 임베딩 모델을 바꿨으면 `--reset` 을 붙인다.
+
+```bash
+uv run --extra rag --extra data python -m cs_agent.pipeline.embed_docs
+```
+
 - CI: GitHub Actions (`.github/workflows/ci.yml`)
 - Jira 연동 및 브랜치/커밋 규칙: [docs/JIRA_INTEGRATION.md](docs/JIRA_INTEGRATION.md)
