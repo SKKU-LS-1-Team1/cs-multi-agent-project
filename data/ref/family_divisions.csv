@@ -1,0 +1,12 @@
+family,division,division_label,note
+LV_BREAKER,POWER,전력,원본에 없어 직접 만든 표 (CSA-19 할 일 4). 기획서 5.2 확정본으로 맞춘다
+MV_EQUIP,POWER,전력,
+TRANSFORMER,POWER,전력,
+METER,POWER,전력,
+CONTROL,AUTOMATION,자동화,
+DRIVE,AUTOMATION,자동화,
+PLC,AUTOMATION,자동화,
+HMI,AUTOMATION,자동화,
+ESS,ENERGY,에너지,
+PV,ENERGY,에너지,
+UPS,ENERGY,에너지,
