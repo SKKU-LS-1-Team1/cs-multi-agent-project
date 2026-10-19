@@ -14,7 +14,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # .env.example 처럼 값이 빈 키(CHROMA_PORT= 등)는 없는 것으로 보고 기본값을 쓴다
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", env_ignore_empty=True
+    )
 
     app_env: Literal["local", "prod"] = "local"
 
