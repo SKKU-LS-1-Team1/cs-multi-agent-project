@@ -1,113 +1,44 @@
-"""④ 1차 검색 · ⑧ 근거 확정: 지식 검색 에이전트 (CSA-28 · 담당 박종석).
-
-답변 작성과 챗봇이 함께 쓴다. ChromaDB 컬렉션 2개(기획서 7.1):
-- `docs`: 공식 문서·FAQ·정책 (절 단위). 값·절차·정책의 근거. 값이 충돌하면 이쪽을 따른다.
-- `cases`: 해결 사례. 비슷한 문의를 어떻게 풀었는지와 문장 본보기. 참고로만 쓴다.
-
-정확히 맞아야 하는 값(사양·보증기간·에러코드)은 벡터 검색이 아니라 기준표 조회로 한다.
-"""
-
-import math
-import re
-from collections.abc import Iterable
-from typing import Protocol
-
-from cs_agent.config import get_settings
-from cs_agent.pipeline.chunking import Chunk, iter_doc_chunks
-from cs_agent.schemas import Evidence, Extraction
-
-_TOKEN_RE = re.compile(r"[A-Za-z0-9가-힣.\-]+")
-
-
-class Retriever(Protocol):
-    def search(
-        self, query: str, k: int = 5, where: dict[str, str] | None = None
-    ) -> list[Evidence]: ...
-
-
-class KeywordRetriever:
-    """ChromaDB 없이 쓰는 TF-IDF 비슷한 키워드 검색. 테스트와 로컬 시연용."""
-
-    def __init__(self, chunks: Iterable[Chunk], source: str = "docs") -> None:
-        self.source = source
-        self._chunks = list(chunks)
-        self._tokens = [self._tokenize(f"{c.title} {c.text}") for c in self._chunks]
-        df: dict[str, int] = {}
-        for tokens in self._tokens:
-            for t in tokens:
-                df[t] = df.get(t, 0) + 1
-        n = len(self._chunks) or 1
-        self._idf = {t: math.log((n + 1) / (d + 0.5)) for t, d in df.items()}
-
-    @staticmethod
-    def _tokenize(text: str) -> set[str]:
-        return {t.lower().strip(".") for t in _TOKEN_RE.findall(text) if len(t) > 1}
-
-    def search(self, query: str, k: int = 5, where: dict[str, str] | None = None) -> list[Evidence]:
-        q = self._tokenize(query)
-        total = sum(self._idf.get(t, 0) for t in q) or 1
-        scored = []
-        for c, tokens in zip(self._chunks, self._tokens, strict=True):
-            if where and any(c.metadata.get(key) != val for key, val in where.items()):
-                continue
-            score = sum(self._idf[t] for t in q & tokens) / total
-            if score > 0:
-                scored.append((score, c))
-        scored.sort(key=lambda x: -x[0])
-        return [
-            Evidence(source=self.source, doc_id=c.doc_id, section=c.section, text=c.text, score=s)
-            for s, c in scored[:k]
-        ]
-
-
-class ChromaRetriever:
-    """TODO(CSA-18·CSA-28): 임베딩 모델 확정 후 pipeline/embed_docs.py와 같은 설정으로 맞춘다."""
-
-    def __init__(self, collection: str) -> None:
-        import chromadb  # extra: rag
-
-        s = get_settings()
-        self.source = collection
-        client = chromadb.HttpClient(host=s.chroma_host, port=s.chroma_port)
-        self._col = client.get_or_create_collection(collection)
-
-    def search(self, query: str, k: int = 5, where: dict[str, str] | None = None) -> list[Evidence]:
-        res = self._col.query(query_texts=[query], n_results=k, where=where or None)
-        out = []
-        for doc, meta, dist in zip(
-            res["documents"][0], res["metadatas"][0], res["distances"][0], strict=True
-        ):
-            out.append(
-                Evidence(
-                    source=self.source,
-                    doc_id=str(meta.get("doc_id")),
-                    section=meta.get("section"),
-                    text=doc,
-                    score=1 - float(dist),
-                )
-            )
-        return out
-
-
-def default_retrievers() -> tuple[Retriever, Retriever]:
-    s = get_settings()
-    if s.chroma_host:
-        return ChromaRetriever("docs"), ChromaRetriever("cases")
-    docs_dir = s.raw_data_dir / "docs"
-    chunks = iter_doc_chunks(docs_dir) if docs_dir.exists() else []
-    return KeywordRetriever(chunks, "docs"), KeywordRetriever([], "cases")
-
-
-def first_pass(docs: Retriever, cases: Retriever, text: str, k: int = 8) -> list[Evidence]:
-    """유형이 정해지기 전 원문으로 넓게 가져온다 (N-01 병렬)."""
-    return docs.search(text, k=k) + cases.search(text, k=3)
-
-
-def finalize_evidence(
-    candidates: list[Evidence], extraction: Extraction, k: int = 3
-) -> list[Evidence]:
-    """제품으로 거르고 다시 정렬한다. TODO(CSA-28): 유형별 문서 종류 가중치, 재정렬 모델."""
-    code = extraction.product_code
-    docs = [e for e in candidates if e.source == "docs" and (not code or code in e.doc_id)]
-    cases = [e for e in candidates if e.source == "cases"]
-    return sorted(docs, key=lambda e: -e.score)[:k] + cases[:2]
+# 지식 검색 에이전트 — ④ 1차 검색 · ⑧ 근거 확정 (CSA-28 · 담당 박종석 · Sprint 1)
+#
+# 답변 작성(⑨)과 챗봇(CSA-32)이 함께 쓴다. ChromaDB 컬렉션 2개(기획서 7.1).
+# - `docs`: 공식 문서·FAQ·정책을 절 단위로 (CSA-18에서 적재). 값·절차·정책의 근거. 값이 충돌하면
+#     이쪽.
+# - `cases`: 해결 사례 (train에 연결된 것만). 비슷한 문의를 어떻게 풀었는지, 문장 본보기. 참고로만.
+#
+# 할 일
+# 1. Retriever 규약: search(query, k, where) → list[Evidence]. where 는 메타데이터 필터
+#    (product_code, doc_type, family). Evidence.source 에 "docs" / "cases" 를 넣는다.
+# 2. ChromaRetriever: settings.chroma_host/port 로 chromadb.HttpClient 에 붙는다 (extra: rag).
+#    임베딩 모델은 적재(pipeline/embed_docs.py)와 반드시 같은 것을 쓴다.
+# 3. default_retrievers(): CHROMA_HOST 가 있으면 Chroma 2개, 없으면 로컬 개발용 대체 구현
+#    (data/raw/docs 를 pipeline/chunking.py 로 읽어 키워드 검색)을 돌려준다.
+# 4. first_pass(): 유형이 정해지기 전에 원문으로 넓게 가져온다 (분류·추출과 병렬, N-01).
+#    docs top-8 + cases top-3 정도.
+# 5. finalize_evidence(): 추출된 제품으로 거르고, 유형별로 문서 종류 가중치(사양→DS, 설치→IG,
+#    불량→TG, 펌웨어→RN …)를 줘서 재정렬한다. docs 3개 + cases 2개 정도.
+# 6. 사양값·보증기간·에러코드처럼 정확히 맞아야 하는 값은 벡터 검색이 아니라 기준표 조회로 한다
+#    (CSA-19). 에러코드가 있으면 고장 카탈로그 정확 조회, 없으면 증상으로 사례 검색.
+#
+# 완료 기준
+# - valid: 근거 일치율 K3 (reference_doc_id + reference_section 이 top-3 안) 측정·보고
+# - test 티켓에 연결된 사례가 cases 컬렉션에 없음
+#
+# 참고: 기획서 v10 7.1, 에이전트_구조_제안.md 6장
+#
+# 만들 것 (이름·모양은 다른 파일이 이대로 부른다)
+#
+#   class Retriever(Protocol):
+#       def search(
+#           self, query: str, k: int = 5, where: dict[str, str] | None = None
+#       ) -> list[Evidence]: ...
+#
+#   def default_retrievers() -> tuple[Retriever, Retriever]:
+#       """(docs, cases) 검색기. 위 '할 일 3' 참고."""
+#
+#   def first_pass(docs: Retriever, cases: Retriever, text: str, k: int = 8) -> list[Evidence]:
+#       """④ 원문 기반 1차 검색."""
+#
+#   def finalize_evidence(
+#       candidates: list[Evidence], extraction: Extraction, k: int = 3
+#   ) -> list[Evidence]:
+#       """⑧ 제품·유형으로 거르고 재정렬한 확정 근거."""

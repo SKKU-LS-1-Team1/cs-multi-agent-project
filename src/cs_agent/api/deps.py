@@ -1,32 +1,9 @@
-"""요청마다 공유 객체를 꺼낸다. 객체는 main.create_app()에서 app.state에 만든다."""
-
-from typing import Annotated
-
-from fastapi import Depends, Request
-
-from cs_agent.agents.retrieval import Retriever
-from cs_agent.cache.store import ChatSessionStore
-from cs_agent.llm.router import LLMRouter
-from cs_agent.services.tickets import TicketService
-
-
-def _service(request: Request) -> TicketService:
-    return request.app.state.tickets
-
-
-def _chat_store(request: Request) -> ChatSessionStore:
-    return request.app.state.chat_sessions
-
-
-def _docs(request: Request) -> Retriever:
-    return request.app.state.docs
-
-
-def _llm(request: Request) -> LLMRouter:
-    return request.app.state.llm
-
-
-Tickets = Annotated[TicketService, Depends(_service)]
-ChatSessions = Annotated[ChatSessionStore, Depends(_chat_store)]
-Docs = Annotated[Retriever, Depends(_docs)]
-LLM = Annotated[LLMRouter, Depends(_llm)]
+# FastAPI 의존성 (CSA-21 · 담당 김동규)
+#
+# 요청마다 app.state 의 공유 객체를 꺼내 라우터에 넘긴다 (main.py 가 만들어 둔다).
+# ruff B008 규칙 때문에 기본값에 Depends() 를 쓰지 말고 Annotated 로 만든다:
+#   Tickets      = Annotated[TicketService, Depends(lambda request: request.app.state.tickets)]
+#   ChatSessions = Annotated[ChatSessionStore, Depends(... .chat_sessions)]
+#   Docs         = Annotated[Retriever, Depends(... .docs)]
+#   LLM          = Annotated[LLMRouter, Depends(... .llm)]
+# DB 세션(db/session.py)도 여기서 의존성으로 만든다 (CSA-24).

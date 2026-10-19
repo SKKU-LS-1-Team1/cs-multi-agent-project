@@ -1,12 +1,6 @@
--- 부서별 대시보드 (CSA-20 · CSA-43): 처리량, 무수정 승인율, SLA 위반
--- TODO(CSA-20): 유형별·주 단위 집계 추가
-SELECT
-    t.assigned_dept,
-    COUNT(*) AS tickets,
-    AVG(CASE WHEN r.action = 'approve' THEN 1.0 ELSE 0 END) AS approve_as_is_rate,
-    AVG(CASE WHEN r.action = 'edit_approve' THEN 1.0 ELSE 0 END) AS edit_rate,
-    AVG(CASE WHEN r.action = 'reject' THEN 1.0 ELSE 0 END) AS reject_rate
-FROM tickets t
-LEFT JOIN reviews r ON r.ticket_id = t.ticket_id
-GROUP BY t.assigned_dept
-ORDER BY tickets DESC;
+-- 부서별 대시보드 (CSA-20 · 담당 박종석) — 관리자 화면 CSA-43 이 쓴다
+--
+-- 할 일
+-- 1. 부서별: 진행 중 건수, SLA 75% 경고 건수, SLA 위반 건수
+-- 2. 부서 × 유형별: 그대로 승인 비율 / 수정 후 승인 비율 / 반려 비율 (reviews.action 기준, 주 단위)
+-- 3. 수정 사유(feedback_reason) 4개 분포 — 피드백 루프 우선순위 판단용 (기획서 7장)

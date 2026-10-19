@@ -1,48 +1,13 @@
-"""mock 데이터 생성 (CSA-23 · 담당 김동규).
-
-화면·API 개발용으로 유형별 샘플 문의를 만든다. 실제 시험 데이터(test 597건)는 쓰지 않는다.
-실행: `uv run python -m cs_agent.pipeline.mock_data > data/mock/inquiries.json`
-"""
-
-import json
-import random
-
-from cs_agent.domain import Category
-from cs_agent.rules.tables import load_tables
-
-_BODIES = {
-    Category.TECH_SPEC: "What is the rated breaking capacity of {name}?",
-    Category.MANUAL: "Please send the installation manual for {name}.",
-    Category.COMPLIANCE: "Does {name} have CE and UL certification?",
-    Category.QUOTE: "Please quote 20 units of {name}, Incoterms FOB.",
-    Category.ORDER_LEAD: "What is the lead time for {name}? PO number pending.",
-    Category.DEFECT: "{name} shows error E.OC during acceleration.",
-    Category.INSTALL: "How should I wire {name} in the panel?",
-    Category.FW_UPDATE: "Is there a newer firmware for {name}? Current fw 1.2.",
-    Category.WARRANTY: "{name} failed after 8 months. Is it under warranty?",
-    Category.RETURN: "We want to return {name}, wrong model delivered.",
-}
-
-
-def generate(n: int = 50, seed: int = 7) -> list[dict]:
-    rng = random.Random(seed)
-    products = list(load_tables().products.values())
-    rows = []
-    for i in range(n):
-        category = rng.choice(list(Category))
-        p = rng.choice(products)
-        rows.append(
-            {
-                "channel": rng.choice(["EMAIL", "WEB_FORM", "CHAT", "PHONE", "PARTNER_PORTAL"]),
-                "customer_id": f"CUST-MOCK-{i:04d}",
-                "customer_tier": rng.choice(["STANDARD", "GOLD", "PLATINUM"]),
-                "language": "en",
-                "subject": f"[{category.value}] {p.name}",
-                "body": _BODIES[category].format(name=p.name),
-            }
-        )
-    return rows
-
-
-if __name__ == "__main__":
-    print(json.dumps(generate(), ensure_ascii=False, indent=2))
+# mock 데이터 생성 (CSA-23 · 담당 김동규 · Sprint 1)
+# 실행 예: uv run python -m cs_agent.pipeline.mock_data > data/mock/inquiries.json
+#
+# 화면·API 개발과 시연용 샘플 문의. 실제 시험 데이터(test 597건)는 쓰지 않는다.
+#
+# 할 일
+# 1. 유형 10개 × 제품 몇 개로 InquiryIn 모양의 문의를 만든다 (채널·등급·언어 섞어서).
+# 2. 시연 시나리오는 고정값으로 넣는다:
+#    - 단순 사양 문의 (TRF-OIL-1000 Vector group) → 추천 답변 → 승인
+#    - 안전 건 (연기 발생) → 사람 큐
+#    - 필수정보 누락 (S100 트립, 시리얼 없음) → 추가정보 요청
+#    - 챗봇 경유 (S100 E.OC → 조치 후 재발 → 문의하기 자동 채움)
+# 3. POST /api/tickets 로 한 번에 넣는 스크립트 옵션.

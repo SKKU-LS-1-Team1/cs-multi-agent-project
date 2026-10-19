@@ -1,12 +1,6 @@
--- 평가용 (CSA-20 · CSA-50): 시스템 판단 vs 정답 비교용 조인 뼈대
--- TODO(CSA-20): 정답 테이블(tickets_gold) 적재 후 사용
-SELECT
-    t.ticket_id,
-    t.category AS pred_category,
-    g.category_code AS gold_category,
-    t.assigned_dept AS pred_dept,
-    g.assigned_dept AS gold_dept,
-    t.priority AS pred_priority,
-    g.priority AS gold_priority
-FROM tickets t
-JOIN tickets_gold g ON g.ticket_id = t.ticket_id;
+-- 평가용 조인 (CSA-20 · 담당 박종석) — 평가 스크립트 CSA-50 이 쓴다
+--
+-- 할 일
+-- 1. 정답 테이블(tickets_gold: valid·test 분할의 원본 tickets)을 적재한다.
+-- 2. 시스템 판단(tickets, drafts, reviews) vs 정답: 유형, 부서, 우선순위, 누락 항목, 근거 문서·절.
+-- 3. KPI 정의는 analysis/kpi/KPI_설정안.md (K1~K5).

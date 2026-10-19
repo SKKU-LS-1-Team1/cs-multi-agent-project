@@ -1,15 +1,7 @@
--- 상담원 작업 목록 (CSA-20 · CSA-40): SLA 남은 비율 순, 75% 이상 경고
--- 고객 회신 대기 시간은 경과에서 뺀다.
-SELECT
-    t.ticket_id,
-    t.category,
-    t.priority,
-    t.assigned_dept,
-    t.status,
-    t.sla_resolution_target_h,
-    (EXTRACT(EPOCH FROM (now() - t.received_at)) / 3600 - t.customer_wait_hours)
-        / NULLIF(t.sla_resolution_target_h, 0) AS sla_ratio
-FROM tickets t
-WHERE t.status NOT IN ('RESOLVED', 'REJECTED')
-  AND (:dept IS NULL OR t.assigned_dept = :dept)
-ORDER BY sla_ratio DESC NULLS LAST;
+-- 상담원 작업 목록 (CSA-20 · 담당 박종석) — 관리자 화면 CSA-40 이 쓴다
+--
+-- 할 일
+-- 1. 해결·반려되지 않은 티켓을 SLA 경과 비율(경과 시간 − 고객 대기 시간) / 해결 목표 시간이 큰 순으로.
+-- 2. 열: ticket_id, category, priority, assigned_dept, status, sla_due_at, sla_ratio, at_risk(≥ 0.75)
+-- 3. :dept 파라미터로 부서 필터 (NULL 이면 전체).
+-- 4. 테이블·열 이름은 db/models.py (CSA-24) 확정본을 따른다.

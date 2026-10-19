@@ -1,33 +1,15 @@
-"""FastAPI 진입점 (CSA-21). 실행: `uv run uvicorn cs_agent.main:app --reload`"""
-
-from fastapi import FastAPI
-
-from cs_agent import __version__
-from cs_agent.agents.retrieval import default_retrievers
-from cs_agent.api import chat, dashboard, products, tickets
-from cs_agent.cache.store import ChatSessionStore
-from cs_agent.graph.builder import GraphDeps
-from cs_agent.llm.router import get_router
-from cs_agent.services.tickets import TicketService
-
-
-def create_app(deps: GraphDeps | None = None) -> FastAPI:
-    app = FastAPI(title="C/S Multi-Agent", version=__version__, root_path="")
-    if deps is None:
-        docs, cases = default_retrievers()
-        deps = GraphDeps(llm=get_router(), docs=docs, cases=cases)
-    app.state.llm = deps.llm
-    app.state.docs = deps.docs
-    app.state.tickets = TicketService(deps)
-    app.state.chat_sessions = ChatSessionStore()
-
-    @app.get("/api/health")
-    def health() -> dict:
-        return {"status": "ok", "version": __version__}
-
-    for r in (tickets.router, chat.router, products.router, dashboard.router):
-        app.include_router(r, prefix="/api")
-    return app
-
-
-app = create_app()
+# FastAPI 진입점 (CSA-21 · 담당 김동규 · Sprint 1)
+# 실행: uv run uvicorn cs_agent.main:app --reload  → http://localhost:8000/docs
+#
+# 할 일
+# 1. create_app(): FastAPI 앱을 만들고 공유 객체를 app.state 에 둔다.
+#    - app.state.llm = llm.router.get_router()
+#    - app.state.docs, cases = agents.retrieval.default_retrievers()
+#    - app.state.tickets = services.tickets.TicketService(...)
+#    - app.state.chat_sessions = cache.store.ChatSessionStore()
+# 2. GET /api/health → {"status": "ok", "version": ...}
+# 3. 라우터 등록 (모두 prefix "/api"): api/tickets.py, api/chat.py, api/products.py,
+#      api/dashboard.py
+#    Nginx(infra/nginx/nginx.conf)가 /api 요청을 이 앱으로 넘긴다.
+# 4. 시작 시 DB 테이블 확인(db/session.py), 기준표 로드(rules/tables.py)
+# 5. 모듈 끝에 app = create_app()  (Dockerfile CMD 가 cs_agent.main:app 을 띄운다)

@@ -1,6 +1,6 @@
 # 구조
 
-기획서 v10 9장·9.1·9.2와 `analysis/agent-architecture/에이전트_구조_제안.md` 를 코드로 옮긴 골격이다.
+기획서 v10 9장·9.1·9.2와 `analysis/agent-architecture/에이전트_구조_제안.md` 를 파일 구조로 옮긴 골격이다.
 
 ## 처리 흐름 (LangGraph, `src/cs_agent/graph/builder.py`)
 
@@ -36,11 +36,11 @@
 | `frontend/` | React (고객 화면 · 관리자 화면) |
 | `infra/` | Nginx · GCP 안내 |
 
-## 외부 서비스 없이 돌리기
+## 지금 상태
 
-`LLM_PROVIDER=fake` (기본값) 이고 `DATABASE_URL`·`REDIS_URL`·`CHROMA_HOST` 가 비어 있으면,
-LLM 대신 키워드 규칙, DB 대신 메모리, ChromaDB 대신 키워드 검색으로 처음부터 끝까지 돈다.
-테스트와 화면 개발은 이 모드로 한다. 실제 연동은 각 Jira 작업에서 채운다.
+`src/cs_agent/` 의 .py 파일은 코드 없이 주석만 있다. 파일 맨 위 주석에 담당·Jira 키·할 일·완료 기준·참고 문서가,
+아래 "만들 것" 주석에 다른 파일이 부를 함수·클래스 모양이 적혀 있다. 이름과 모양은 그대로 맞춰서 구현한다.
+`domain.py`·`schemas.py`·`graph/state.py` 는 팀이 같이 쓰는 값이라 먼저 만들고, 바꿀 때는 팀에 알린다.
 
 ## 기준표 (`data/ref/`)
 

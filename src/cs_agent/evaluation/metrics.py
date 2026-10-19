@@ -1,25 +1,13 @@
-"""KPI 계산 (CSA-49 기준선 측정 · 담당 김동규).
-
-K1 처리 지연 p95 · K2 무수정 승인 가능률(정보 안내형) · K3 근거 일치율(doc_id+section) ·
-K4 부서·우선순위 일치율 · K5 필수정보 누락 탐지율. 정의와 목표치는 KPI_설정안.md를 따른다.
-"""
-
-from collections.abc import Sequence
-
-
-def accuracy(pred: Sequence, gold: Sequence) -> float:
-    pairs = list(zip(pred, gold, strict=True))
-    return sum(p == g for p, g in pairs) / len(pairs) if pairs else 0.0
-
-
-def p95(values: Sequence[float]) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int(round(0.95 * (len(ordered) - 1))))]
-
-
-def recall(pred_sets: Sequence[set], gold_sets: Sequence[set]) -> float:
-    hit = sum(len(p & g) for p, g in zip(pred_sets, gold_sets, strict=True))
-    total = sum(len(g) for g in gold_sets)
-    return hit / total if total else 1.0
+# KPI 계산 (CSA-49 기준선 측정 · 담당 김동규 · Sprint 1)
+#
+# 정의·목표치는 analysis/kpi/KPI_설정안.md 를 따른다.
+#   K1 처리 지연 p95 (목표 ≤ 60초, Langfuse 기록)
+#   K2 무수정 승인 가능률 (정보 안내형)
+#   K3 근거 일치율 (reference_doc_id + reference_section)
+#   K4 부서·우선순위 일치율 (부서는 100% 게이트)
+#   K5 필수정보 누락 탐지율 (missing_info 재현율)
+#
+# 할 일
+# 1. accuracy(pred, gold), p95(values), recall(pred_sets, gold_sets) 같은 계산 함수
+# 2. 기준선: valid 603건으로 현재 값을 재고 목표치를 확정해 KPI_설정안.md 에 기록
+# 3. Jev vs Gemini 비교 (정확도·응답 시간·비용) 표 (기획서 9.2)
