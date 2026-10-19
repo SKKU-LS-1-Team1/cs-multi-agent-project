@@ -16,7 +16,7 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 38개(CSA-14~51)�
 | 키 | 작업 | 담당 | 스프린트 | 위치 |
 |---|---|---|---|---|
 | CSA-17 | 상담 이력 정제, 학습·시험 분리 | 박종석 | 1 | `src/cs_agent/pipeline/prepare_data.py` |
-| CSA-18 | 기술문서 나누기·임베딩 → ChromaDB | 박종석 | 1 | `pipeline/chunking.py`, `pipeline/embed_docs.py` |
+| CSA-18 | 기술문서 나누기·임베딩 → pgvector | 박종석 | 1 | `pipeline/chunking.py`, `pipeline/embed_docs.py` |
 | CSA-19 | 기준표 정리 (제품 기준정보, 규칙표, SLA 정책) | 박종석 | 1 | `data/ref/*.csv`, `rules/tables.py` |
 | CSA-20 | SQL 쿼리 작성 (작업 목록·대시보드·평가용) | 박종석 | 2 | `src/cs_agent/db/sql/*.sql` |
 

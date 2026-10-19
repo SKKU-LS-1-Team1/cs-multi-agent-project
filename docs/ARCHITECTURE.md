@@ -18,6 +18,22 @@
 
 상담원 검토 지점에서 그래프가 멈추고(체크포인트), `POST /api/tickets/{id}/action` 이 `Command(resume=...)` 로 같은 그래프를 이어서 돌린다.
 
+## 저장소와 RAG
+
+| 저장소 | 담는 것 |
+|---|---|
+| PostgreSQL | 문의·답변·상담원 처리 기록·챗봇 대화 (CSA-24) **+ 벡터 검색** (pgvector) |
+| Redis | LLM 응답 캐시 · 호출 제한 · 챗봇 세션 (CSA-45) |
+| `data/ref/*.csv` | 기준표. 사양값·보증기간·에러코드처럼 정확히 맞아야 하는 값은 벡터가 아니라 여기서 조회 |
+
+- **벡터 DB = PostgreSQL + pgvector** (ChromaDB 대신). 저장소가 하나라 운영·백업이 단순하고, 사례 원본과
+  벡터가 같은 행에 있어 SQL 필터(제품·유형·data_split)와 벡터 검색을 한 쿼리로 한다.
+  - `doc_chunks`: 공식 문서·FAQ·정책을 절 단위로 (약 900조각). 답변 근거.
+  - `resolution_cases.embedding`: 해결 사례 (train 연결 568건 + 운영 중 해결 건). 참고·문장 본보기.
+- **임베딩 = `gemini-embedding-2`, 1536차원** (`EMBEDDING_MODEL`·`EMBEDDING_DIM`). 15개 언어 문의로
+  영어 문서를 찾는 다국어 모델. 적재는 `task_type=RETRIEVAL_DOCUMENT`, 검색은 `RETRIEVAL_QUERY`.
+  모델·차원을 바꾸면 전부 다시 적재한다.
+
 ## 폴더
 
 | 폴더 | 내용 |
@@ -28,7 +44,7 @@
 | `src/cs_agent/rules/` | 기준표 로더 · 우선순위/부서/필수정보 · SLA |
 | `src/cs_agent/llm/` | 모델 분기 (Jev 판단 / Gemini 작성) · Langfuse |
 | `src/cs_agent/api/` | FastAPI 라우터 (`/api/tickets`, `/api/chat`, `/api/products`, `/api/dashboard`) |
-| `src/cs_agent/db/` | PostgreSQL 모델 · SQL 쿼리 |
+| `src/cs_agent/db/` | PostgreSQL 모델(벡터 테이블 포함) · SQL 쿼리 |
 | `src/cs_agent/cache/` | Redis (캐시 · 호출 제한 · 챗봇 세션) |
 | `src/cs_agent/pipeline/` | 데이터 정제 · 문서 청킹/임베딩 · mock 데이터 |
 | `src/cs_agent/evaluation/` | KPI 계산 · 시험 문의 평가 |

@@ -2,7 +2,7 @@
 
 해외 고객상담 AI 에이전트 (C/S 멀티 에이전트 시스템).
 
-FastAPI + LangGraph 백엔드, React 화면, PostgreSQL · Redis · ChromaDB, Langfuse, Docker Compose.
+FastAPI + LangGraph 백엔드, React 화면, PostgreSQL(+pgvector) · Redis, Langfuse, Docker Compose.
 
 - 구조: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Jira 작업별 코드 위치: [docs/JIRA_MAP.md](docs/JIRA_MAP.md)
@@ -30,10 +30,10 @@ cp .env.example .env && docker compose up --build   # 전체 구성 http://local
 원천 데이터(`CS_AI_Agent_Training_Data_v1`, 교육용 가상 데이터)는 `data/raw/` 에 있다.
 
 - `cs_tickets_resolution_v1.xlsx` (같은 내용 `tickets.csv`·`tickets.jsonl`·`resolution_cases.csv`):
-  상담 이력 4,000건과 해결 사례 800건. 정제·분리(CSA-17) 후 ChromaDB `cases` 에 넣는다(CSA-18).
-- `docs/`: 제품 23개의 데이터시트·설치·트러블슈팅·유지보수 문서와 FAQ. ChromaDB `docs` 에 넣는다(CSA-18).
+  상담 이력 4,000건과 해결 사례 800건. 정제·분리(CSA-17) 후 임베딩해서 PostgreSQL `resolution_cases` 에 넣는다(CSA-18).
+- `docs/`: 제품 23개의 데이터시트·설치·트러블슈팅·유지보수 문서와 FAQ. 절 단위로 잘라 임베딩해서 PostgreSQL `doc_chunks` 에 넣는다(CSA-18).
 - 원본 기준표(`ref/`)는 `data/ref/` 로 옮겼다.
-- 가공 결과(`data/processed/`)와 벡터 DB(`data/chroma/`)는 git에 올리지 않고 각자 만든다.
+- 가공 결과(`data/processed/`)는 git에 올리지 않고 각자 만든다. 벡터는 PostgreSQL 안에 있다.
 
 상담 데이터 정제와 분리는 다음 명령으로 실행한다. `data/processed/`에
 `tickets_train.parquet`, `tickets_valid.parquet`, `tickets_test.parquet`,
