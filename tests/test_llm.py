@@ -1,0 +1,236 @@
+from contextlib import contextmanager
+
+import httpx
+import pytest
+
+from cs_agent.config import Settings
+from cs_agent.llm import tracing
+from cs_agent.llm.clients import Completion, JevClient, Judgement, parse_judgement
+from cs_agent.llm.router import LLMRouter
+
+OPTIONS = ["DEFECT", "RETURN", "QUOTE"]
+
+
+class StubJudge:
+    def __init__(self, name, answer="RETURN", confidence=0.9, error=None):
+        self.name, self.answer, self.confidence, self.error = name, answer, confidence, error
+        self.calls = 0
+
+    def judge(self, prompt, options):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return Judgement(self.answer, self.confidence, self.name, {"input": 10, "output": 2})
+
+
+class StubWriter:
+    name = "gemini-writer"
+
+    def write(self, prompt):
+        return Completion(f"답변: {prompt}", self.name, {"input": 5, "output": 7})
+
+
+def settings(**kw) -> Settings:
+    return Settings(_env_file=None, **kw)
+
+
+# --- router -------------------------------------------------------------------------------
+
+
+def test_disabled_router_needs_no_keys():
+    router = LLMRouter(settings(llm_provider="fake"))
+
+    assert router.enabled is False
+    result = router.judge("classify", "문의", OPTIONS)
+    assert (result.answer, result.confidence, result.model) == ("DEFECT", 0.0, "fake")
+    assert router.write("draft", "안녕하세요").startswith("[LLM 꺼짐]")
+
+
+def test_live_router_requires_gemini_key():
+    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+        LLMRouter(settings(llm_provider="live"))
+
+
+def test_confident_jev_answer_is_used():
+    jev, gemini = StubJudge("jev", confidence=0.9), StubJudge("gemini-fast", answer="QUOTE")
+    router = LLMRouter(settings(jev_min_confidence=0.7), jev=jev, gemini_judge=gemini)
+
+    result = router.judge("classify", "문의", OPTIONS)
+
+    assert (result.answer, result.model) == ("RETURN", "jev")
+    assert gemini.calls == 0
+
+
+def test_low_confidence_falls_back_to_gemini():
+    jev, gemini = StubJudge("jev", confidence=0.4), StubJudge("gemini-fast", answer="QUOTE")
+    router = LLMRouter(settings(jev_min_confidence=0.7), jev=jev, gemini_judge=gemini)
+
+    result = router.judge("classify", "문의", OPTIONS)
+
+    assert (result.answer, result.model) == ("QUOTE", "gemini-fast")
+    assert jev.calls == gemini.calls == 1
+
+
+def test_jev_error_falls_back_to_gemini():
+    jev = StubJudge("jev", error=httpx.ConnectError("down"))
+    gemini = StubJudge("gemini-fast", answer="QUOTE")
+    router = LLMRouter(settings(), jev=jev, gemini_judge=gemini)
+
+    assert router.judge("classify", "문의", OPTIONS).model == "gemini-fast"
+
+
+def test_without_jev_gemini_judges_directly():
+    gemini = StubJudge("gemini-fast", confidence=0.1)
+    router = LLMRouter(settings(), gemini_judge=gemini)
+
+    result = router.judge("verify_grounding", "근거", ["yes", "no"])
+
+    assert result.model == "gemini-fast"  # 대체할 모델이 없으면 확신도가 낮아도 그대로
+    assert gemini.calls == 1
+
+
+def test_write_uses_writer():
+    router = LLMRouter(settings(), writer=StubWriter())
+
+    assert router.write("draft", "문의 요약") == "답변: 문의 요약"
+
+
+# --- clients ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "answer", "confidence"),
+    [
+        ('{"answer": "RETURN", "confidence": 0.82}', "RETURN", 0.82),
+        ('```json\n{"answer": "quote", "confidence": 1.5}\n```', "QUOTE", 1.0),
+        ('{"answer": "OTHER", "confidence": 0.9}', "DEFECT", 0.0),  # 보기에 없음
+        ("RETURN 입니다", "DEFECT", 0.0),  # JSON 아님
+    ],
+)
+def test_parse_judgement(text, answer, confidence):
+    result = parse_judgement(text, OPTIONS, "m")
+
+    assert (result.answer, result.confidence) == (answer, confidence)
+
+
+def _jev_response(content: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "choices": [{"message": {"content": content}}],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 9},
+        },
+    )
+
+
+def test_jev_client_retries_429_then_parses():
+    requests, waits = [], []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(429, headers={"retry-after": "2"})
+        return _jev_response('{"answer": "RETURN", "confidence": 0.77}')
+
+    jev = JevClient(
+        "key",
+        "jev-1",
+        "https://jev.test/v1",
+        transport=httpx.MockTransport(handler),
+        sleep=waits.append,
+    )
+
+    result = jev.judge("문의", OPTIONS)
+
+    assert (result.answer, result.confidence, result.model) == ("RETURN", 0.77, "jev-1")
+    assert result.usage == {"input": 120, "output": 9}
+    assert waits == [2.0]
+    assert requests[-1].url == "https://jev.test/v1/chat/completions"
+    assert requests[-1].headers["authorization"] == "Bearer key"
+
+
+def test_jev_client_gives_up_after_max_attempts():
+    jev = JevClient(
+        "key",
+        "jev-1",
+        "https://jev.test/v1",
+        transport=httpx.MockTransport(lambda r: httpx.Response(503)),
+        sleep=lambda s: None,
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        jev.judge("문의", OPTIONS)
+
+
+# --- tracing ------------------------------------------------------------------------------
+
+
+class FakeGeneration:
+    def __init__(self, kwargs):
+        self.start = kwargs
+        self.updates: dict = {}
+
+    def update(self, **kw):
+        self.updates.update(kw)
+
+
+class FakeLangfuse:
+    def __init__(self):
+        self.generations: list[FakeGeneration] = []
+
+    def create_trace_id(self, seed=None):
+        return f"trace-{seed}"
+
+    @contextmanager
+    def start_as_current_observation(self, **kwargs):
+        generation = FakeGeneration(kwargs)
+        self.generations.append(generation)
+        yield generation
+
+
+@pytest.fixture
+def langfuse(monkeypatch):
+    fake = FakeLangfuse()
+    monkeypatch.setattr(tracing, "_client", lambda: fake)
+    return fake
+
+
+def test_trace_is_noop_without_keys(monkeypatch):
+    monkeypatch.setattr(tracing, "_client", lambda: None)
+
+    with tracing.trace("draft", "m", "p") as span:
+        span.output = "x"
+
+    assert span.output == "x"
+
+
+def test_router_calls_are_traced_under_ticket(langfuse):
+    jev, gemini = StubJudge("jev", confidence=0.4), StubJudge("gemini-fast", answer="QUOTE")
+    router = LLMRouter(settings(), jev=jev, gemini_judge=gemini, writer=StubWriter())
+
+    with tracing.ticket_scope("T-1"):
+        router.judge("classify", "문의", OPTIONS)
+        router.write("draft", "요약")
+
+    first, fallback, draft = langfuse.generations
+    assert [g.start["name"] for g in langfuse.generations] == ["classify", "classify", "draft"]
+    assert [g.start["model"] for g in langfuse.generations] == [
+        "jev",
+        "gemini-fast",
+        "gemini-writer",
+    ]
+    assert {g.start["trace_context"]["trace_id"] for g in langfuse.generations} == {"trace-T-1"}
+    assert first.updates["output"] == {"answer": "RETURN", "confidence": 0.4}
+    assert first.updates["usage_details"] == {"input": 10, "output": 2}
+    assert fallback.start["metadata"]["fallback_from"] == "jev"
+    assert fallback.start["metadata"]["fallback_reason"] == "low_confidence"
+    assert draft.updates["output"] == "답변: 요약"
+
+
+def test_trace_marks_errors(langfuse):
+    with pytest.raises(RuntimeError), tracing.trace("draft", "m", "p"):
+        raise RuntimeError("boom")
+
+    (generation,) = langfuse.generations
+    assert generation.start["trace_context"] is None  # 문의 밖 호출은 trace 를 따로
+    assert generation.updates["level"] == "ERROR"

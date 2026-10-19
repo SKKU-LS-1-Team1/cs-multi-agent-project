@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     # LLM (기획서 9.2). live: Jev + Gemini 호출 / fake: LLM 끔
     llm_provider: Literal["live", "fake"] = "fake"
     gemini_api_key: str = ""
-    gemini_model_fast: str = "gemini-2.5-flash"
-    gemini_model_writer: str = "gemini-2.5-pro"
+    gemini_model_fast: str = "gemini-3.7-flash"
+    gemini_model_writer: str = "gemini-3.7-flash"  # pro 는 한 문장에 85초 (K1 초과)
     jev_api_key: str = ""
     jev_base_url: str = "https://inference.do-ai.run/v1"
     jev_model: str = ""
