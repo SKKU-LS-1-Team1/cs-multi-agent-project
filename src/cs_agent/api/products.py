@@ -7,3 +7,8 @@
 # - GET /api/products/{code} → 제품 상세: 정보·설치·고장·펌웨어·FAQ·문서 탭 내용
 #     탭 내용은 기술문서(data/raw/docs)와 기준표(사양·고장 코드·펌웨어 이력, CSA-19)에서 가져온다.
 #     없는 코드는 404.
+
+from fastapi import APIRouter
+
+# TODO: 위 엔드포인트를 이 라우터에 만든다 (main.py 가 이미 /api 아래 등록해 둠)
+router = APIRouter(prefix="/products", tags=["products"])
