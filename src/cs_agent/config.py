@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    # .env.example 처럼 값이 빈 키(CHROMA_PORT= 등)는 없는 것으로 보고 기본값을 쓴다
+    # .env.example 처럼 값이 빈 키(REDIS_URL= 등)는 없는 것으로 보고 기본값을 쓴다
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore", env_ignore_empty=True
     )
@@ -24,8 +24,6 @@ class Settings(BaseSettings):
     # 저장소 (docker compose 안에서는 docker-compose.yml 값을 쓴다)
     database_url: str = "postgresql+psycopg://cs:cs@postgres:5432/cs"
     redis_url: str = "redis://redis:6379/0"
-    chroma_host: str = "chroma"
-    chroma_port: int = 8000
 
     # 데이터 경로
     ref_dir: Path = REPO_ROOT / "data" / "ref"  # 기준표
@@ -40,6 +38,12 @@ class Settings(BaseSettings):
     jev_base_url: str = "https://inference.do-ai.run/v1"
     jev_model: str = ""
     jev_min_confidence: float = 0.7  # 임시값. 시험 문의로 확정 (CSA-49)
+
+    # 임베딩 (CSA-18). 다국어 15개 언어 문의 → 영어 문서. 적재와 검색이 반드시 같은 값을 쓴다.
+    # gemini-embedding-2 기본은 3072차원인데 pgvector HNSW 인덱스는 2000차원까지라 1536으로 줄인다
+    # (같은 뜻 한·영 유사도 0.744 → 0.749, 품질 차이 없음).
+    embedding_model: str = "gemini-embedding-2"
+    embedding_dim: int = 1536
 
     # Langfuse (CSA-48)
     langfuse_public_key: str = ""
