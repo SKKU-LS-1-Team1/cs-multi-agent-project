@@ -1,3 +1,9 @@
+import shutil
+from pathlib import Path
+
+import pytest
+
+from cs_agent.config import get_settings
 from cs_agent.rules.tables import ALL, audit_tickets, load_tables
 
 
@@ -78,3 +84,43 @@ def test_audit_tickets_routes_non_defect_return() -> None:
     assert report.non_defect_returns == 1
     assert report.routing_match == report.dept_match == 1
     assert "routing" not in report.mismatches
+
+
+def _ref_copy(tmp_path: Path) -> Path:
+    ref = tmp_path / "ref"
+    shutil.copytree(get_settings().ref_dir, ref)
+    return ref
+
+
+def test_ref_tables_are_hashable() -> None:
+    tables = load_tables()
+
+    assert {tables} == {load_tables()}  # set·lru_cache 인자로 쓸 수 있다
+
+
+def test_row_with_unquoted_comma_names_file_and_line(tmp_path: Path) -> None:
+    ref = _ref_copy(tmp_path)
+    with (ref / "family_divisions.csv").open("a", encoding="utf-8") as f:
+        f.write("SENSOR,AUTOMATION,자동화,기획서 5.2, 확정본\n")
+
+    with pytest.raises(ValueError, match=r"family_divisions\.csv:13: 열 개수"):
+        load_tables(ref)
+
+
+def test_duplicate_key_is_rejected(tmp_path: Path) -> None:
+    ref = _ref_copy(tmp_path)
+    with (ref / "family_divisions.csv").open("a", encoding="utf-8") as f:
+        f.write("DRIVE,POWER,전력,\n")
+
+    with pytest.raises(ValueError, match="family_divisions.csv: 키 DRIVE"):
+        load_tables(ref)
+
+
+def test_duplicate_sla_key_is_rejected(tmp_path: Path) -> None:
+    ref = _ref_copy(tmp_path)
+    path = ref / "sla_policy.csv"
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    path.write_text("\n".join([*lines, lines[1]]) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="sla_policy.csv: 키"):
+        load_tables(ref)
