@@ -7,3 +7,8 @@
 #   3. sessions.append(session_id, 고객 메시지, 답변)
 #   응답에 화면 이동 지시(navigation)와, 전환 시 문의서 초안(form)이 담긴다 → 고객 화면 CSA-38 이
 #     쓴다.
+
+from fastapi import APIRouter
+
+# TODO: 위 엔드포인트를 이 라우터에 만든다 (main.py 가 이미 /api 아래 등록해 둠)
+router = APIRouter(prefix="/chat", tags=["chat"])
