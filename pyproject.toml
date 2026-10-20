@@ -20,6 +20,8 @@ dependencies = [
     "pgvector>=0.3",  # SQLAlchemy Vector 타입 (db/models.py)
     "redis>=5.0",
     "httpx>=0.27",
+    "langgraph-checkpoint-postgres>=2.0",  # 그래프 체크포인트 PostgresSaver (graph/builder.py)
+    "psycopg-pool>=3.2",
 ]
 
 [project.optional-dependencies]

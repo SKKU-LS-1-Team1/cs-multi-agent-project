@@ -27,6 +27,11 @@ TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 needs_db = pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL 없음")
 
 
+def _include_name(name, type_, parent_names) -> bool:
+    checkpoint = {"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"}
+    return not (type_ == "table" and name in checkpoint)
+
+
 def _columns(model) -> set[str]:
     return set(model.__table__.columns.keys())
 
@@ -87,7 +92,9 @@ def test_migration_matches_models(db):
 
     engine, _ = db
     with engine.connect() as conn:
-        diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)
+        # 체크포인트 테이블(PostgresSaver)은 migrations/env.py 와 같이 비교에서 뺀다
+        context = MigrationContext.configure(conn, opts={"include_name": _include_name})
+        diff = compare_metadata(context, Base.metadata)
         tables = set(inspect(conn).get_table_names())
         has_vector = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'"))
 
@@ -136,3 +143,80 @@ def test_ticket_history_and_vector_search(db):
             select(DocChunk.id).order_by(DocChunk.embedding.cosine_distance(query))
         ).all()
         assert ranked == ["D1#1", "D2#1"]
+
+
+# --- 문의 처리 기록 + 그래프 체크포인트 (services/records.py, graph/builder.py) ----------------
+
+
+def _db_service(Session, checkpointer):
+    from stubs import ANALYSIS
+
+    from cs_agent.graph.builder import GraphDeps, build_ticket_graph
+    from cs_agent.llm.router import LLMRouter
+    from cs_agent.services.records import SqlRecords
+    from cs_agent.services.tickets import TicketService
+
+    deps = GraphDeps(llm=LLMRouter(Settings(_env_file=None)), **ANALYSIS)
+    embed = lambda texts: [[1.0] + [0.0] * (EMBEDDING_DIM - 1) for _ in texts]  # noqa: E731
+    return TicketService(build_ticket_graph(deps, checkpointer), SqlRecords(Session, embed))
+
+
+@needs_db
+def test_service_records_rows_and_survives_restart(db):
+    from cs_agent.graph.builder import postgres_checkpointer
+
+    engine, Session = db
+    inquiry = InquiryIn(
+        channel="email",
+        customer_tier="GOLD",
+        subject="Dimensions of TRF-OIL-1000",
+        body="What are the dimensions and weight of TRF-OIL-1000?",
+        category=Category.TECH_SPEC,
+        provided_fields={"application": "substation"},
+        thread_ref="mail-7",
+    )
+    try:
+        with postgres_checkpointer(TEST_DATABASE_URL) as saver:
+            service = _db_service(Session, saver)
+            tid = service.submit(inquiry).ticket_id
+            service.act(tid, ReviewIn(action=ReviewAction.REWRITE, feedback="짧게"))
+
+        # 서버를 다시 켠 것처럼 새 체크포인터·서비스로 이어서 처리한다
+        with postgres_checkpointer(TEST_DATABASE_URL) as saver:
+            service = _db_service(Session, saver)
+            assert service.get(tid).status == TicketStatus.READY_FOR_REVIEW
+            assert service.work_list()[0]["ticket_id"] == tid
+            service.act(tid, ReviewIn(action=ReviewAction.APPROVE, reviewer="kim"))
+            assert service.resolve(tid).status == TicketStatus.RESOLVED
+
+            with Session() as s:
+                ticket = s.get(Ticket, tid)
+                assert (ticket.status, ticket.category, ticket.assigned_dept) == (
+                    "RESOLVED",
+                    "TECH_SPEC",
+                    "TS_TRF",
+                )
+                assert ticket.first_responded_at and ticket.resolved_at
+                assert [d.kind for d in ticket.drafts][0] == "draft"
+                assert [r.action for r in ticket.reviews] == ["rewrite", "approve"]
+                assert ticket.reviews[0].draft_id == ticket.drafts[0].id
+                case = s.get(ResolutionCase, f"CASE-{tid}")
+                assert (case.active, case.data_split) == (True, "live")
+                assert case.embedding is not None and case.text_hash
+
+            # 같은 메일 스레드의 고객 회신 → 같은 티켓을 다시 연다
+            again = service.submit(
+                InquiryIn(channel="email", body="It tripped again.", thread_ref="mail-7")
+            )
+            assert again.ticket_id == tid
+            with Session() as s:
+                assert s.get(Ticket, tid).followups == 1
+                assert s.get(ResolutionCase, f"CASE-{tid}").active is False
+    finally:
+        with engine.begin() as conn:  # 체크포인트 테이블은 alembic downgrade 가 지우지 않는다
+            conn.execute(
+                text(
+                    "DROP TABLE IF EXISTS checkpoints, checkpoint_blobs, checkpoint_writes, "
+                    "checkpoint_migrations"
+                )
+            )
