@@ -32,10 +32,10 @@ class Settings(BaseSettings):
     # LLM (기획서 9.2). live: Jev + Gemini 호출 / fake: LLM 끔
     llm_provider: Literal["live", "fake"] = "fake"
     gemini_api_key: str = ""
-    gemini_model_fast: str = "gemini-2.5-flash"
-    gemini_model_writer: str = "gemini-2.5-pro"
+    gemini_model_fast: str = "gemini-3.7-flash"
+    gemini_model_writer: str = "gemini-3.7-flash"  # pro 는 한 문장에 85초 (K1 초과)
     jev_api_key: str = ""
-    jev_base_url: str = "https://inference.do-ai.run/v1"
+    jev_base_url: str = "https://api.typesafe.ai/v1"  # TypeSafe 공식 API
     jev_model: str = ""
     jev_min_confidence: float = 0.7  # 임시값. 시험 문의로 확정 (CSA-49)
 
@@ -48,11 +48,12 @@ class Settings(BaseSettings):
     # Langfuse (CSA-48)
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
-    langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_host: str = "https://us.cloud.langfuse.com"  # 팀 프로젝트는 US 리전 (EU 주소면 401)
 
     # 처리 흐름
     max_verify_retries: int = 2  # 자동 점검 재작성 최대 (S-06)
     sla_at_risk_ratio: float = 0.75  # SLA 경고 기준 (CSA-40)
+    analysis_retry_interval_s: float = 60.0  # 분석 대기 문의 재시도 간격. 0 이면 자동 재시도 끔
 
 
 @lru_cache

@@ -62,6 +62,7 @@ class Route(StrEnum):
 
 class TicketStatus(StrEnum):
     NEW = "NEW"
+    ANALYSIS_PENDING = "ANALYSIS_PENDING"  # 분류·추출 실패, 자동 재시도 대기
     HUMAN_QUEUE = "HUMAN_QUEUE"
     WAITING_CUSTOMER = "WAITING_CUSTOMER"  # SLA 정지
     READY_FOR_REVIEW = "READY_FOR_REVIEW"

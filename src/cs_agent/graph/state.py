@@ -23,11 +23,12 @@ class TicketState(TypedDict, total=False):
     # 괄호 = 채우는 노드
     ticket_id: str
     inquiry: InquiryIn  # ① 접수
-    classification: Classification  # ② 분류, CSA-26
-    extraction: Extraction  # ③ 추출, CSA-26
+    classification: Classification | None  # ② 분류, CSA-26
+    extraction: Extraction | None  # ③ 추출, CSA-26
+    analysis_error: str | None  # ②③ 실패 사유 (AnalysisError) → 분석 대기
     candidates: list[Evidence]  # ④ 1차 검색, CSA-28
-    rules: RuleResult  # ⑤ 규칙 처리, CSA-22
-    route: str  # ⑥ 분기: human | info_request | draft (domain.Route)
+    rules: RuleResult | None  # ⑤ 규칙 처리, CSA-22. 분석 실패면 None
+    route: str | None  # ⑥ 분기: human | info_request | draft (domain.Route), 분석 대기면 None
     evidence: list[Evidence]  # ⑧ 근거 확정, CSA-28
     draft: Draft | None  # ⑨ 답변 작성, CSA-29·30
     checks: list[CheckResult]  # ⑩ 자동 점검, CSA-31
