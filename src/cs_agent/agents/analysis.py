@@ -44,7 +44,7 @@
 # ── CSA-26 초안에서 달라진 점 ──
 # - TF-IDF 기본 분류기 대신 라우터의 Jev 판단을 사용한다.
 # - 보조 유형은 확률 2위가 아니라 선택적인 별도 판단으로 처리한다.
-# - 문맥 추출은 이 파일 안의 Gemini 3.8 Flash 구조화 추출 어댑터를 사용한다.
+# - 문맥 추출은 이 파일 안의 Gemini 구조화 추출 어댑터와 GEMINI_MODEL_FAST 설정을 사용한다.
 # - 공통 schemas/domain/config/기준표 로더를 사용한다. 추출 상세값은 별도 결과에 보존한다.
 # - 데이터셋 기준 성능과 아래의 입출력 호환성 검사는 서로 구분한다.
 # - 공통 스키마/라우터/그래프는 변경하지 않는다. 실제 그래프 등록은 통합 담당자 작업이다.
@@ -52,8 +52,9 @@
 
 """CSA-26 문의 분석: Jev 판단 + 규칙/Gemini fast 추출.
 
-classify()/extract()는 팀 공통 schemas의 객체를 반환한다. 정보가 부족하거나 호출이
-실패하면 임의 유형/긴급도를 만들지 않는다. AnalysisError를 호출자가 처리해야 한다.
+classify()/extract()는 팀 공통 schemas의 객체를 반환한다. 구조화 추출 실패 시 확인된
+규칙 결과를 반환하고 상세 issues에 실패를 남긴다. 유형/긴급도 판단이 불가능한 경우의
+AnalysisError는 호출자가 처리해야 한다.
 extract_details()는 실제 추출값, 근거, 미판단 상태를 보존하는 챗봇/진단용 결과다.
 대화는 공통 InquiryIn을 바꾸지 않고 transcript 키워드 인자로 따로 전달한다.
 판단은 기존 라우터를 사용한다. 아직 공통 구조화 추출 인터페이스가 없으므로,
@@ -87,7 +88,6 @@ from cs_agent.rules.tables import Product, RefTables, load_tables
 from cs_agent.schemas import Classification, Extraction, InquiryIn
 
 _LOGGER = logging.getLogger(__name__)
-GEMINI_EXTRACTION_MODEL = "gemini-3.8-flash"
 EXTRACTION_REQUEST_TIMEOUT_S = 45.0
 EXTRACTION_TOTAL_TIMEOUT_S = 60.0
 EXTRACTION_MAX_ATTEMPTS = 2
@@ -762,10 +762,11 @@ class ExtractionDetails(BaseModel):
         기존 그래프는 urgency == SAFETY만 사람 큐로 보낸다. 별도 검토 필드가 없으므로
         안전 검토가 필요한 건의 공통 출력은 SAFETY로 보수적으로 전달한다.
         이것은 검토를 위한 호환 매핑이며 self.urgency의 실제 모델 판단은 덮어쓰지 않는다.
+        구조화 추출 실패는 issues에 남기고, 이미 확인된 규칙·고객 제공 값을 반환한다.
+        대화에서 철회·충돌로 제외된 값은 복구하지 않는다.
         """
         blocking = {
             "urgency_judgement_failed",
-            "structured_extraction_failed",
             "structured_extractor_unavailable",
             "return_defect_judgement_failed",
             "return_defect_router_unavailable",
@@ -1508,7 +1509,7 @@ def extract_details(
     category: Category | None = None,
     extraction_model: str | None = None,
 ) -> ExtractionDetails:
-    """상세 결과: llm은 Jev 판단, 기본 추출 어댑터는 Gemini 3.8 Flash.
+    """상세 결과: llm은 Jev 판단, 추출 모델은 Settings.gemini_model_fast(.env) 사용.
 
     requested_fields=None이면 category/제품군 기준 자동 조회, []이면 추가 요청 없음.
     transcript는 과거 발언, inquiry.body는 최신 발언이다. 대화 시 폼 값은 이전 상태로 취급한다.
@@ -1520,9 +1521,7 @@ def extract_details(
     settings = settings or getattr(llm, "settings", None) or get_settings()
     if extractor is None and hasattr(llm, "extract_structured"):
         extractor = llm
-    model = extraction_model or (
-        settings.gemini_model_fast if extractor is not None else GEMINI_EXTRACTION_MODEL
-    )
+    model = extraction_model or settings.gemini_model_fast
     if (
         extractor is None
         and llm is not None
