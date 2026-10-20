@@ -36,6 +36,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from cs_agent import domain, schemas
+from cs_agent.agents import retrieval
 from cs_agent.config import get_settings
 from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
 from cs_agent.graph import defaults
@@ -56,8 +57,8 @@ class GraphDeps:
     # 에이전트 함수 (모양은 agents/*.py "만들 것" 주석)
     classify: Callable = defaults.classify  # TODO(CSA-26): agents.analysis.classify
     extract: Callable = defaults.extract  # TODO(CSA-26): agents.analysis.extract
-    first_pass: Callable = defaults.first_pass  # TODO(CSA-28): agents.retrieval.first_pass
-    finalize_evidence: Callable = defaults.finalize_evidence  # TODO(CSA-28)
+    first_pass: Callable = retrieval.first_pass
+    finalize_evidence: Callable = retrieval.finalize_evidence
     write_draft: Callable = defaults.write_draft  # TODO(CSA-29): agents.drafting.write_draft
     verify: Callable = defaults.verify  # TODO(CSA-31): agents.verification.verify
     write_info_request: Callable = defaults.write_info_request  # TODO(CSA-27)
@@ -130,7 +131,11 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
 
     def evidence(state: TicketState) -> dict:
         return {
-            "evidence": deps.finalize_evidence(state.get("candidates", []), state["extraction"])
+            "evidence": deps.finalize_evidence(
+                state.get("candidates", []),
+                state["extraction"],
+                category=state["classification"].category,
+            )
         }
 
     def draft(state: TicketState) -> dict:

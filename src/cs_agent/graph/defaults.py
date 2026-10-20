@@ -8,12 +8,10 @@
 # |---|---|---|
 # | classify | 고객이 고른 유형, 없으면 llm.judge | agents/analysis.py classify (CSA-26) |
 # | extract | 문의서·본문 속 제품 코드, 안전 키워드 | agents/analysis.py extract (CSA-26) |
-# | first_pass / finalize_evidence | 근거 없음 | agents/retrieval.py (CSA-28) |
 # | write_draft | llm.write("draft") 한 번 | agents/drafting.py (CSA-29·30) |
 # | verify | 빈 답변만 실패 | agents/verification.py (CSA-31) |
 # | write_info_request | llm.write("info_request") 한 번 | agents/info_request.py (CSA-27) |
 import re
-from typing import Any
 
 from cs_agent.domain import Category, Urgency
 from cs_agent.llm.router import LLMRouter
@@ -53,16 +51,6 @@ def extract(inquiry: InquiryIn, tables: RefTables) -> Extraction:
         language=inquiry.language,
         provided_info=provided,
     )
-
-
-def first_pass(docs: Any, cases: Any, text: str, k: int = 8) -> list[Evidence]:
-    return []
-
-
-def finalize_evidence(
-    candidates: list[Evidence], extraction: Extraction, k: int = 3
-) -> list[Evidence]:
-    return candidates[:k]
 
 
 def write_draft(
