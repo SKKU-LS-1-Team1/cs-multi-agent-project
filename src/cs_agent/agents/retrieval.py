@@ -5,7 +5,7 @@
 # - `docs` = doc_chunks 테이블: 공식 문서·FAQ·정책을 절 단위로 (CSA-18에서 적재). 값·절차·정책의
 #     근거. 값이 충돌하면 이쪽.
 # - `cases` = resolution_cases 테이블(embedding 열): 해결 사례 (train 연결 + 운영 중 해결 건,
-#     searchable=true 인 것만). 비슷한 문의를 어떻게 풀었는지, 문장 본보기. 참고로만.
+#     active=true 인 것만). 비슷한 문의를 어떻게 풀었는지, 문장 본보기. 참고로만.
 #
 # 할 일
 # 1. Retriever 규약: search(query, k, where) → list[Evidence]. where 는 메타데이터 필터
@@ -200,10 +200,11 @@ _TABLES = {
         "source": "docs",
     },
     "resolution_cases": {
-        "columns": "case_id, ticket_id, category, product_code, error_code, summary, cause, "
-        "action_taken, final_reply, reference_doc_id",
+        "columns": "case_id, ticket_id, category, product_code, product_family, error_code, "
+        "summary, cause, action, final_reply, cited",
         "filters": CASE_FILTERS,
-        "extra_where": "embedding IS NOT NULL AND searchable",
+        # active=false: 재문의로 다시 열린 사례 (db/models.py ResolutionCase)
+        "extra_where": "embedding IS NOT NULL AND active",
         "source": "cases",
     },
 }
@@ -272,15 +273,20 @@ class PgVectorRetriever:
         case = {
             "case_summary": row["summary"] or "",
             "root_cause": row["cause"] or "",
-            "action_taken": row["action_taken"] or "",
+            "action_taken": row["action"] or "",
         }
-        keys = ("category", "product_code", "error_code", "ticket_id", "reference_doc_id")
+        cited = row["cited"] or []  # ["doc_id#section", ...] (embed_docs.case_rows)
+        metadata = {
+            k: row[k] or "" for k in ("category", "product_code", "error_code", "ticket_id")
+        }
+        metadata["family"] = row["product_family"] or ""
+        metadata["reference_doc_id"] = cited[0].split("#", 1)[0] if cited else ""
         return Evidence(
             source="cases",
             doc_id=row["case_id"],
             text=case_text(case, row["final_reply"] or ""),
             score=score,
-            metadata={k: row[k] or "" for k in keys},
+            metadata=metadata,
         )
 
 

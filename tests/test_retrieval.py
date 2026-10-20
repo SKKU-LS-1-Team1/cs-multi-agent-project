@@ -186,3 +186,30 @@ def test_pgvector_retriever_rejects_unknown_filter() -> None:
         retriever.search("q", where={"text; DROP TABLE": "x"})
     with pytest.raises(ValueError):
         PgVectorRetriever("tickets")
+
+
+def test_pgvector_case_row_maps_db_columns() -> None:
+    """resolution_cases 열 이름(db/models.py)대로 읽어 키워드 사례와 같은 모양으로 만든다."""
+    retriever = PgVectorRetriever("resolution_cases", engine=object(), embed_fn=lambda q: [0.0])
+    row = {
+        "case_id": "CASE-1",
+        "ticket_id": "T-1",
+        "category": "DEFECT",
+        "product_code": "INV-A",
+        "product_family": "DRIVE",
+        "error_code": "E.OC",
+        "summary": "Trip on start",
+        "cause": "Accel time too short",
+        "action": "Increase accel time",
+        "final_reply": "Please increase the accel time.",
+        "cited": ["TG-INV-A#3.1"],
+        "distance": 0.25,
+    }
+
+    evidence = retriever._evidence(row)
+
+    assert (evidence.source, evidence.doc_id, evidence.score) == ("cases", "CASE-1", 0.75)
+    assert "Action: Increase accel time" in evidence.text
+    assert evidence.metadata["family"] == "DRIVE"
+    assert evidence.metadata["reference_doc_id"] == "TG-INV-A"
+    assert retriever._evidence({**row, "cited": []}).metadata["reference_doc_id"] == ""
