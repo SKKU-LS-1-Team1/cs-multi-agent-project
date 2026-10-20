@@ -3,7 +3,9 @@
 # API 와 그래프 사이. 그래프 실행·재개와 기록을 묶는다.
 #
 # - submit(inquiry): ticket_id 발급 → graph.invoke → 상담원 검토 지점(또는 사람 큐)에서
-#   멈춘 상태로 반환
+#   멈춘 상태로 반환. thread_ref 가 기존 티켓과 같으면 새 티켓이 아니라 고객 회신이다 (reply).
+# - reply(ticket_id, inquiry): 고객 회신 → 원문에 회신을 붙여 같은 thread_id 로 ① 접수부터 다시
+#   돈다. 재문의 횟수(followups) +1, 해결된 문의였으면 그 사례를 검색에서 뺀다.
 # - act(ticket_id, review): 상담원 버튼 → Command(resume=...) 로 그래프 재개 (CSA-25)
 # - resolve(ticket_id): 해결 확정 → 상태 RESOLVED, 저장 대상이면 사례로 남김
 #   (agents/case_memory.py)
@@ -13,9 +15,10 @@
 # - retry_pending(): 분석 대기(ANALYSIS_PENDING, LLM 장애 등) 문의를 처음부터 다시 돌린다.
 #   main.py 가 analysis_retry_interval_s 마다 부른다.
 #
-# 저장소: 지금은 그래프 체크포인트(메모리) + 이 객체의 dict 다. 서버를 다시 켜면 사라진다.
-# TODO(CSA-24·25): PostgreSQL 이 오면 tickets·drafts·reviews 행 기록, PostgresSaver 체크포인트,
-#   work_list 는 db/sql/work_list.sql 로. 사례는 resolution_cases + embedding 으로 (CSA-18).
+# 저장소: 그래프 상태는 체크포인터(PostgresSaver, DB 없으면 메모리), 조회·집계용 행은
+#   services/records.py (SqlRecords: tickets·drafts·reviews·resolution_cases, 없으면 MemoryRecords).
+#   그래프를 돌릴 때마다 records.save_state() 로 tickets 행을 맞춘다.
+# TODO(CSA-20·40): work_list 를 db/sql/work_list.sql 로 (지금은 열린 티켓의 그래프 상태로 계산).
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -27,8 +30,9 @@ from cs_agent.domain import Route, TicketStatus
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
 from cs_agent.schemas import InquiryIn, ReviewIn, TicketOut
+from cs_agent.services.records import MemoryRecords, Records
 
-CLOSED = {TicketStatus.APPROVED, TicketStatus.REJECTED, TicketStatus.RESOLVED}
+CLOSED = frozenset({TicketStatus.APPROVED, TicketStatus.REJECTED, TicketStatus.RESOLVED})
 
 
 class TicketNotFound(LookupError):
@@ -40,38 +44,48 @@ class InvalidAction(ValueError):
 
 
 class TicketService:
-    def __init__(self, graph: Any) -> None:
+    def __init__(self, graph: Any, records: Records | None = None) -> None:
         self.graph = graph
-        self.ticket_ids: list[str] = []  # 접수 순서
-        self.reviews: dict[str, list[ReviewIn]] = {}  # TODO(CSA-24): reviews 테이블
-        self.cases: list[dict] = []  # TODO(CSA-18·24): resolution_cases + embedding
+        self.records = records if records is not None else MemoryRecords()
 
     @staticmethod
     def _config(ticket_id: str) -> dict:
         return {"configurable": {"thread_id": ticket_id}}
 
     def _state(self, ticket_id: str) -> Any:
-        if ticket_id not in self.reviews:
+        if not self.records.exists(ticket_id):
             raise TicketNotFound(ticket_id)
         return self.graph.get_state(self._config(ticket_id))
 
-    def submit(self, inquiry: InquiryIn) -> TicketOut:
-        ticket_id = f"T-{uuid.uuid4().hex[:12].upper()}"
-        self.ticket_ids.append(ticket_id)
-        self.reviews[ticket_id] = []
+    def _run(self, ticket_id: str, graph_input: Any) -> None:
         with ticket_scope(ticket_id):  # 문의 1건의 LLM 호출을 Langfuse trace 하나로
-            self.graph.invoke({"ticket_id": ticket_id, "inquiry": inquiry}, self._config(ticket_id))
+            self.graph.invoke(graph_input, self._config(ticket_id))
+        self.records.save_state(ticket_id, self.graph.get_state(self._config(ticket_id)).values)
+
+    def submit(self, inquiry: InquiryIn) -> TicketOut:
+        if inquiry.thread_ref and (existing := self.records.find_thread(inquiry.thread_ref)):
+            return self.reply(existing, inquiry)
+        ticket_id = f"T-{uuid.uuid4().hex[:12].upper()}"
+        self.records.add_ticket(ticket_id, inquiry)
+        self._run(ticket_id, {"ticket_id": ticket_id, "inquiry": inquiry, "followups": 0})
+        return self.get(ticket_id)
+
+    def reply(self, ticket_id: str, inquiry: InquiryIn) -> TicketOut:
+        """고객 회신. 진행 중이던 검토는 버리고 원문 + 회신으로 처음부터 다시 판단한다."""
+        values = self._state(ticket_id).values
+        if values.get("status") == TicketStatus.RESOLVED:
+            self.records.deactivate_case(ticket_id)  # 다시 열린 문의의 사례는 검색에서 뺀다
+        merged = merge_reply(values["inquiry"], inquiry)
+        followups = values.get("followups", 0) + 1
+        self._run(ticket_id, {"ticket_id": ticket_id, "inquiry": merged, "followups": followups})
         return self.get(ticket_id)
 
     def act(self, ticket_id: str, review: ReviewIn) -> TicketOut:
         snapshot = self._state(ticket_id)
         if "review" not in snapshot.next:
             raise InvalidAction(f"{ticket_id} 는 상담원 검토 대기 상태가 아니다")
-        self.reviews[ticket_id].append(review)
-        with ticket_scope(ticket_id):
-            self.graph.invoke(
-                Command(resume=review.model_dump(mode="json")), self._config(ticket_id)
-            )
+        self.records.add_review(ticket_id, review)
+        self._run(ticket_id, Command(resume=review.model_dump(mode="json")))
         return self.get(ticket_id)
 
     def resolve(self, ticket_id: str) -> TicketOut:
@@ -79,22 +93,21 @@ class TicketService:
         if values.get("status") not in {TicketStatus.APPROVED, TicketStatus.ESCALATED}:
             raise InvalidAction(f"{ticket_id} 는 승인·이관된 문의만 해결 확정할 수 있다")
         self.graph.update_state(self._config(ticket_id), {"status": TicketStatus.RESOLVED})
+        resolved = self._state(ticket_id).values
+        self.records.save_state(ticket_id, resolved)
         review = values.get("review")
         if review and review.action in SAVE_ON:
-            self.cases.append(build_case(self._state(ticket_id).values))
+            self.records.save_case(build_case(resolved))
         return self.get(ticket_id)
 
     def retry_pending(self) -> list[str]:
         """분석 대기 문의를 다시 돌리고, 대기에서 벗어난 ticket_id 를 돌려준다."""
         recovered = []
-        for ticket_id in list(self.ticket_ids):
+        for ticket_id in self.records.ticket_ids(exclude=CLOSED):
             values = self.graph.get_state(self._config(ticket_id)).values
             if values.get("status") != TicketStatus.ANALYSIS_PENDING:
                 continue
-            with ticket_scope(ticket_id):
-                self.graph.invoke(
-                    {"ticket_id": ticket_id, "inquiry": values["inquiry"]}, self._config(ticket_id)
-                )
+            self._run(ticket_id, {"ticket_id": ticket_id, "inquiry": values["inquiry"]})
             if self.get(ticket_id).status != TicketStatus.ANALYSIS_PENDING:
                 recovered.append(ticket_id)
         return recovered
@@ -122,7 +135,7 @@ class TicketService:
     def work_list(self, dept: str | None = None, now: datetime | None = None) -> list[dict]:
         now = now or datetime.now(UTC)
         rows = []
-        for ticket_id in self.ticket_ids:
+        for ticket_id in self.records.ticket_ids(exclude=CLOSED):
             v = self.graph.get_state(self._config(ticket_id)).values
             rules = v.get("rules")
             if v.get("status") in CLOSED:
@@ -163,3 +176,17 @@ def _unruled_row(ticket_id: str, v: dict) -> dict:
         "sla_ratio": None,
         "at_risk": True,
     }
+
+
+def merge_reply(original: InquiryIn, reply: InquiryIn) -> InquiryIn:
+    """원문 뒤에 고객 회신을 붙인다. 접수 시각(SLA 기준)은 원문 것을 쓴다."""
+    stamp = reply.received_at.strftime("%Y-%m-%d %H:%M")
+    return original.model_copy(
+        update={
+            "body": f"{original.body}\n\n[Customer reply {stamp}]\n{reply.body}".strip(),
+            "language": reply.language or original.language,
+            "product_code": reply.product_code or original.product_code,
+            "category": original.category or reply.category,
+            "provided_fields": {**original.provided_fields, **reply.provided_fields},
+        }
+    )

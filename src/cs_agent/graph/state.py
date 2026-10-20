@@ -38,6 +38,7 @@ class TicketState(TypedDict, total=False):
     pending: str  # 상담원이 검토할 대상: draft | info_request
     review: ReviewIn | None  # 상담원 버튼 입력, CSA-25
     review_rounds: int  # 상담원 재작성 요청 횟수, 자동 점검과 따로 센다
+    followups: int  # 고객 회신(재문의)으로 다시 돈 횟수 (services/tickets.py reply)
     final_reply: str | None
     escalated_to: str | None
     status: str  # domain.TicketStatus

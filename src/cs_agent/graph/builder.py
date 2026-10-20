@@ -24,13 +24,14 @@
 # - review 노드는 interrupt 만 한다. interrupt 앞에서 상태를 바꾸면 재개 때 노드가 다시 실행되므로
 #   상태 표시는 ready / hold 노드에서 한다.
 #   API(POST /api/tickets/{id}/action)가 Command(resume=ReviewIn.model_dump(mode="json"))로 잇는다.
-# - 체크포인터: 개발은 InMemorySaver, 운영은 PostgresSaver (langgraph-checkpoint-postgres, CSA-24).
+# - 체크포인터: 개발은 InMemorySaver, 운영은 PostgresSaver (postgres_checkpointer(), CSA-24).
 #   상태에 든 pydantic 모델·Enum 은 serializer() 에 등록해야 체크포인트에서 그대로 복원된다.
-#
-# TODO(CSA-21): 고객 회신이 오면 ① 접수에서 같은 thread_id 로 재개 (thread_ref 로 기존 티켓 찾기,
-#   재문의 +1). 고객 회신 채널(CSA-32·39)이 생기면 붙인다.
+# - 고객 회신: 같은 thread_id 에 새 입력(원문 + 회신, followups +1)을 넣으면 ① 접수부터 다시 돈다
+#   (services/tickets.py reply). 검토 대기 중이었으면 그 검토는 버린다. ① 이 지난 판단·답변·상담원
+#   입력을 지워야 이전 상담원 피드백이 새 답변에 섞이지 않는다.
 # 참고: 에이전트_구조_제안.md 2장, 관리자_대시보드_AI기능_구조검토.md 4장
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -80,6 +81,25 @@ def serializer() -> JsonPlusSerializer:
     return JsonPlusSerializer(allowed_msgpack_modules=allowed)
 
 
+@contextmanager
+def postgres_checkpointer(database_url: str) -> Iterator[Any]:
+    """PostgresSaver (연결 풀). 체크포인트 테이블이 없으면 만든다. 앱이 끝날 때 풀을 닫는다."""
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+    from sqlalchemy.engine import make_url
+
+    # SQLAlchemy 주소(postgresql+psycopg://)를 psycopg 주소로
+    conninfo = make_url(database_url).set(drivername="postgresql")
+    kwargs = {"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}
+    with ConnectionPool(
+        conninfo.render_as_string(hide_password=False), kwargs=kwargs, open=True
+    ) as pool:
+        saver = PostgresSaver(pool, serde=serializer())
+        saver.setup()
+        yield saver
+
+
 def _inquiry_text(state: TicketState) -> str:
     inquiry = state["inquiry"]
     return f"{inquiry.subject}\n{inquiry.body}".strip()
@@ -97,6 +117,7 @@ def _review(state: TicketState) -> ReviewIn | None:
 def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     # ① ~ ⑤ ----------------------------------------------------------------------------
     def intake(state: TicketState) -> dict:
+        # 고객 회신·분석 대기 재시도로 다시 돌 때 지난 판단·답변·상담원 입력을 지운다
         return {
             "status": TicketStatus.NEW,
             "retries": 0,
@@ -105,6 +126,13 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "classification": None,
             "extraction": None,
             "analysis_error": None,
+            "draft": None,
+            "info_request": None,
+            "checks": [],
+            "evidence": [],
+            "review": None,
+            "final_reply": None,
+            "escalated_to": None,
         }
 
     def classify(state: TicketState) -> dict:

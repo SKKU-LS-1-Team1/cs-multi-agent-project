@@ -25,3 +25,66 @@
 #   def cache_key(task: str, prompt: str) -> str:
 #
 #   def allow(bucket: str, limit: int, window_s: int = 60) -> bool:
+#
+# 지금 들어간 것: 할 일 4 (ChatSessionStore). Redis 연결은 main.py 가 시작할 때 확인해서 넘긴다
+#   (connect_redis). 연결이 없으면 메모리 구현 — 서버를 다시 켜면 대화가 사라진다.
+# TODO(CSA-45): 1 get_kv · 2 cache_key · 3 allow (LLM 캐시·호출 제한, llm/router.py 연결)
+import json
+import time
+from typing import Any
+
+SESSION_TTL_S = 3600
+SESSION_MAX_MESSAGES = 40
+
+
+def connect_redis(url: str) -> Any:
+    """Redis 클라이언트. 붙지 않으면 예외 (main.py 가 메모리로 대체할지 정한다)."""
+    import redis
+
+    client = redis.Redis.from_url(url, socket_connect_timeout=3, decode_responses=True)
+    client.ping()
+    return client
+
+
+class ChatSessionStore:
+    """챗봇 대화 기록. session_id 별로 마지막 대화부터 TTL 동안, 최근 SESSION_MAX_MESSAGES 개."""
+
+    def __init__(
+        self,
+        client: Any = None,
+        ttl_s: int = SESSION_TTL_S,
+        max_messages: int = SESSION_MAX_MESSAGES,
+        clock: Any = time.monotonic,
+    ) -> None:
+        self.client = client  # None 이면 메모리
+        self.ttl_s = ttl_s
+        self.max_messages = max_messages
+        self._clock = clock
+        self._memory: dict[str, tuple[float, list[str]]] = {}  # session_id → (만료 시각, 기록)
+
+    @staticmethod
+    def _key(session_id: str) -> str:
+        return f"chat:{session_id}"
+
+    def history(self, session_id: str) -> list[str]:
+        if self.client is not None:
+            return [json.loads(m) for m in self.client.lrange(self._key(session_id), 0, -1)]
+        expires, messages = self._memory.get(session_id, (0.0, []))
+        if expires <= self._clock():
+            self._memory.pop(session_id, None)
+            return []
+        return list(messages)
+
+    def append(self, session_id: str, *messages: str) -> None:
+        if not messages:
+            return
+        if self.client is not None:
+            key = self._key(session_id)
+            pipe = self.client.pipeline()
+            pipe.rpush(key, *(json.dumps(m, ensure_ascii=False) for m in messages))
+            pipe.ltrim(key, -self.max_messages, -1)
+            pipe.expire(key, self.ttl_s)
+            pipe.execute()
+            return
+        kept = (self.history(session_id) + list(messages))[-self.max_messages :]
+        self._memory[session_id] = (self._clock() + self.ttl_s, kept)

@@ -78,10 +78,15 @@ def test_json_round_trips_to_inquiry():
 
 def test_post_all_submits_through_api():
     items = mock_data.demo_scenarios()
-    app = create_app(llm=LLMRouter(Settings(_env_file=None)), agents=AGENTS)
+    app = create_app(
+        llm=LLMRouter(Settings(_env_file=None)),
+        agents=AGENTS,
+        storage="memory",
+        retrievers=(None, None),
+    )
     with TestClient(app) as client:
         results = mock_data.post_all(items, client=client)
-        stored = len(client.app.state.tickets.ticket_ids)
+        stored = len(client.app.state.tickets.records.ticket_ids())
 
     assert stored == len(items)
     assert [r["status"] for r in results] == [i["expect"]["status"] for i in items]
