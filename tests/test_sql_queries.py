@@ -210,13 +210,14 @@ def test_dept_dashboard(conn) -> None:
     assert lv["approve_rate"] == 0.333 and lv["category"] == "TECH_SPEC"
 
     reasons = run(conn, "dept_dashboard", "feedback_reasons", since=NOW - timedelta(days=7))
+    # 재작성(rewrite)에 붙은 TONE 은 결정이 아니라 빠진다
     assert [(r["feedback_reason"], r["count"]) for r in reasons] == [
         ("FACT_ERROR", 2),
-        ("TONE", 1),
         ("ROUTING_ERROR", 1),
         ("WEAK_EVIDENCE", 0),
+        ("TONE", 0),
     ]
-    assert reasons[0]["share"] == 0.5
+    assert reasons[0]["share"] == 0.667
     only_mv = run(conn, "dept_dashboard", "feedback_reasons", dept="TS_MV")
     assert [r["count"] for r in only_mv if r["feedback_reason"] == "ROUTING_ERROR"] == [1]
 

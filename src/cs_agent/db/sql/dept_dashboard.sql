@@ -84,6 +84,8 @@ ORDER BY week DESC, t.assigned_dept, t.category;
 
 -- name: feedback_reasons
 -- 3. 수정 사유 4개(domain.FeedbackReason) 분포. 0건인 사유도 나온다.
+--    상담원 결정 중 수정 후 승인·반려에 붙은 사유만 센다 (review_outcomes_weekly 와 같은 기준).
+--    재작성·추가정보 요청·이관에 붙은 사유는 결정 전 요청이라 넣지 않는다.
 WITH reasons (feedback_reason, ord) AS (
     VALUES ('FACT_ERROR', 1), ('WEAK_EVIDENCE', 2), ('TONE', 3), ('ROUTING_ERROR', 4)
 ),
@@ -92,6 +94,7 @@ counted AS (
     FROM reviews AS r
     JOIN tickets AS t ON t.ticket_id = r.ticket_id
     WHERE r.feedback_reason IS NOT NULL
+        AND r.action IN ('edit_approve', 'reject')
         AND (CAST(:dept AS text) IS NULL OR t.assigned_dept = CAST(:dept AS text))
         AND (CAST(:since AS timestamptz) IS NULL OR r.created_at >= CAST(:since AS timestamptz))
     GROUP BY r.feedback_reason
