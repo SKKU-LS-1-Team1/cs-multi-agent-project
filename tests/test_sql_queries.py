@@ -176,7 +176,7 @@ def test_work_list_orders_by_sla_ratio_and_pauses_while_waiting(conn) -> None:
     assert by_id["T-WAIT"]["sla_ratio"] == 0.2 and by_id["T-WAIT"]["at_risk"] is False
     # 마감 = 접수 + 목표 100시간 + 대기 30시간
     assert by_id["T-WAIT"]["sla_due_at"] == NOW - timedelta(hours=50) + timedelta(hours=130)
-    assert by_id["T-SAFETY"]["sla_ratio"] is None and by_id["T-SAFETY"]["at_risk"] is False
+    assert by_id["T-SAFETY"]["sla_ratio"] is None and by_id["T-SAFETY"]["at_risk"] is True
 
     only_lv = run(conn, "work_list", "work_list", now=NOW, dept="TS_LV")
     assert [r["ticket_id"] for r in only_lv] == ["T-RISK", "T-WAIT", "T-LOW"]

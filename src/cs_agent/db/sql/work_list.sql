@@ -15,7 +15,8 @@
 --   대기 중에는 SLA 시계가 멈추므로 비율이 커지지 않고, 마감(sla_due_at)은 대기만큼 뒤로 간다
 --   (rules/sla.py due_at·elapsed_hours 와 같은 식).
 -- - 규칙이 아직 없는 티켓(해결 목표 시간 없음)은 빼되, 분류 없이 사람 큐로 간 안전 건
---   (HUMAN_QUEUE · 부서 없음)은 부서 필터가 없을 때 맨 위에 둔다 (sla_ratio NULL).
+--   (HUMAN_QUEUE · 부서 없음)은 부서 필터가 없을 때 맨 위에 둔다 (sla_ratio NULL, at_risk true —
+--   유형·부서·SLA 를 상담원이 정해야 해서 경고로 보인다).
 -- - 같은 비율이면 먼저 접수된 순.
 
 
@@ -61,6 +62,7 @@ SELECT
     received_at + make_interval(secs => (sla_resolution_target_h + wait_hours) * 3600)
         AS sla_due_at,
     CAST(round(CAST(ratio AS numeric), 3) AS double precision) AS sla_ratio,
-    COALESCE(ratio >= at_risk_ratio, false) AS at_risk
+    -- 사람 큐 안전 건은 비율이 없어도 경고로 보인다 (services/tickets.py _unruled_row)
+    CASE WHEN ratio IS NULL THEN status = 'HUMAN_QUEUE' ELSE ratio >= at_risk_ratio END AS at_risk
 FROM measured
 ORDER BY ratio DESC NULLS FIRST, received_at, ticket_id;
