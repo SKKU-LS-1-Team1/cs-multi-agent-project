@@ -104,6 +104,33 @@ def test_simple_inquiry_reaches_review_then_approve(run):
     assert done.values["final_reply"] == "draft 1"
 
 
+def test_extracted_field_values_reach_draft_and_checkpoint():
+    received = []
+
+    def extract(inquiry, tables, *, llm=None, category=None):
+        return stubs.extract(inquiry, tables).model_copy(
+            update={"field_values": {"quantity": "10"}}
+        )
+
+    def write(category, extraction, evidence, text, llm, **kwargs):
+        received.append(dict(extraction.field_values))
+        return Draft(text="draft", slots=dict(extraction.field_values), model="stub")
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=stubs.classify,
+        extract=extract,
+        write_draft=write,
+    )
+    graph = build_ticket_graph(deps)
+    config = {"configurable": {"thread_id": "field-values"}}
+    graph.invoke({"ticket_id": "field-values", "inquiry": SPEC_QUESTION}, config)
+    state = graph.get_state(config)
+    assert received == [{"quantity": "10"}]
+    assert state.values["extraction"].field_values == {"quantity": "10"}
+    assert state.values["draft"].slots["quantity"] == "10"
+
+
 def test_checkpoint_restores_our_models_without_warnings(run):
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # 등록 안 된 타입이면 역직렬화 경고 → 실패

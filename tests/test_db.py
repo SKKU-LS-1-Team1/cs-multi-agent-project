@@ -1,6 +1,7 @@
 import os
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import inspect, select, text
 
 from cs_agent.agents.case_memory import build_case
@@ -83,6 +84,73 @@ def db():
     command.upgrade(config, "head")
     yield get_engine(TEST_DATABASE_URL), get_sessionmaker(TEST_DATABASE_URL)
     command.downgrade(config, "base")
+
+
+@needs_db
+def test_field_values_migration_preserves_existing_rows():
+    from alembic import command
+
+    from cs_agent.db.session import alembic_config, get_engine
+    from cs_agent.services.records import ticket_row
+
+    config = alembic_config(TEST_DATABASE_URL)
+    engine = get_engine(TEST_DATABASE_URL)
+    command.downgrade(config, "base")
+    try:
+        command.upgrade(config, "0001")
+        old_table = sa.Table("tickets", sa.MetaData(), autoload_with=engine)
+        inquiry = InquiryIn(channel="email", body="Existing ticket before migration")
+        row = ticket_row({"inquiry": inquiry})
+        row.pop("field_values")
+        with engine.begin() as conn:
+            conn.execute(
+                old_table.insert().values(ticket_id="T-OLD", **row, customer_wait_hours=0.0)
+            )
+        command.upgrade(config, "head")
+        with engine.begin() as conn:
+            stored = conn.execute(
+                select(Ticket.body, Ticket.field_values).where(Ticket.ticket_id == "T-OLD")
+            ).one()
+            assert stored.body == inquiry.body
+            assert stored.field_values == {}
+            # 업그레이드 전 코드처럼 새 열을 생략한 INSERT도 서버 기본값으로 동작한다.
+            conn.execute(
+                old_table.insert().values(ticket_id="T-NEW", **row, customer_wait_hours=0.0)
+            )
+            assert (
+                conn.execute(
+                    select(Ticket.field_values).where(Ticket.ticket_id == "T-NEW")
+                ).scalar_one()
+                == {}
+            )
+    finally:
+        command.downgrade(config, "base")
+
+
+@needs_db
+def test_sql_records_keep_and_clear_extracted_values(db):
+    from cs_agent.services.records import SqlRecords
+
+    _, Session = db
+    records = SqlRecords(Session)
+    inquiry = InquiryIn(
+        channel="email", body="Quantity corrected", provided_fields={"quantity": "5"}
+    )
+    records.add_ticket("T-FIELDS", inquiry)
+    records.save_state(
+        "T-FIELDS",
+        {
+            "inquiry": inquiry,
+            "extraction": Extraction(field_values={"quantity": "10", "incoterms": "FOB"}),
+        },
+    )
+    with Session() as session:
+        ticket = session.get(Ticket, "T-FIELDS")
+        assert ticket.field_values == {"quantity": "10", "incoterms": "FOB"}
+        assert ticket.provided_fields == {"quantity": "5"}
+    records.save_state("T-FIELDS", {"inquiry": inquiry, "extraction": Extraction()})
+    with Session() as session:
+        assert session.get(Ticket, "T-FIELDS").field_values == {}
 
 
 @needs_db

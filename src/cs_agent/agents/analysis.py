@@ -764,7 +764,7 @@ class ExtractionDetails(BaseModel):
     issues: list[str] = Field(default_factory=list)
 
     def to_extraction(self) -> Extraction:
-        """기존 공통 출력만 반환한다. 실제 판단/근거/미확인 값은 상세 결과에 보존한다.
+        """공통 출력에 확정 필드값을 전달한다. 근거/미확인 이력은 상세 결과에 보존한다.
 
         기존 그래프는 urgency == SAFETY만 사람 큐로 보낸다. 별도 검토 필드가 없으므로
         안전 검토가 필요한 건의 공통 출력은 SAFETY로 보수적으로 전달한다.
@@ -801,6 +801,7 @@ class ExtractionDetails(BaseModel):
             urgency=Urgency.SAFETY if review_required else self.urgency,
             language=self.language,
             provided_info=list(self.provided_info),
+            field_values=dict(self.fields),
             return_defect=self.return_defect,
         )
 
@@ -1471,6 +1472,7 @@ def extract(
     transcript: Sequence[ChatMessage | Mapping[str, str]] = (),
     settings: Settings | None = None,
     category: Category | None = None,
+    secondary_category: Category | None = None,
     extraction_model: str | None = None,
 ) -> Extraction:
     """스켈레톤의 extract(inquiry, tables) 호출과 기존 공통 Extraction을 유지한다.
@@ -1502,6 +1504,7 @@ def extract(
         transcript=transcript,
         settings=settings,
         category=category,
+        secondary_category=secondary_category,
         extraction_model=extraction_model,
     ).to_extraction()
 
@@ -1516,11 +1519,12 @@ def extract_details(
     transcript: Sequence[ChatMessage | Mapping[str, str]] = (),
     settings: Settings | None = None,
     category: Category | None = None,
+    secondary_category: Category | None = None,
     extraction_model: str | None = None,
 ) -> ExtractionDetails:
     """상세 결과: llm은 Jev 판단, 추출 모델은 Settings.gemini_model_fast(.env) 사용.
 
-    requested_fields=None이면 category/제품군 기준 자동 조회, []이면 추가 요청 없음.
+    requested_fields=None이면 주·보조 category/제품군 기준 자동 조회, []이면 추가 요청 없음.
     transcript는 과거 발언, inquiry.body는 최신 발언이다. 대화 시 폼 값은 이전 상태로 취급한다.
     모델을 주입하지 않으면 실제 호출하지 않으며 미판단/미연결을 issues에 기록한다.
     대화 상태 저장/폼 갱신은 호출자 책임이고 이 함수는 입력을 수정하지 않는다.
@@ -1643,7 +1647,12 @@ def extract_details(
     def auto_required_fields() -> list[str]:
         code = result.fields.get("product_model")
         family = products[code].family if code in products else None
-        return required_info(family, effective_category, tables)[0] if effective_category else []
+        categories = [c for c in (effective_category, secondary_category) if c is not None]
+        return list(
+            dict.fromkeys(
+                field for c in categories for field in required_info(family, c, tables)[0]
+            )
+        )
 
     # 대화에서 폼 값도 재평가한다. 철회·충돌 후보를 확정값과 구분해서 보존한다.
     if requested_fields is None:

@@ -31,6 +31,7 @@ class TicketState(TypedDict, total=False):
     route: str | None  # ⑥ 분기: human | info_request | draft (domain.Route), 분석 대기면 None
     evidence: list[Evidence]  # ⑧ 근거 확정, CSA-28
     draft: Draft | None  # ⑨ 답변 작성, CSA-29·30
+    drafting_error: str | None  # ⑨ 입력 부족·호출/출력 오류 → 기존 보류·검토 흐름
     checks: list[CheckResult]  # ⑩ 자동 점검, CSA-31
     retries: int  # 자동 점검 재작성 횟수, 최대 2
     fix_notes: list[str]  # ⑩ 실패 사유 → ⑨ 재작성에 넘김

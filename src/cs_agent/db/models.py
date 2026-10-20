@@ -85,6 +85,7 @@ class Ticket(Base):
     urgency_flag: Mapped[str | None] = mapped_column(String(16))
     return_defect: Mapped[bool | None] = mapped_column(Boolean)
     provided_info: Mapped[list] = mapped_column(JSONB, default=list)
+    field_values: Mapped[dict[str, str]] = mapped_column(JSONB, default=dict, server_default="{}")
     analysis_error: Mapped[str | None] = mapped_column(String(64))  # 분석 대기 사유
     # ⑤ 규칙 (RuleResult) — rule_id 를 같이 남겨 판단 근거를 추적한다 (N-04)
     priority: Mapped[str | None] = mapped_column(String(4))

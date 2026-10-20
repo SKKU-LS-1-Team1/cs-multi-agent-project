@@ -1,10 +1,11 @@
+import csv
 import shutil
 from pathlib import Path
 
 import pytest
 
 from cs_agent.config import get_settings
-from cs_agent.rules.tables import ALL, audit_tickets, load_tables
+from cs_agent.rules.tables import ALL, Product, audit_tickets, load_tables
 
 
 def test_load_tables_reads_reference_files() -> None:
@@ -34,6 +35,28 @@ def test_every_product_has_division() -> None:
     assert set(tables.family_divisions) == {p.family for p in tables.products.values()}
     assert all(product.division for product in tables.products.values())
     assert tables.products["INV-LSLV0075-S100"].division == "AUTOMATION"
+
+
+def test_products_preserve_drafting_reference_values():
+    tables = load_tables()
+    with (get_settings().ref_dir / "product_master.csv").open(
+        encoding="utf-8-sig", newline=""
+    ) as f:
+        rows = list(csv.DictReader(f))
+    for row in rows:
+        product = tables.products[row["product_code"]]
+        for key in ("list_price_usd", "std_lead_time_weeks", "moq", "standards", "certifications"):
+            assert getattr(product, key) == row[key].strip()
+        assert product.doc_ids == tuple(filter(None, row["doc_ids"].split(";")))
+    product = tables.products["MCCB-ABS-103c"]
+    assert (product.list_price_usd, product.std_lead_time_weeks, product.moq) == ("85", "4", "10")
+    assert "(-U variant)" in tables.products["MCCB-ABS-403c"].certifications
+
+
+def test_old_product_constructor_keeps_missing_values_unconfirmed():
+    product = Product("TEST", "Test product", "DRIVE", "AUTOMATION")
+    assert product.list_price_usd == product.std_lead_time_weeks == product.moq == ""
+    assert product.doc_ids == ()
 
 
 def _ticket(**overrides: str) -> dict[str, str]:

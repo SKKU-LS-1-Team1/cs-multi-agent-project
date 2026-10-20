@@ -41,8 +41,9 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from cs_agent import domain, schemas
-from cs_agent.agents import analysis, retrieval
+from cs_agent.agents import analysis, drafting, retrieval
 from cs_agent.agents.analysis import AnalysisError
+from cs_agent.agents.drafting import DraftingError
 from cs_agent.config import get_settings
 from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
 from cs_agent.graph import defaults
@@ -50,7 +51,7 @@ from cs_agent.graph.state import TicketState
 from cs_agent.llm.router import LLMRouter
 from cs_agent.rules.engine import apply_rules
 from cs_agent.rules.tables import RefTables, load_tables
-from cs_agent.schemas import ReviewIn
+from cs_agent.schemas import CheckResult, ReviewIn
 
 
 @dataclass
@@ -65,7 +66,7 @@ class GraphDeps:
     extract: Callable = analysis.extract
     first_pass: Callable = retrieval.first_pass
     finalize_evidence: Callable = retrieval.finalize_evidence
-    write_draft: Callable = defaults.write_draft  # TODO(CSA-29): agents.drafting.write_draft
+    write_draft: Callable = drafting.write_draft
     verify: Callable = defaults.verify  # TODO(CSA-31): agents.verification.verify
     write_info_request: Callable = defaults.write_info_request  # TODO(CSA-27)
 
@@ -127,6 +128,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "extraction": None,
             "analysis_error": None,
             "draft": None,
+            "drafting_error": None,
             "info_request": None,
             "checks": [],
             "evidence": [],
@@ -144,12 +146,16 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     def extract(state: TicketState) -> dict:
         # 분류가 실패해도 추출은 돈다: 안전 신호는 유형 없이도 사람 큐로 보내야 한다
         classification = state.get("classification")
+        options = {}
+        if deps.extract is analysis.extract and classification:
+            options["secondary_category"] = classification.secondary_category
         try:
             result = deps.extract(
                 state["inquiry"],
                 deps.tables,
                 llm=deps.llm,
                 category=classification.category if classification else None,
+                **options,
             )
         except AnalysisError as e:
             return {"analysis_error": state.get("analysis_error") or str(e)}
@@ -203,24 +209,59 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     def draft(state: TicketState) -> dict:
         review = _review(state)
         feedback = review.feedback if review and review.action == ReviewAction.REWRITE else None
-        result = deps.write_draft(
-            state["classification"].category,
-            state["extraction"],
-            state.get("evidence", []),
-            _inquiry_text(state),
-            deps.llm,
-            fix_notes=state.get("fix_notes") or None,
-            reviewer_feedback=feedback,
-        )
+        options = {"fix_notes": state.get("fix_notes") or None, "reviewer_feedback": feedback}
+        evidence = state.get("evidence", [])
+        if deps.write_draft is drafting.write_draft:
+            # 주입한 기존 호출 대역의 규격은 유지하고 실제 작성기에 조회 문맥을 전달한다.
+            options.update(
+                tables=deps.tables, secondary_category=state["classification"].secondary_category
+            )
+            evidence = drafting.prepare_evidence(
+                state["classification"].category,
+                state["extraction"],
+                evidence,
+                secondary_category=state["classification"].secondary_category,
+                tables=deps.tables,
+                raw_dir=deps.llm.settings.raw_data_dir,
+            )
+        try:
+            result = deps.write_draft(
+                state["classification"].category,
+                state["extraction"],
+                evidence,
+                _inquiry_text(state),
+                deps.llm,
+                **options,
+            )
+        except DraftingError as error:
+            return {
+                "draft": None,
+                "pending": "draft",
+                "drafting_error": str(error),
+                "evidence": evidence,
+            }
         # 점검 실패 사유(fix_notes)를 받아 다시 쓰는 경우만 재시도로 센다
         retries = state.get("retries", 0) + (1 if state.get("fix_notes") else 0)
-        return {"draft": result, "pending": "draft", "retries": retries}
+        return {
+            "draft": result,
+            "pending": "draft",
+            "retries": retries,
+            "drafting_error": None,
+            "evidence": evidence,
+        }
 
     def verify(state: TicketState) -> dict:
+        if error := state.get("drafting_error"):
+            return {
+                "checks": [CheckResult(name="draft_input_or_output", passed=False, reason=error)],
+                "fix_notes": [error],
+            }
         checks = deps.verify(
             state["draft"],
             state["classification"].category,
-            (),  # TODO(CSA-29): drafting.TEMPLATES[category].required_slots
+            drafting.required_slots(
+                state["classification"].category, state["classification"].secondary_category
+            ),
             _inquiry_text(state),
             _language(state),
             state.get("evidence", []),
@@ -229,6 +270,8 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         return {"checks": checks, "fix_notes": [c.reason or c.name for c in checks if not c.passed]}
 
     def after_verify(state: TicketState) -> str:
+        if state.get("drafting_error"):
+            return "hold"  # 원천값 누락·호출 장애는 모델 재작성으로 사실을 만들어 채우지 않는다.
         if not state.get("fix_notes"):
             return "ready"
         return "draft" if state.get("retries", 0) < deps.max_retries else "hold"
@@ -251,7 +294,13 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         return {"review": ReviewIn.model_validate(value)}
 
     def after_review(state: TicketState) -> str:
-        action = state["review"].action
+        review = state["review"]
+        action = review.action
+        if state.get("pending") == "draft" and not state.get("draft"):
+            if action == ReviewAction.APPROVE or (
+                action == ReviewAction.EDIT_APPROVE and not (review.edited_text or "").strip()
+            ):
+                return "hold"
         return {
             ReviewAction.REWRITE: "rewrite",
             ReviewAction.INFO_REQUEST: "info_request",
@@ -333,7 +382,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     g.add_edge("ready", "review")
     g.add_edge("hold", "review")
     g.add_conditional_edges(
-        "review", after_review, ["rewrite", "info_request", "escalate", "finish"]
+        "review", after_review, ["rewrite", "info_request", "escalate", "finish", "hold"]
     )
     g.add_edge("rewrite", "draft")
     g.add_edge("finish", END)

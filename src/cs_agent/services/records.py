@@ -79,6 +79,7 @@ def ticket_row(values: dict) -> dict:
         "urgency_flag": extraction.get("urgency"),
         "return_defect": extraction.get("return_defect"),
         "provided_info": extraction.get("provided_info") or [],
+        "field_values": dict(extraction.get("field_values") or {}),
         "analysis_error": values.get("analysis_error"),
         "priority": rules.get("priority"),
         "priority_rule_id": rules.get("priority_rule_id"),
