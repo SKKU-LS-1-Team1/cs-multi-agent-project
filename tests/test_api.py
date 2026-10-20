@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from stubs import ANALYSIS
 
 from cs_agent.config import Settings
 from cs_agent.llm.router import LLMRouter
@@ -20,7 +21,7 @@ INQUIRY = {
 
 @pytest.fixture
 def client():
-    with TestClient(create_app(llm=LLMRouter(Settings(_env_file=None)))) as c:
+    with TestClient(create_app(llm=LLMRouter(Settings(_env_file=None)), agents=ANALYSIS)) as c:
         yield c
 
 

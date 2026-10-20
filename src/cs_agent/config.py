@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # 처리 흐름
     max_verify_retries: int = 2  # 자동 점검 재작성 최대 (S-06)
     sla_at_risk_ratio: float = 0.75  # SLA 경고 기준 (CSA-40)
+    analysis_retry_interval_s: float = 60.0  # 분석 대기 문의 재시도 간격. 0 이면 자동 재시도 끔
 
 
 @lru_cache
