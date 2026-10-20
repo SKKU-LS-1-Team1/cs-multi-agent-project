@@ -261,3 +261,15 @@ def test_safety_goes_to_human_even_when_classification_fails():
     assert [r["ticket_id"] for r in rows] == [safety.ticket_id, normal.ticket_id]
     assert rows[0]["at_risk"] is True  # 유형·부서·SLA 는 상담원이 정한다
     assert service.retry_pending() == []  # 사람 큐 건은 다시 돌리지 않는다
+
+
+def test_escalated_ticket_moves_to_receiving_dept_in_work_list():
+    service = _service(Calls())
+    ticket = service.submit(SPEC_QUESTION)
+    original = service.work_list()[0]["assigned_dept"]
+
+    service.act(ticket.ticket_id, ReviewIn(action=ReviewAction.ESCALATE, escalate_to="FIELD_SVC"))
+
+    assert [r["assigned_dept"] for r in service.work_list()] == ["FIELD_SVC"]
+    assert [r["ticket_id"] for r in service.work_list(dept="FIELD_SVC")] == [ticket.ticket_id]
+    assert service.work_list(dept=original) == []

@@ -144,7 +144,9 @@ class TicketService:
                 if v.get("status") == TicketStatus.HUMAN_QUEUE and not dept:
                     rows.append(_unruled_row(ticket_id, v))
                 continue
-            if dept and rules.assigned_dept != dept:
+            # 이관됐으면 이관 부서 목록에 보인다 (db/sql/work_list.sql 과 같다)
+            assigned_dept = v.get("escalated_to") or rules.assigned_dept
+            if dept and assigned_dept != dept:
                 continue
             # TODO(CSA-40): WAITING_CUSTOMER 동안 멈춘 시간(customer_wait_hours)을 빼기 (DB 필요)
             elapsed = elapsed_hours(v["inquiry"].received_at, now)
@@ -154,7 +156,7 @@ class TicketService:
                     "status": v["status"],
                     "category": v["classification"].category,
                     "priority": rules.priority,
-                    "assigned_dept": rules.assigned_dept,
+                    "assigned_dept": assigned_dept,
                     "sla_due_at": due_at(v["inquiry"].received_at, rules.sla_resolution_h),
                     "sla_ratio": round(elapsed / rules.sla_resolution_h, 3),
                     "at_risk": is_at_risk(elapsed, rules.sla_resolution_h),
