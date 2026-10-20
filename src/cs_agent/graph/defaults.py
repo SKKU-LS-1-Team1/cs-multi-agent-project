@@ -6,25 +6,12 @@
 #
 # | 자리 | 임시 동작 | 실제 구현 |
 # |---|---|---|
-# | first_pass / finalize_evidence | 근거 없음 | agents/retrieval.py (CSA-28) |
 # | write_draft | llm.write("draft") 한 번 | agents/drafting.py (CSA-29·30) |
 # | verify | 빈 답변만 실패 | agents/verification.py (CSA-31) |
 # | write_info_request | llm.write("info_request") 한 번 | agents/info_request.py (CSA-27) |
-from typing import Any
-
 from cs_agent.domain import Category
 from cs_agent.llm.router import LLMRouter
 from cs_agent.schemas import CheckResult, Draft, Evidence, Extraction
-
-
-def first_pass(docs: Any, cases: Any, text: str, k: int = 8) -> list[Evidence]:
-    return []
-
-
-def finalize_evidence(
-    candidates: list[Evidence], extraction: Extraction, k: int = 3
-) -> list[Evidence]:
-    return candidates[:k]
 
 
 def write_draft(
