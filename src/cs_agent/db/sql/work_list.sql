@@ -9,8 +9,11 @@
 -- 부르는 법: db/queries.py  run(conn, "work_list", "work_list", dept=None, now=None)
 -- 파라미터 (모두 NULL 가능): :dept, :now(NULL 이면 now()), :at_risk_ratio(NULL 이면 0.75)
 --
--- 정해 둔 것 (services/tickets.py work_list 와 같은 결과가 나오게)
+-- 정해 둔 것 (services/tickets.py work_list 를 CSA-40 에서 이 SQL 로 바꾼다. 그 전까지 Python 쪽은
+-- 고객 대기 시간을 빼지 않아 대기했던 티켓의 sla_ratio·sla_due_at 이 여기와 다르다)
 -- - 닫힌 상태 = APPROVED · REJECTED · RESOLVED (services/tickets.py CLOSED).
+-- - 부서 = 이관됐으면 이관 부서(escalated_to), 아니면 assigned_dept. 부서 필터·assigned_dept 열 모두
+--   이 값이다 (이관된 건은 받은 부서 목록에 보여야 한다).
 -- - 고객 대기 = customer_wait_hours(끝난 대기 누적) + WAITING_CUSTOMER 인 동안 지금 − waiting_since.
 --   대기 중에는 SLA 시계가 멈추므로 비율이 커지지 않고, 마감(sla_due_at)은 대기만큼 뒤로 간다
 --   (rules/sla.py due_at·elapsed_hours 와 같은 식).
@@ -29,6 +32,7 @@ WITH params AS (
 open_tickets AS (
     SELECT
         t.*,
+        COALESCE(t.escalated_to, t.assigned_dept) AS dept,
         p.as_of,
         p.at_risk_ratio,
         t.customer_wait_hours
@@ -44,7 +48,10 @@ open_tickets AS (
             (t.sla_resolution_target_h IS NOT NULL AND t.assigned_dept IS NOT NULL)
             OR (t.status = 'HUMAN_QUEUE' AND t.assigned_dept IS NULL)
         )
-        AND (CAST(:dept AS text) IS NULL OR t.assigned_dept = CAST(:dept AS text))
+        AND (
+            CAST(:dept AS text) IS NULL
+            OR COALESCE(t.escalated_to, t.assigned_dept) = CAST(:dept AS text)
+        )
 ),
 measured AS (
     SELECT
@@ -57,7 +64,7 @@ SELECT
     ticket_id,
     category,
     priority,
-    assigned_dept,
+    dept AS assigned_dept,
     status,
     received_at + make_interval(secs => (sla_resolution_target_h + wait_hours) * 3600)
         AS sla_due_at,

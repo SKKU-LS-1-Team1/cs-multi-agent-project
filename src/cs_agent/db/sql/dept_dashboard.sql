@@ -11,11 +11,18 @@
 --   :now            기준 시각. NULL 이면 now() (테스트에서 고정할 때 넣는다)
 --   :at_risk_ratio  경고 기준. NULL 이면 0.75 (settings.sla_at_risk_ratio)
 --   :since          이 시각 이후 검토만 (review_outcomes_weekly, feedback_reasons). NULL 이면 전체
+--   :tz             주 경계 시간대 (review_outcomes_weekly). NULL 이면 'Asia/Seoul' — 한국 시간 월요일
+--                   0시부터 한 주다 (UTC 로 자르면 월요일 9시 전 건이 전주로 간다)
+--
+-- 부서 = 이관됐으면 이관 부서(escalated_to), 아니면 assigned_dept (work_list.sql 과 같다).
+-- 이관된 건의 진행·검토는 받은 부서 몫으로 센다.
 --
 -- SLA 경과 비율은 work_list.sql 과 같은 계산이다:
 --   (지금 − 접수 − 고객 대기) / 해결 목표 시간. 고객 대기 = customer_wait_hours(끝난 대기 누적)
 --   + WAITING_CUSTOMER 인 동안의 지금 − waiting_since (SLA 정지, rules/sla.py).
 -- 경고 = 0.75 ≤ 비율 < 1, 위반 = 비율 ≥ 1 (경고 건수에 위반 건은 넣지 않는다).
+-- 분류 없이 사람 큐로 간 안전 건(HUMAN_QUEUE · 부서 없음)은 부서 필터가 없을 때 부서 NULL(미배정)
+-- 행으로 맨 위에 나오고, 경고로 센다 (work_list.sql at_risk 와 같다).
 
 
 -- name: dept_status
@@ -27,7 +34,8 @@ WITH params AS (
 ),
 open_tickets AS (
     SELECT
-        t.assigned_dept,
+        COALESCE(t.escalated_to, t.assigned_dept) AS assigned_dept,
+        t.status,
         p.at_risk_ratio,
         GREATEST(
             EXTRACT(EPOCH FROM (p.as_of - t.received_at)) / 3600.0
@@ -42,17 +50,23 @@ open_tickets AS (
     FROM tickets AS t
     CROSS JOIN params AS p
     WHERE t.status NOT IN ('APPROVED', 'REJECTED', 'RESOLVED')
-        AND t.assigned_dept IS NOT NULL
-        AND (CAST(:dept AS text) IS NULL OR t.assigned_dept = CAST(:dept AS text))
+        AND (t.assigned_dept IS NOT NULL OR t.status = 'HUMAN_QUEUE')
+        AND (
+            CAST(:dept AS text) IS NULL
+            OR COALESCE(t.escalated_to, t.assigned_dept) = CAST(:dept AS text)
+        )
 )
 SELECT
     assigned_dept,
     count(*) AS open_count,
-    count(*) FILTER (WHERE sla_ratio >= at_risk_ratio AND sla_ratio < 1) AS at_risk_count,
+    count(*) FILTER (
+        WHERE (sla_ratio >= at_risk_ratio AND sla_ratio < 1)
+            OR (sla_ratio IS NULL AND status = 'HUMAN_QUEUE')
+    ) AS at_risk_count,
     count(*) FILTER (WHERE sla_ratio >= 1) AS breached_count
 FROM open_tickets
 GROUP BY assigned_dept
-ORDER BY breached_count DESC, at_risk_count DESC, assigned_dept;
+ORDER BY assigned_dept IS NULL DESC, breached_count DESC, at_risk_count DESC, assigned_dept;
 
 
 -- name: review_outcomes_weekly
@@ -60,8 +74,11 @@ ORDER BY breached_count DESC, at_risk_count DESC, assigned_dept;
 --    재작성·추가정보 요청·이관은 결정이 아니라 다음 버튼을 기다리므로 분모에서 뺀다.
 --    한 티켓이 다시 열려 두 번 결정되면 두 번 센다 (결정 이벤트 기준).
 SELECT
-    CAST(date_trunc('week', r.created_at AT TIME ZONE 'UTC') AS date) AS week,
-    t.assigned_dept,
+    CAST(
+        date_trunc('week', r.created_at AT TIME ZONE COALESCE(CAST(:tz AS text), 'Asia/Seoul'))
+        AS date
+    ) AS week,
+    COALESCE(t.escalated_to, t.assigned_dept) AS assigned_dept,
     t.category,
     count(*) AS decided,
     count(*) FILTER (WHERE r.action = 'approve') AS approved,
@@ -76,10 +93,13 @@ SELECT
 FROM reviews AS r
 JOIN tickets AS t ON t.ticket_id = r.ticket_id
 WHERE r.action IN ('approve', 'edit_approve', 'reject')
-    AND (CAST(:dept AS text) IS NULL OR t.assigned_dept = CAST(:dept AS text))
+    AND (
+        CAST(:dept AS text) IS NULL
+        OR COALESCE(t.escalated_to, t.assigned_dept) = CAST(:dept AS text)
+    )
     AND (CAST(:since AS timestamptz) IS NULL OR r.created_at >= CAST(:since AS timestamptz))
-GROUP BY 1, t.assigned_dept, t.category
-ORDER BY week DESC, t.assigned_dept, t.category;
+GROUP BY 1, 2, t.category
+ORDER BY week DESC, assigned_dept, t.category;
 
 
 -- name: feedback_reasons
@@ -95,7 +115,10 @@ counted AS (
     JOIN tickets AS t ON t.ticket_id = r.ticket_id
     WHERE r.feedback_reason IS NOT NULL
         AND r.action IN ('edit_approve', 'reject')
-        AND (CAST(:dept AS text) IS NULL OR t.assigned_dept = CAST(:dept AS text))
+        AND (
+            CAST(:dept AS text) IS NULL
+            OR COALESCE(t.escalated_to, t.assigned_dept) = CAST(:dept AS text)
+        )
         AND (CAST(:since AS timestamptz) IS NULL OR r.created_at >= CAST(:since AS timestamptz))
     GROUP BY r.feedback_reason
 )

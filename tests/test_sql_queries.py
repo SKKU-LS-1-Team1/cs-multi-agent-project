@@ -36,6 +36,7 @@ def test_sql_files_split_into_named_queries() -> None:
         load_queries("eval_join")
     )
     assert params_of("work_list", "work_list") == {"dept", "now", "at_risk_ratio"}
+    assert params_of("dept_dashboard", "review_outcomes_weekly") == {"dept", "since", "tz"}
     assert "-- name" not in load_queries("work_list")["work_list"]
     with pytest.raises(KeyError):
         query("work_list", "nope")
@@ -167,10 +168,19 @@ def test_work_list_orders_by_sla_ratio_and_pauses_while_waiting(conn) -> None:
     )
     _ticket(conn, "T-DONE", 500, status="RESOLVED")
     _ticket(conn, "T-NEW", 1, status="NEW", sla_resolution_target_h=None)  # 규칙 전
+    # TS_LV 에서 현장서비스로 이관 → 받은 부서 목록에 보인다 (0.30)
+    _ticket(conn, "T-ESC", 30, status="ESCALATED", escalated_to="FIELD_SVC")
 
     rows = run(conn, "work_list", "work_list", now=NOW)
 
-    assert [r["ticket_id"] for r in rows] == ["T-SAFETY", "T-OTHER", "T-RISK", "T-WAIT", "T-LOW"]
+    assert [r["ticket_id"] for r in rows] == [
+        "T-SAFETY",
+        "T-OTHER",
+        "T-RISK",
+        "T-ESC",
+        "T-WAIT",
+        "T-LOW",
+    ]
     by_id = {r["ticket_id"]: r for r in rows}
     assert by_id["T-RISK"]["sla_ratio"] == 0.8 and by_id["T-RISK"]["at_risk"] is True
     assert by_id["T-WAIT"]["sla_ratio"] == 0.2 and by_id["T-WAIT"]["at_risk"] is False
@@ -180,6 +190,8 @@ def test_work_list_orders_by_sla_ratio_and_pauses_while_waiting(conn) -> None:
 
     only_lv = run(conn, "work_list", "work_list", now=NOW, dept="TS_LV")
     assert [r["ticket_id"] for r in only_lv] == ["T-RISK", "T-WAIT", "T-LOW"]
+    only_field = run(conn, "work_list", "work_list", now=NOW, dept="FIELD_SVC")
+    assert [(r["ticket_id"], r["assigned_dept"]) for r in only_field] == [("T-ESC", "FIELD_SVC")]
 
 
 @needs_db
@@ -188,6 +200,18 @@ def test_dept_dashboard(conn) -> None:
     _ticket(conn, "T-2", 80)  # 경고
     _ticket(conn, "T-3", 120)  # 위반
     _ticket(conn, "T-4", 10, assigned_dept="TS_MV", category="DEFECT")
+    # TS_LV 에서 TS_MV 로 이관 → TS_MV 몫
+    _ticket(conn, "T-5", 10, category="DEFECT", status="ESCALATED", escalated_to="TS_MV")
+    _ticket(  # 분류 없이 사람 큐로 간 안전 건 → 미배정 행, 경고
+        conn,
+        "T-SAFE",
+        1,
+        status="HUMAN_QUEUE",
+        category=None,
+        assigned_dept=None,
+        priority=None,
+        sla_resolution_target_h=None,
+    )
     for ticket_id, action, reason in [
         ("T-1", "approve", None),
         ("T-2", "rewrite", "TONE"),  # 결정 아님
@@ -197,17 +221,42 @@ def test_dept_dashboard(conn) -> None:
     ]:
         _review(conn, ticket_id, action, reason)
     _review(conn, "T-1", "approve", days_ago=30)  # 지난달 (since 로 거른다)
+    # 한국 시간 월요일(10/19) 0시 30분 = UTC 일요일 15시 30분 → 한국 기준 주(10/19)에 든다
+    monday_kst = datetime(2026, 10, 18, 15, 30, tzinfo=UTC)
+    conn.execute(
+        sa.text(
+            "INSERT INTO reviews (ticket_id, action, reviewer, info_items, created_at) "
+            "VALUES ('T-5', 'approve', 'r', '[]', :c)"
+        ),
+        {"c": monday_kst},
+    )
 
     status = run(conn, "dept_dashboard", "dept_status", now=NOW)
     assert status == [
+        {"assigned_dept": None, "open_count": 1, "at_risk_count": 1, "breached_count": 0},
         {"assigned_dept": "TS_LV", "open_count": 3, "at_risk_count": 1, "breached_count": 1},
-        {"assigned_dept": "TS_MV", "open_count": 1, "at_risk_count": 0, "breached_count": 0},
+        {"assigned_dept": "TS_MV", "open_count": 2, "at_risk_count": 0, "breached_count": 0},
     ]
+    only_mv = run(conn, "dept_dashboard", "dept_status", now=NOW, dept="TS_MV")
+    assert [r["assigned_dept"] for r in only_mv] == ["TS_MV"]  # 미배정 행은 전체 볼 때만
 
     weekly = run(conn, "dept_dashboard", "review_outcomes_weekly", since=NOW - timedelta(days=7))
     lv = next(r for r in weekly if r["assigned_dept"] == "TS_LV")
     assert (lv["decided"], lv["approved"], lv["edit_approved"], lv["rejected"]) == (3, 1, 1, 1)
     assert lv["approve_rate"] == 0.333 and lv["category"] == "TECH_SPEC"
+    week = datetime(2026, 10, 19).date()
+    assert [(r["week"], r["decided"]) for r in weekly if r["assigned_dept"] == "TS_MV"] == [
+        (week, 2)  # T-4 수정 후 승인 + 이관된 T-5 승인(월요일 새벽)
+    ]
+    utc_weeks = run(
+        conn,
+        "dept_dashboard",
+        "review_outcomes_weekly",
+        dept="TS_MV",
+        tz="UTC",
+        since=NOW - timedelta(days=7),
+    )
+    assert [r["week"] for r in utc_weeks] == [week, datetime(2026, 10, 12).date()]
 
     reasons = run(conn, "dept_dashboard", "feedback_reasons", since=NOW - timedelta(days=7))
     # 재작성(rewrite)에 붙은 TONE 은 결정이 아니라 빠진다
