@@ -9,7 +9,7 @@
 #   app.state.sessionmaker(db/session.py, DB 없으면 None). 꺼내 쓰는 쪽은 api/deps.py.
 # - 저장소 (storage="auto"): 시작할 때 DB·Redis 에 붙어 본다.
 #   - DB 가 붙고 스키마가 최신(alembic head)이면 PostgresSaver 체크포인트 + SqlRecords 로 기록한다.
-#   - Redis 가 붙으면 챗봇 대화를 Redis 에 둔다.
+#   - Redis 가 붙으면 챗봇 대화와 LLM 캐시·호출 횟수(live 일 때, cache/store.py)를 Redis 에 둔다.
 #   - 안 붙으면 APP_ENV=local 은 경고 후 메모리로 돈다 (서버를 다시 켜면 사라짐), prod 는 멈춘다.
 # - GET /api/health → {"status": "ok", "version": ...}
 # - 라우터는 모두 prefix "/api". Nginx(infra/nginx/nginx.conf)가 /api 요청을 이 앱으로 넘긴다.
@@ -27,7 +27,7 @@ from fastapi import FastAPI
 from cs_agent import __version__
 from cs_agent.agents.retrieval import default_retrievers
 from cs_agent.api import chat, dashboard, products, tickets
-from cs_agent.cache.store import ChatSessionStore, connect_redis
+from cs_agent.cache.store import ChatSessionStore, MemoryKV, connect_redis
 from cs_agent.config import Settings, get_settings
 from cs_agent.graph.builder import GraphDeps, build_ticket_graph, postgres_checkpointer
 from cs_agent.llm import tracing
@@ -120,6 +120,9 @@ def create_app(
                 except Exception as e:
                     _unavailable(settings, "Redis", e)
             app.state.chat_sessions = ChatSessionStore(redis_client)
+            # LLM 같은 요청 캐시·분당 호출 제한 (CSA-45). 테스트가 넘긴 라우터는 건드리지 않는다
+            if llm is None and app.state.llm.enabled:
+                app.state.llm.kv = redis_client if redis_client is not None else MemoryKV()
 
             deps = GraphDeps(
                 llm=app.state.llm,

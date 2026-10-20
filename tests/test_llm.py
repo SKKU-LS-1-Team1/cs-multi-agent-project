@@ -4,10 +4,11 @@ from contextlib import contextmanager
 import httpx
 import pytest
 
+from cs_agent.cache.store import MemoryKV
 from cs_agent.config import Settings
 from cs_agent.llm import tracing
 from cs_agent.llm.clients import Completion, JevClient, Judgement, parse_judgement
-from cs_agent.llm.router import LLMRouter
+from cs_agent.llm.router import LLMRouter, RateLimited
 
 OPTIONS = ["DEFECT", "RETURN", "QUOTE"]
 
@@ -27,7 +28,11 @@ class StubJudge:
 class StubWriter:
     name = "gemini-writer"
 
+    def __init__(self):
+        self.calls = 0
+
     def write(self, prompt):
+        self.calls += 1
         return Completion(f"답변: {prompt}", self.name, {"input": 5, "output": 7})
 
 
@@ -97,6 +102,95 @@ def test_write_uses_writer():
 
 
 # --- clients ------------------------------------------------------------------------------
+
+
+# --- 캐시·호출 제한 (CSA-45) -------------------------------------------------------------
+
+
+class FakeTime:
+    def __init__(self, now=0.0):
+        self.now = now
+        self.slept = []
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def test_cache_reuses_judge_and_write_results():
+    jev, writer = StubJudge("jev"), StubWriter()
+    router = LLMRouter(settings(), jev=jev, writer=writer, kv=MemoryKV())
+
+    first = router.judge("classify", "p", OPTIONS)
+    again = router.judge("classify", "p", OPTIONS)
+    router.judge("classify", "p", ["RETURN", "QUOTE"])  # 보기가 다르면 새로
+    router.judge("detect_language", "p", OPTIONS)  # 단계가 다르면 새로
+
+    assert again == first and jev.calls == 3
+    assert router.write("draft", "q") == router.write("draft", "q") and writer.calls == 1
+
+
+def test_no_cache_without_kv_or_when_ttl_zero():
+    jev = StubJudge("jev")
+    LLMRouter(settings(), jev=jev).judge("classify", "p", OPTIONS)
+    router = LLMRouter(settings(llm_cache_ttl_s=0), jev=jev, kv=MemoryKV())
+    router.judge("classify", "p", OPTIONS)
+    router.judge("classify", "p", OPTIONS)
+    assert jev.calls == 3
+
+
+def test_cache_errors_do_not_block_calls():
+    class BrokenKV:
+        def _down(self, *args, **kwargs):
+            raise ConnectionError("redis down")
+
+        get = set = incr = expire = _down
+
+    jev = StubJudge("jev")
+    router = LLMRouter(settings(jev_rpm=1), jev=jev, kv=BrokenKV())
+    assert router.judge("classify", "p", OPTIONS).answer == "RETURN"
+    assert router.judge("classify", "p", OPTIONS).answer == "RETURN"
+    assert jev.calls == 2
+
+
+def test_rate_limit_waits_for_next_window():
+    t = FakeTime(now=50.0)
+    writer = StubWriter()
+    router = LLMRouter(
+        settings(gemini_rpm=1, llm_rate_wait_s=20, llm_cache_ttl_s=0),
+        writer=writer,
+        kv=MemoryKV(),
+        clock=t.clock,
+        sleep=t.sleep,
+    )
+
+    router.write("draft", "a")
+    router.write("draft", "b")  # 이번 창은 다 썼다 → 10초 기다려 다음 창
+
+    assert t.slept == [10.0] and writer.calls == 2
+
+
+def test_rate_limit_fails_when_wait_too_long_and_jev_falls_back():
+    t = FakeTime(now=0.0)
+    jev, gemini = StubJudge("jev"), StubJudge("gemini")
+    router = LLMRouter(
+        settings(jev_rpm=1, gemini_rpm=1, llm_rate_wait_s=20, llm_cache_ttl_s=0),
+        jev=jev,
+        gemini_judge=gemini,
+        kv=MemoryKV(),
+        clock=t.clock,
+        sleep=t.sleep,
+    )
+
+    assert router.judge("classify", "a", OPTIONS).model == "jev"
+    # Jev 상한 초과(60초 대기 필요) → Gemini 로
+    assert router.judge("classify", "b", OPTIONS).model == "gemini"
+    with pytest.raises(RateLimited):  # Gemini 도 초과 → 실패
+        router.judge("classify", "c", OPTIONS)
+    assert t.slept == [] and (jev.calls, gemini.calls) == (1, 1)
 
 
 @pytest.mark.parametrize(
