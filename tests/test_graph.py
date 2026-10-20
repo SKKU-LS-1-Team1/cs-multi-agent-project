@@ -1,13 +1,18 @@
 import warnings
 
 import pytest
+import stubs
 from langgraph.types import Command
 
+from cs_agent.agents import analysis
+from cs_agent.agents.analysis import AnalysisError
 from cs_agent.config import Settings
 from cs_agent.domain import Category, ReviewAction, Route, TicketStatus
+from cs_agent.graph import defaults
 from cs_agent.graph.builder import GraphDeps, build_ticket_graph
 from cs_agent.llm.router import LLMRouter
 from cs_agent.schemas import CheckResult, Draft, InquiryIn, ReviewIn
+from cs_agent.services.tickets import TicketService
 
 SPEC_QUESTION = InquiryIn(
     channel="email",
@@ -23,10 +28,22 @@ SPEC_QUESTION = InquiryIn(
 class Calls:
     """에이전트 자리에 넣는 기록용 가짜 함수들"""
 
-    def __init__(self, fail_checks: int = 0):
+    def __init__(self, fail_checks: int = 0, analysis_down: int = 0):
         self.fail_checks = fail_checks
+        self.analysis_down = analysis_down  # 앞에서부터 이 횟수만큼 분류 실패 (LLM 장애)
         self.drafts: list[dict] = []
         self.info_requests: list[list[str]] = []
+        self.extract_categories: list = []
+
+    def classify(self, inquiry, llm):
+        if self.analysis_down:
+            self.analysis_down -= 1
+            raise AnalysisError("classification_failed")
+        return stubs.classify(inquiry, llm)
+
+    def extract(self, inquiry, tables, *, llm=None, category=None):
+        self.extract_categories.append(category)
+        return stubs.extract(inquiry, tables, llm=llm, category=category)
 
     def write_draft(self, category, extraction, evidence, text, llm, fix_notes=None,
                     reviewer_feedback=None):  # fmt: skip
@@ -51,6 +68,8 @@ def run():
         deps = GraphDeps(
             llm=LLMRouter(Settings(_env_file=None)),
             max_retries=2,
+            classify=calls.classify,
+            extract=calls.extract,
             write_draft=calls.write_draft,
             verify=calls.verify,
             write_info_request=calls.write_info_request,
@@ -167,3 +186,78 @@ def test_escalate(run):
 
     assert done.values["status"] == TicketStatus.ESCALATED
     assert done.values["escalated_to"] == "FIELD_SVC"
+
+
+# --- 분석 에이전트 연결 (CSA-26) ---------------------------------------------------------
+
+
+def test_graph_uses_analysis_agent_not_placeholders():
+    deps = GraphDeps(llm=LLMRouter(Settings(_env_file=None)))
+
+    assert (deps.classify, deps.extract) == (analysis.classify, analysis.extract)
+    assert not hasattr(defaults, "classify") and not hasattr(defaults, "extract")
+
+
+def test_extract_receives_classified_category(run):
+    _, _, calls = run(SPEC_QUESTION)
+
+    assert calls.extract_categories == [Category.TECH_SPEC]
+
+
+def test_offline_llm_never_fakes_analysis():
+    """LLM 이 꺼져(fake) 있으면 분석 결과를 지어내지 않고 분석 대기로 멈춘다."""
+    graph = build_ticket_graph(GraphDeps(llm=LLMRouter(Settings(_env_file=None))))
+    config = {"configurable": {"thread_id": "T-OFF"}}
+
+    graph.invoke({"ticket_id": "T-OFF", "inquiry": SPEC_QUESTION}, config)
+
+    v = graph.get_state(config).values
+    assert v["status"] == TicketStatus.ANALYSIS_PENDING
+    assert v["analysis_error"]
+    assert (v["classification"], v["rules"], v["route"], v.get("draft")) == (None, None, None, None)
+
+
+def _service(calls: Calls) -> TicketService:
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=calls.classify,
+        extract=calls.extract,
+        write_draft=calls.write_draft,
+        verify=calls.verify,
+        write_info_request=calls.write_info_request,
+    )
+    return TicketService(build_ticket_graph(deps))
+
+
+def test_analysis_outage_waits_then_retry_recovers():
+    calls = Calls(analysis_down=1)
+    service = _service(calls)
+
+    pending = service.submit(SPEC_QUESTION)
+
+    assert pending.status == TicketStatus.ANALYSIS_PENDING
+    assert (pending.category, pending.route, pending.draft) == (None, None, None)
+    assert calls.drafts == []
+    assert service.work_list() == []  # 상담원 목록에는 아직 없다
+
+    assert service.retry_pending() == [pending.ticket_id]
+
+    ticket = service.get(pending.ticket_id)
+    assert ticket.status == TicketStatus.READY_FOR_REVIEW
+    assert ticket.category == Category.TECH_SPEC
+    assert service.retry_pending() == []
+
+
+def test_safety_goes_to_human_even_when_classification_fails():
+    service = _service(Calls(analysis_down=1))
+    smoke = SPEC_QUESTION.model_copy(update={"body": "TRF-OIL-1000 is emitting smoke!"})
+
+    safety = service.submit(smoke)  # 분류 실패
+    normal = service.submit(SPEC_QUESTION)
+
+    assert safety.status == TicketStatus.HUMAN_QUEUE
+    assert (safety.route, safety.category, safety.priority) == (Route.HUMAN, None, None)
+    rows = service.work_list()
+    assert [r["ticket_id"] for r in rows] == [safety.ticket_id, normal.ticket_id]
+    assert rows[0]["at_risk"] is True  # 유형·부서·SLA 는 상담원이 정한다
+    assert service.retry_pending() == []  # 사람 큐 건은 다시 돌리지 않는다

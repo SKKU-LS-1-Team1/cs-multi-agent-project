@@ -6,51 +6,12 @@
 #
 # | 자리 | 임시 동작 | 실제 구현 |
 # |---|---|---|
-# | classify | 고객이 고른 유형, 없으면 llm.judge | agents/analysis.py classify (CSA-26) |
-# | extract | 문의서·본문 속 제품 코드, 안전 키워드 | agents/analysis.py extract (CSA-26) |
 # | write_draft | llm.write("draft") 한 번 | agents/drafting.py (CSA-29·30) |
 # | verify | 빈 답변만 실패 | agents/verification.py (CSA-31) |
 # | write_info_request | llm.write("info_request") 한 번 | agents/info_request.py (CSA-27) |
-import re
-
-from cs_agent.domain import Category, Urgency
+from cs_agent.domain import Category
 from cs_agent.llm.router import LLMRouter
-from cs_agent.rules.engine import UNKNOWN_PRODUCT_FIELD
-from cs_agent.rules.tables import RefTables
-from cs_agent.schemas import CheckResult, Classification, Draft, Evidence, Extraction, InquiryIn
-
-_SAFETY = re.compile(
-    r"(?i)\b(smoke|fire|burn(?:ing|t)?|spark(?:s|ing)?|electric shock)\b|연기|화재|감전"
-)
-
-
-def classify(inquiry: InquiryIn, llm: LLMRouter) -> Classification:
-    if inquiry.category:
-        return Classification(category=inquiry.category, confidence=1.0, model="customer")
-    result = llm.judge(
-        "classify", f"{inquiry.subject}\n{inquiry.body}", [c.value for c in Category]
-    )
-    return Classification(
-        category=Category(result.answer), confidence=result.confidence, model=result.model
-    )
-
-
-def extract(inquiry: InquiryIn, tables: RefTables) -> Extraction:
-    text = f"{inquiry.subject}\n{inquiry.body}"
-    code = inquiry.product_code or next(
-        (c for c in tables.products if re.search(rf"\b{re.escape(c)}\b", text)), None
-    )
-    product = tables.products.get(code) if code else None
-    provided = list(inquiry.provided_fields)
-    if product and UNKNOWN_PRODUCT_FIELD not in provided:
-        provided.append(UNKNOWN_PRODUCT_FIELD)
-    return Extraction(
-        product_code=product.code if product else None,
-        product_family=product.family if product else None,
-        urgency=Urgency.SAFETY if _SAFETY.search(text) else Urgency.NONE,
-        language=inquiry.language,
-        provided_info=provided,
-    )
+from cs_agent.schemas import CheckResult, Draft, Evidence, Extraction
 
 
 def write_draft(

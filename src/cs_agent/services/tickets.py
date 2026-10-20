@@ -9,6 +9,9 @@
 #   (agents/case_memory.py)
 # - get(ticket_id): 그래프 상태 → TicketOut. sla_due_at = 접수 + 해결 목표 시간 (rules/sla.py)
 # - work_list(dept): 열린 티켓을 SLA 경과 비율 큰 순으로, at_risk(≥ 75%) 표시 (CSA-40)
+#   규칙이 없는 사람 큐(분류 실패한 안전 건)는 맨 위에 둔다.
+# - retry_pending(): 분석 대기(ANALYSIS_PENDING, LLM 장애 등) 문의를 처음부터 다시 돌린다.
+#   main.py 가 analysis_retry_interval_s 마다 부른다.
 #
 # 저장소: 지금은 그래프 체크포인트(메모리) + 이 객체의 dict 다. 서버를 다시 켜면 사라진다.
 # TODO(CSA-24·25): PostgreSQL 이 오면 tickets·drafts·reviews 행 기록, PostgresSaver 체크포인트,
@@ -81,6 +84,21 @@ class TicketService:
             self.cases.append(build_case(self._state(ticket_id).values))
         return self.get(ticket_id)
 
+    def retry_pending(self) -> list[str]:
+        """분석 대기 문의를 다시 돌리고, 대기에서 벗어난 ticket_id 를 돌려준다."""
+        recovered = []
+        for ticket_id in list(self.ticket_ids):
+            values = self.graph.get_state(self._config(ticket_id)).values
+            if values.get("status") != TicketStatus.ANALYSIS_PENDING:
+                continue
+            with ticket_scope(ticket_id):
+                self.graph.invoke(
+                    {"ticket_id": ticket_id, "inquiry": values["inquiry"]}, self._config(ticket_id)
+                )
+            if self.get(ticket_id).status != TicketStatus.ANALYSIS_PENDING:
+                recovered.append(ticket_id)
+        return recovered
+
     def get(self, ticket_id: str) -> TicketOut:
         v = self._state(ticket_id).values
         rules = v.get("rules")
@@ -107,7 +125,11 @@ class TicketService:
         for ticket_id in self.ticket_ids:
             v = self.graph.get_state(self._config(ticket_id)).values
             rules = v.get("rules")
-            if v.get("status") in CLOSED or rules is None:
+            if v.get("status") in CLOSED:
+                continue
+            if rules is None:
+                if v.get("status") == TicketStatus.HUMAN_QUEUE and not dept:
+                    rows.append(_unruled_row(ticket_id, v))
                 continue
             if dept and rules.assigned_dept != dept:
                 continue
@@ -125,4 +147,19 @@ class TicketService:
                     "at_risk": is_at_risk(elapsed, rules.sla_resolution_h),
                 }
             )
-        return sorted(rows, key=lambda r: r["sla_ratio"], reverse=True)
+        # 규칙 없는 사람 큐(sla_ratio None) 먼저, 그다음 SLA 경과 비율 큰 순
+        return sorted(rows, key=lambda r: (r["sla_ratio"] is not None, -(r["sla_ratio"] or 0)))
+
+
+def _unruled_row(ticket_id: str, v: dict) -> dict:
+    """분류 없이 사람 큐로 간 안전 건. 유형·부서·SLA 는 상담원이 정한다."""
+    return {
+        "ticket_id": ticket_id,
+        "status": v["status"],
+        "category": None,
+        "priority": None,
+        "assigned_dept": None,
+        "sla_due_at": None,
+        "sla_ratio": None,
+        "at_risk": True,
+    }

@@ -3,10 +3,10 @@
 # 슈퍼바이저 = 코드가 순서를 정한 LangGraph StateGraph(TicketState). LLM이 다음 단계를 고르지
 # 않는다. 노드 함수는 짧게: 에이전트 함수를 부르고 바꾼 키만 돌려준다.
 #
-#   START → ① intake ─┬─ ② classify ─┐
-#                     ├─ ③ extract  ──┼→ ⑤ rules → ⑥ 분기 ─┬ human → END (사람 큐, 초안 없음)
-#                     └─ ④ retrieve ─┘                    ├ info_request → ⑦ → ready → review
-#                                                         └ draft → ⑧ evidence → ⑨ draft → ⑩ verify
+#   START → ① intake ─┬─ ② classify → ③ extract ─┬→ ⑤ rules → ⑥ 분기 ─┬ human → END (사람 큐)
+#                     └─ ④ retrieve ──────────────┘                   ├ info_request → ⑦ → ready
+#                                                                      ├ draft → ⑧ evidence → ⑨ → ⑩
+#                                                                      └ analysis_pending → END
 #   ⑩ verify ─┬ 통과 → ready → review
 #             ├ 실패 · 재시도 남음 → ⑨ draft (실패 사유를 fix_notes 로)
 #             └ 실패 · 재시도 초과 → hold(ON_HOLD) → review
@@ -17,6 +17,10 @@
 #
 # - 에이전트 함수는 GraphDeps 로 받는다. 아직 구현 안 된 자리는 graph/defaults.py 임시 구현.
 #   담당자가 agents/*.py 를 만들면 GraphDeps 기본값만 바꾼다.
+# - ③ 추출은 ② 분류 결과(category)를 받아 필요한 항목을 찾으므로 분류 다음에 돈다.
+# - 분석 실패(AnalysisError: Jev·Gemini 모두 실패 등)는 거짓 결과로 메우지 않는다.
+#   안전 신호가 잡혔으면 사람 큐로, 아니면 ANALYSIS_PENDING(분석 대기)으로 멈추고
+#   TicketService.retry_pending() 이 다시 돌린다. 원인은 analysis_error 에 남는다.
 # - review 노드는 interrupt 만 한다. interrupt 앞에서 상태를 바꾸면 재개 때 노드가 다시 실행되므로
 #   상태 표시는 ready / hold 노드에서 한다.
 #   API(POST /api/tickets/{id}/action)가 Command(resume=ReviewIn.model_dump(mode="json"))로 잇는다.
@@ -36,7 +40,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from cs_agent import domain, schemas
-from cs_agent.agents import retrieval
+from cs_agent.agents import analysis, retrieval
+from cs_agent.agents.analysis import AnalysisError
 from cs_agent.config import get_settings
 from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
 from cs_agent.graph import defaults
@@ -55,8 +60,8 @@ class GraphDeps:
     cases: Any = None  # Retriever (CSA-28)
     max_retries: int = field(default_factory=lambda: get_settings().max_verify_retries)
     # 에이전트 함수 (모양은 agents/*.py "만들 것" 주석)
-    classify: Callable = defaults.classify  # TODO(CSA-26): agents.analysis.classify
-    extract: Callable = defaults.extract  # TODO(CSA-26): agents.analysis.extract
+    classify: Callable = analysis.classify
+    extract: Callable = analysis.extract
     first_pass: Callable = retrieval.first_pass
     finalize_evidence: Callable = retrieval.finalize_evidence
     write_draft: Callable = defaults.write_draft  # TODO(CSA-29): agents.drafting.write_draft
@@ -92,19 +97,45 @@ def _review(state: TicketState) -> ReviewIn | None:
 def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     # ① ~ ⑤ ----------------------------------------------------------------------------
     def intake(state: TicketState) -> dict:
-        return {"status": TicketStatus.NEW, "retries": 0, "review_rounds": 0, "fix_notes": []}
+        return {
+            "status": TicketStatus.NEW,
+            "retries": 0,
+            "review_rounds": 0,
+            "fix_notes": [],
+            "classification": None,
+            "extraction": None,
+            "analysis_error": None,
+        }
 
     def classify(state: TicketState) -> dict:
-        return {"classification": deps.classify(state["inquiry"], deps.llm)}
+        try:
+            return {"classification": deps.classify(state["inquiry"], deps.llm)}
+        except AnalysisError as e:
+            return {"analysis_error": str(e)}
 
     def extract(state: TicketState) -> dict:
-        return {"extraction": deps.extract(state["inquiry"], deps.tables)}
+        # 분류가 실패해도 추출은 돈다: 안전 신호는 유형 없이도 사람 큐로 보내야 한다
+        classification = state.get("classification")
+        try:
+            result = deps.extract(
+                state["inquiry"],
+                deps.tables,
+                llm=deps.llm,
+                category=classification.category if classification else None,
+            )
+        except AnalysisError as e:
+            return {"analysis_error": state.get("analysis_error") or str(e)}
+        return {"extraction": result}
 
     def retrieve(state: TicketState) -> dict:
         return {"candidates": deps.first_pass(deps.docs, deps.cases, _inquiry_text(state))}
 
     def rules(state: TicketState) -> dict:
-        extraction = state["extraction"]
+        extraction = state.get("extraction")
+        if extraction and extraction.urgency == Urgency.SAFETY and not state.get("classification"):
+            return {"rules": None, "route": Route.HUMAN}  # 유형 없이 사람 큐 (규칙은 상담원이)
+        if state.get("analysis_error"):
+            return {"rules": None, "route": None}
         result = apply_rules(
             state["classification"], extraction, state["inquiry"].customer_tier, deps.tables
         )
@@ -118,6 +149,9 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
 
     def human(state: TicketState) -> dict:
         return {"status": TicketStatus.HUMAN_QUEUE}
+
+    def analysis_pending(state: TicketState) -> dict:
+        return {"status": TicketStatus.ANALYSIS_PENDING}
 
     # ⑦ ⑧ ⑨ ⑩ --------------------------------------------------------------------------
     def info_request(state: TicketState) -> dict:
@@ -233,6 +267,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         ("retrieve", retrieve),
         ("rules", rules),
         ("human", human),
+        ("analysis_pending", analysis_pending),
         ("info_request", info_request),
         ("evidence", evidence),
         ("draft", draft),
@@ -247,15 +282,22 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         g.add_node(name, fn)
 
     g.add_edge(START, "intake")
-    for node in ("classify", "extract", "retrieve"):  # ②③④ 병렬
-        g.add_edge("intake", node)
-    g.add_edge(["classify", "extract", "retrieve"], "rules")
+    g.add_edge("intake", "classify")
+    g.add_edge("intake", "retrieve")  # ④ 는 ②③ 과 병렬
+    g.add_edge("classify", "extract")
+    g.add_edge(["extract", "retrieve"], "rules")
     g.add_conditional_edges(
         "rules",
-        lambda s: s["route"],
-        {Route.HUMAN: "human", Route.INFO_REQUEST: "info_request", Route.DRAFT: "evidence"},
+        lambda s: s.get("route") or "analysis_pending",
+        {
+            Route.HUMAN: "human",
+            Route.INFO_REQUEST: "info_request",
+            Route.DRAFT: "evidence",
+            "analysis_pending": "analysis_pending",
+        },
     )
     g.add_edge("human", END)
+    g.add_edge("analysis_pending", END)
     g.add_edge("info_request", "ready")
     g.add_edge("evidence", "draft")
     g.add_edge("draft", "verify")
