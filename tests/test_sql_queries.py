@@ -236,13 +236,14 @@ def test_eval_join(conn, tmp_path) -> None:
         "serial_no;photos,serial_no;photos,serial_no,Y,TG-ACB-AS-2000,3.1",
         "G-2,valid,en,en,GOLD,,QUOTE,NONE,P4,PR-07,Y,SALES,RT-Y,,,,N,POL-ORDER,",
         "G-3,test,en,en,GOLD,,QUOTE,NONE,P4,PR-07,N,SALES,RT-Y,,,,N,,",
+        "G-5,valid,en,en,GOLD,ACB-AS-2000,DEFECT,NONE,P3,PR-05,N,TS_LV,RT-X,,,,N,,",
         "G-4,train,en,en,GOLD,,QUOTE,NONE,P4,PR-07,N,SALES,RT-Y,,,,N,,",
     ]
     csv_path = tmp_path / "tickets.csv"
     csv_path.write_text("\n".join([header, *lines]) + "\n", encoding="utf-8")
 
-    assert load_tickets_gold(conn, csv_path) == 3  # train 은 넣지 않는다
-    assert load_tickets_gold(conn, csv_path) == 3  # 다시 돌려도 됨
+    assert load_tickets_gold(conn, csv_path) == 4  # train 은 넣지 않는다
+    assert load_tickets_gold(conn, csv_path) == 4  # 다시 돌려도 됨
 
     # G-1: 같은 원본으로 두 번 실행 → 늦은 것(run2)을 쓴다
     _ticket(conn, "T-OLD", 5, thread_ref="run1:G-1", category="TECH_SPEC")
@@ -282,6 +283,19 @@ def test_eval_join(conn, tmp_path) -> None:
         {"e": json.dumps([{"source": "docs", "doc_id": "POL-ORDER", "section": "2"}])},
     )
 
+    # G-5: 처리는 됐지만 분석 실패로 유형·부서·우선순위가 비었다 (route 도 없음)
+    _ticket(
+        conn,
+        "T-5",
+        1,
+        thread_ref="G-5",
+        status="ANALYSIS_PENDING",
+        category=None,
+        assigned_dept=None,
+        priority=None,
+        sla_resolution_target_h=None,
+    )
+
     rows = {r["gold_ticket_id"]: r for r in run(conn, "eval_join", "ticket_results")}
     g1, g2, g3 = rows["G-1"], rows["G-2"], rows["G-3"]
     assert g1["ticket_id"] == "T-1" and g1["category_match"] and g1["dept_match"]
@@ -294,11 +308,19 @@ def test_eval_join(conn, tmp_path) -> None:
     assert g1["info_request_sent"] is True and g1["gold_info_request_sent"] is True
     assert g2["evidence_match"] is True and g2["priority_match"] is False
     assert g3["ticket_id"] is None and g3["evidence_match"] is None
+    g5 = rows["G-5"]
+    assert g5["category_match"] is None and g5["info_request_sent"] is False
 
     summary = run(conn, "eval_join", "eval_summary", split="valid")
     total = next(r for r in summary if r["gold_category"] is None)
-    assert (total["gold_count"], total["processed"]) == (2, 2)
-    assert total["category_accuracy"] == 1.0
-    assert total["priority_rule_accuracy"] == 1.0  # 상담원 조정 건(G-2)은 뺀다
+    assert (total["gold_count"], total["processed"]) == (3, 3)
+    # 분석 실패(G-5)는 빈 비교라도 분모에 남아 틀린 것으로 센다
+    assert total["category_accuracy"] == pytest.approx(2 / 3)
+    assert total["dept_accuracy"] == pytest.approx(2 / 3)
+    assert total["priority_rule_accuracy"] == 0.5  # 상담원 조정 건(G-2)은 빼고 G-1·G-5
+    assert total["missing_info_exact"] == pytest.approx(2 / 3)
     assert total["missing_info_recall"] == 0.5
-    assert total["evidence_top3"] == 1.0
+    assert total["evidence_top3"] == 1.0  # 정답 근거 없는 G-5 는 분모에서 뺀다
+    assert total["info_request_accuracy"] == 1.0
+    defect = next(r for r in summary if r["gold_category"] == "DEFECT")
+    assert (defect["processed"], defect["category_accuracy"]) == (2, 0.5)  # 1.0 이 아니다

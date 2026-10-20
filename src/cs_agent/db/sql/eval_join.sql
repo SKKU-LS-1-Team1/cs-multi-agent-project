@@ -181,7 +181,7 @@ LEFT JOIN LATERAL (
 ) AS top_docs ON true
 LEFT JOIN LATERAL (
     SELECT
-        t.route = 'info_request'
+        COALESCE(t.route = 'info_request', false)
         OR EXISTS (
             SELECT 1 FROM drafts AS d WHERE d.ticket_id = t.ticket_id AND d.kind = 'info_request'
         ) AS requested
@@ -205,25 +205,34 @@ ORDER BY gold_ticket_id;
 
 -- name: eval_summary
 -- split 별, split × 정답 유형별 일치율. 시스템 티켓이 없는 정답은 processed 에서 빠진다.
+-- 일치율 분모는 처리된 티켓(processed) 전체다. 시스템 값이 비어 비교가 NULL 이면(분류·추출 실패
+-- 등) 틀린 것으로 센다 — avg() 는 NULL 을 건너뛰어서 실패가 점수를 올리기 때문.
+-- 근거 일치(evidence_top3)만 정답 근거가 없는 문의(NULL)를 분모에서 뺀다.
 SELECT
     data_split,
     gold_category,
     count(*) AS gold_count,
     count(ticket_id) AS processed,
-    CAST(avg(CAST(category_match AS int)) AS double precision) AS category_accuracy,
-    CAST(avg(CAST(dept_match AS int)) AS double precision) AS dept_accuracy,
-    CAST(avg(CAST(priority_match AS int)) AS double precision) AS priority_accuracy,
-    CAST(avg(CAST(priority_match AS int)) FILTER (WHERE NOT priority_adjusted_by_agent)
-        AS double precision) AS priority_rule_accuracy,
-    CAST(avg(CAST(missing_info_match AS int)) AS double precision) AS missing_info_exact,
+    CAST(count(*) FILTER (WHERE category_match) AS double precision)
+        / NULLIF(count(ticket_id), 0) AS category_accuracy,
+    CAST(count(*) FILTER (WHERE dept_match) AS double precision)
+        / NULLIF(count(ticket_id), 0) AS dept_accuracy,
+    CAST(count(*) FILTER (WHERE priority_match) AS double precision)
+        / NULLIF(count(ticket_id), 0) AS priority_accuracy,
+    CAST(count(*) FILTER (WHERE priority_match AND NOT priority_adjusted_by_agent)
+        AS double precision)
+        / NULLIF(count(ticket_id) FILTER (WHERE NOT priority_adjusted_by_agent), 0)
+        AS priority_rule_accuracy,
+    CAST(count(*) FILTER (WHERE missing_info_match) AS double precision)
+        / NULLIF(count(ticket_id), 0) AS missing_info_exact,
     CAST(
         sum(missing_found_count) FILTER (WHERE ticket_id IS NOT NULL)
         / NULLIF(sum(gold_missing_count) FILTER (WHERE ticket_id IS NOT NULL), 0)
         AS double precision
     ) AS missing_info_recall,
     CAST(avg(CAST(evidence_match AS int)) AS double precision) AS evidence_top3,
-    CAST(avg(CAST(info_request_sent = gold_info_request_sent AS int)) AS double precision)
-        AS info_request_accuracy
+    CAST(count(*) FILTER (WHERE info_request_sent = gold_info_request_sent) AS double precision)
+        / NULLIF(count(ticket_id), 0) AS info_request_accuracy
 FROM eval.ticket_results
 WHERE CAST(:split AS text) IS NULL OR data_split = CAST(:split AS text)
 GROUP BY GROUPING SETS ((data_split), (data_split, gold_category))
