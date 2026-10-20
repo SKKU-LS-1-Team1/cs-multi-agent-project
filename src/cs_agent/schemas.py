@@ -66,6 +66,8 @@ class Evidence(BaseModel):
     section: str | None = None
     text: str
     score: float = 0.0
+    # 제품 거르기·유형별 재정렬용 (CSA-28): doc_type·product_code·family·title, 사례는 category 등
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class RuleResult(BaseModel):
