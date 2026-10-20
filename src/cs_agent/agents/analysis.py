@@ -630,7 +630,8 @@ unconfirmed_fields로 구분합니다.
 고객이 제공한 제품 시리얼 번호를 추출합니다.
 
 - 실제로 제공된 식별번호만 추출합니다.
-- 마스킹된 값은 유효한 시리얼 번호로 취급하지 않습니다.
+- 개인정보 보호로 가려진 값(**MASKED** 등)도 고객이 제공한 시리얼 번호입니다. 가려진 문자열을
+  그대로 value로 추출합니다.
 - 모델명이나 주문번호를 시리얼 번호로 혼동하지 않습니다.
 
 [current_fw]
@@ -651,6 +652,12 @@ field_definitions에 따라 추출합니다.
 - 상대적인 날짜를 기준일 없이 절대 날짜로 변환하지 않습니다.
 - 서로 다른 제품의 정보를 하나의 제품정보로 합치지 않습니다.
 - 고객이 제공하지 않은 필드값은 생성하지 않습니다.
+- 개인정보 보호로 가려진 값(**MASKED** 등)은 고객이 제공한 정보입니다.
+  가려진 문자열 그대로 추출합니다.
+- 사진·로그·서류·도면처럼 파일로 주는 정보는 첨부 표시([attachment: …], "첨부합니다", "attached")가
+  있으면 제공된 것입니다. 첨부 표시 문자열을 value로 추출합니다.
+- 고객 원문은 15개 언어 중 하나일 수 있습니다. field_definitions는 영어로 되어 있어도 같은 뜻의
+  다른 언어 항목 이름·표현을 찾아 추출합니다.
 
 
 # EVIDENCE RULES
@@ -1020,12 +1027,14 @@ _ALIASES = {
     "HMI-XGT-eXP60": ("eXP60",),
     "HMI-XGT-iXP90": ("iXP90",),
 }
-_MISSING = {"", "none", "null", "n/a", "unknown", "미확인", "**masked**", "[masked]"}
+# 개인정보로 가려진 값(**MASKED**)은 고객이 준 값이다 (가린 건 저장 단계). 비어 있는 값만 뺀다.
+_MISSING = {"", "none", "null", "n/a", "unknown", "미확인"}
 _PATTERNS = {
     "error_code": r"(?<![A-Za-z0-9_.])(?:E\.[A-Z][A-Z0-9]*(?:\.[A-Z0-9]+)*|E-\d+|F\d{1,4})"
     r"(?![A-Za-z0-9_])",
+    # 값에 숫자가 있어야 한다 ("Serial number (nameplate): …" 의 "number" 를 잡지 않게)
     "serial_no": r"(?:\bS/N|\bserial(?:\s+(?:number|no\.?))?|시리얼(?:\s*번호)?)"
-    r"\s*[:=#]?\s*([A-Z0-9][A-Z0-9_-]{2,})(?![\w-])",
+    r"(?:\s*\([^)\n]{0,30}\))?\s*[:=#]?\s*((?=[A-Z0-9_-]*\d)[A-Z0-9][A-Z0-9_-]{2,})(?![\w-])",
     "current_fw": r"(?:\bcurrent\s+(?:fw|firmware)(?:\s+version)?|\bfirmware\s+version|"
     r"현재\s*(?:펌웨어|FW)(?:\s*버전)?)\s*[:=]?\s*v?(\d+(?:\.\d+){1,3})(?![\w.])",
 }
@@ -1650,11 +1659,9 @@ def extract_details(
     targets = [
         key for key in dict.fromkeys(requested) if bool(transcript) or key not in result.fields
     ]
-    # 안전 건은 정보 추출 완료를 기다리지 않고 사람 큐로 넘긴다.
-    review_required = (
-        result.urgency == Urgency.SAFETY or "safety_mention_requires_review" in result.issues
-    )
-    if targets and text and not review_required:
+    # 안전 건도 추출한다. 사람 큐로 가더라도 상담원이 고객이 준 정보를 보고 바로 처리할 수 있어야
+    # 하고, 같은 정보를 다시 묻지 않게 한다 (분기는 그래프의 urgency 로 그대로 사람 큐).
+    if targets and text:
         # 제품군 정정 후 추가 필드를 조회하더라도 같은 추출 예산(60초)을 나눠 쓴다.
         extraction_deadline = time.monotonic() + EXTRACTION_TOTAL_TIMEOUT_S
         if extractor is None:

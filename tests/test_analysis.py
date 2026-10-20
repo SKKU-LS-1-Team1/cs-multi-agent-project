@@ -117,7 +117,8 @@ def test_extraction_failure_does_not_hide_missing_urgency(tables, settings):
         result.to_extraction()
 
 
-def test_safety_review_keeps_human_route_without_waiting_for_extraction(tables, settings):
+def test_safety_review_keeps_human_route_and_still_extracts(tables, settings):
+    # 안전 건도 고객이 준 정보를 읽는다 (상담원이 다시 묻지 않게). 추출이 실패해도 사람 큐로 간다.
     extractor = ExtractorStub(error=TimeoutError())
     result = details(
         InquiryIn(channel="EMAIL", body="S100. There is no smoke or fire."),
@@ -129,7 +130,53 @@ def test_safety_review_keeps_human_route_without_waiting_for_extraction(tables, 
     assert result.urgency == Urgency.NONE
     assert "safety_mention_requires_review" in result.issues
     assert result.to_extraction().urgency == Urgency.SAFETY
-    assert not extractor.calls
+    assert len(extractor.calls) == 1
+
+
+def test_safety_inquiry_keeps_provided_fields(tables, settings):
+    extractor = ExtractorStub(
+        {
+            "fields": {
+                "photos": {
+                    "value": "[attachment: 6 photos]",
+                    "evidence": "Photos=[attachment: 6 photos]",
+                }
+            },
+            "model": "gemini-test",
+        }
+    )
+    result = details(
+        InquiryIn(channel="EMAIL", body="S100 is emitting smoke. Photos=[attachment: 6 photos]"),
+        tables,
+        settings,
+        extractor,
+        requested_fields=["photos"],
+    )
+    assert result.to_extraction().urgency == Urgency.SAFETY
+    assert "photos" in result.to_extraction().provided_info
+
+
+def test_masked_value_counts_as_provided(tables, settings):
+    extractor = ExtractorStub(
+        {
+            "fields": {
+                "serial_no": {
+                    "value": "**MASKED**",
+                    "evidence": "Serial number (nameplate): **MASKED**",
+                }
+            },
+            "model": "gemini-test",
+        }
+    )
+    result = details(
+        InquiryIn(channel="EMAIL", body="S100 trips.\n- Serial number (nameplate): **MASKED**"),
+        tables,
+        settings,
+        extractor,
+        requested_fields=["serial_no"],
+    )
+    assert result.fields["serial_no"] == "**MASKED**"
+    assert "serial_no" in result.provided_info
 
 
 def test_latest_correction_overrides_title_and_saved_product(tables, settings):
@@ -412,3 +459,23 @@ def test_additional_fields_after_product_correction_share_total_budget(native, t
     ]
     assert clock.now == 50
     assert "structured_extraction_failed" not in result.issues
+
+
+@pytest.mark.parametrize(
+    ("body", "serial"),
+    [
+        ("Serial number (nameplate): **MASKED**", None),  # 라벨 글자를 시리얼로 잡지 않는다
+        ("Serial number (nameplate): LS2407-00123", "LS2407-00123"),
+        ("S/N: AB12345", "AB12345"),
+        ("serial no. 4471-22", "4471-22"),
+    ],
+)
+def test_serial_rule(tables, settings, body, serial):
+    result = details(
+        InquiryIn(channel="EMAIL", body=f"S100 trips.\n{body}"),
+        tables,
+        settings,
+        None,
+        requested_fields=[],
+    )
+    assert result.fields.get("serial_no") == serial
