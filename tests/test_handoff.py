@@ -54,3 +54,20 @@ def test_low_score_hands_off_and_order_is_kept() -> None:
     assert not should_handoff(Category.MANUAL, 0.70).handoff
     # 결정 유형은 점수가 낮아도 '결정 필요'가 먼저
     assert should_handoff(Category.ORDER_LEAD, 0.60).code == "decision_order_lead"
+
+
+def test_summarize_finds_gap_between_groups() -> None:
+    from cs_agent.evaluation.handoff_threshold import summarize
+
+    summary = summarize(
+        valid_best=[0.60, 0.74, 0.81, 0.86],
+        valid_categories=["ORDER_LEAD", "TECH_SPEC", "DEFECT", "MANUAL"],
+        valid_hit=[True, True, False, True],
+        out_of_scope_best=[0.45, 0.65],
+    )
+
+    assert summary.answerable_min == 0.74  # 결정 유형(ORDER_LEAD)은 빼고 본다
+    assert summary.gap == (0.65, 0.74)
+    assert summary.separates(MIN_RETRIEVAL_SCORE)
+    assert not summary.separates(0.64)
+    assert summary.hit_rate == 0.75
