@@ -27,6 +27,10 @@ services:
   postgres:
     # 벡터 검색(RAG)도 PostgreSQL 안에서 한다 (pgvector, CSA-18). 확장은 Alembic 첫 리비전에서 켠다.
     image: pgvector/pgvector:0.8.0-pg16
+    # 이 컴퓨터(127.0.0.1)에서만 접속 가능. 외부에는 열리지 않는다 (GCP 에서는 SSH 터널로 접속).
+    # 로컬 개발: docker compose up -d postgres → .env 의 DATABASE_URL 로 uv run 서버·alembic 이 붙는다.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
     environment:
       POSTGRES_USER: cs
       POSTGRES_PASSWORD: cs
