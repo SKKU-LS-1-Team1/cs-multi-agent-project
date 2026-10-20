@@ -20,6 +20,9 @@
 #   청크를 만들지 않는다. tickets 정답이 이런 제목을 가리키는 건은 없다.
 # - 긴 절을 나눈 조각은 part 1, 2, ... 로 구분한다. id 는 첫 조각이 "doc_id#section",
 #   다음부터 "doc_id#section:2" (embed_docs 의 upsert id 가 겹치지 않게).
+# - 부모 본문을 자식 청크에 중복하지 않는다. 상위 제목 경로(section_path)와
+#   부모 절 번호(parent_section)를 metadata에 보존한다. 본문 없는 부모의 제목도 포함한다.
+# - text는 절 원문, embedding_text는 제품·문서 종류·제목 경로를 붙인 임베딩 입력이다.
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -43,6 +46,29 @@ class Chunk:
     def id(self) -> str:
         base = f"{self.doc_id}#{self.section}"
         return base if self.part == 1 else f"{base}:{self.part}"
+
+    @property
+    def section_path(self) -> str:
+        return self.metadata.get("section_path") or f"{self.section}. {self.title}"
+
+    @property
+    def embedding_text(self) -> str:
+        """본문은 유지하고 검색에 필요한 제품·문서·상위 절 문맥을 붙인다."""
+        doc_title = self.metadata.get("title", "").strip()
+        product_code = self.metadata.get("product_code", "").strip()
+        family = self.metadata.get("family", "").strip()
+        doc_type = self.metadata.get("doc_type", "").strip()
+        context = []
+        # 제품명과 코드가 이미 문서 제목에 있으면 코드 접두사를 중복하지 않는다.
+        if product_code and product_code.casefold() not in doc_title.casefold():
+            context.append(f"Product: {product_code}")
+        elif not product_code and family:
+            # FAQ처럼 특정 제품 대신 제품군에 적용되는 문서의 문맥.
+            context.append(f"Product family: {family}")
+        if doc_type:
+            context.append(f"Document type: {doc_type}")
+        context.append(f"{doc_title} — {self.section_path}" if doc_title else self.section_path)
+        return "\n".join(context) + "\n\n" + self.text
 
 
 def parse_front_matter(raw: str) -> tuple[dict[str, str], str]:
@@ -114,14 +140,27 @@ def chunk_markdown(raw: str, max_chars: int = MAX_CHUNK_CHARS) -> list[Chunk]:
     headings = list(_HEADING.finditer(body))
 
     chunks: list[Chunk] = []
+    ancestors: list[tuple[int, str, str]] = []
     for heading, next_heading in zip(headings, headings[1:] + [None], strict=True):
+        # 빈 부모 절도 스택에 남겨 하위 절의 제목 경로를 보존한다.
+        level = len(heading.group().split(maxsplit=1)[0])
+        while ancestors and ancestors[-1][0] >= level:
+            ancestors.pop()
+        section, title = heading.group(1), heading.group(2)
+        parent_section = ancestors[-1][1] if ancestors else ""
+        ancestors.append((level, section, title))
+        section_path = " > ".join(f"{number}. {name}" for _, number, name in ancestors)
         end = next_heading.start() if next_heading else len(body)
         text = body[heading.end() : end].strip()
         if not text:
             continue
-        section, title = heading.group(1), heading.group(2)
+        chunk_metadata = {
+            **metadata,
+            "section_path": section_path,
+            "parent_section": parent_section,
+        }
         for part, piece in enumerate(_split_text(text, max_chars), start=1):
-            chunks.append(Chunk(doc_id, section, title, piece, dict(metadata), part))
+            chunks.append(Chunk(doc_id, section, title, piece, dict(chunk_metadata), part))
     return chunks
 
 
