@@ -280,6 +280,121 @@ def test_missing_product_asks_customer_first(run):
     assert done.values["final_reply"] == "please send product_model"
 
 
+def test_info_request_is_localized_when_sent():
+    """승인한 요청문(영어 틀 문장 등)은 보낼 때 고객 언어로 옮긴다. 상담원이 본 원문은 그대로."""
+    calls = Calls()
+    localized = []
+
+    def localize(text, language, llm):
+        localized.append((text, language))
+        return f"[{language}] {text}"
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=calls.classify,
+        extract=calls.extract,
+        write_draft=calls.write_draft,
+        verify=calls.verify,
+        write_info_request=calls.write_info_request,
+        localize_info_request=localize,
+    )
+    graph = build_ticket_graph(deps)
+    config = {"configurable": {"thread_id": "T-ES"}}
+    inquiry = SPEC_QUESTION.model_copy(
+        update={"subject": "Dimensiones", "body": "¿Cuáles son las dimensiones?", "language": "es"}
+    )
+    graph.invoke({"ticket_id": "T-ES", "inquiry": inquiry}, config)
+    review = ReviewIn(action=ReviewAction.EDIT_APPROVE, edited_text="Please send the model.")
+    graph.invoke(Command(resume=review.model_dump(mode="json")), config)
+
+    v = graph.get_state(config).values
+    assert localized == [("Please send the model.", "es")]
+    assert v["final_reply"] == "[es] Please send the model."
+    assert v["info_request"] == "please send product_model"  # 초안(상담원이 본 글)은 그대로
+
+
+def test_info_request_held_when_translation_fails_then_sent_on_reapproval():
+    """번역이 3번 다 실패하면 보내지 않고 보류, 상담원이 다시 승인하면 다시 번역해 보낸다."""
+    from cs_agent.agents.info_request import LocalizationError
+
+    calls = Calls()
+    outcomes = [LocalizationError("es 번역 3번 실패"), "Por favor envíe el modelo."]
+
+    def localize(text, language, llm):
+        out = outcomes.pop(0)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=calls.classify,
+        extract=calls.extract,
+        write_draft=calls.write_draft,
+        verify=calls.verify,
+        write_info_request=calls.write_info_request,
+        localize_info_request=localize,
+    )
+    graph = build_ticket_graph(deps)
+    config = {"configurable": {"thread_id": "T-HOLD"}}
+    inquiry = SPEC_QUESTION.model_copy(
+        update={"subject": "Dimensiones", "body": "¿Cuáles son las dimensiones?", "language": "es"}
+    )
+    graph.invoke({"ticket_id": "T-HOLD", "inquiry": inquiry}, config)
+    approve = Command(resume=ReviewIn(action=ReviewAction.APPROVE).model_dump(mode="json"))
+
+    graph.invoke(approve, config)
+    held = graph.get_state(config)
+    assert held.values["status"] == TicketStatus.ON_HOLD
+    assert held.values["final_reply"] is None  # 영어로 나가지 않았다
+    assert held.values["approved_reply"] == "please send product_model"
+    assert "3번 실패" in held.values["translation_error"]
+    assert held.next == ("review",)  # 상담원 검토로 돌아왔다
+
+    graph.invoke(approve, config)
+    sent = graph.get_state(config).values
+    assert sent["status"] == TicketStatus.WAITING_CUSTOMER
+    assert sent["final_reply"] == "Por favor envíe el modelo."
+    assert sent["translation_error"] is None
+
+
+def test_held_info_request_keeps_reviewer_edit_on_reapproval():
+    """수정 승인 → 번역 실패 보류 → 그냥 승인: 상담원이 고친 글을 번역한다 (초안으로 안 돌아감)."""
+    from cs_agent.agents.info_request import LocalizationError
+
+    calls = Calls()
+    seen = []
+
+    def localize(text, language, llm):
+        seen.append(text)
+        if len(seen) == 1:
+            raise LocalizationError("번역 3번 실패")
+        return f"[{language}] {text}"
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=calls.classify,
+        extract=calls.extract,
+        write_draft=calls.write_draft,
+        verify=calls.verify,
+        write_info_request=calls.write_info_request,
+        localize_info_request=localize,
+    )
+    graph = build_ticket_graph(deps)
+    config = {"configurable": {"thread_id": "T-EDIT"}}
+    inquiry = SPEC_QUESTION.model_copy(
+        update={"subject": "Dimensiones", "body": "¿Cuáles son las dimensiones?", "language": "es"}
+    )
+    graph.invoke({"ticket_id": "T-EDIT", "inquiry": inquiry}, config)
+    edit = ReviewIn(action=ReviewAction.EDIT_APPROVE, edited_text="Please send model and photos.")
+    graph.invoke(Command(resume=edit.model_dump(mode="json")), config)
+    approve = ReviewIn(action=ReviewAction.APPROVE)
+    graph.invoke(Command(resume=approve.model_dump(mode="json")), config)
+
+    assert seen == ["Please send model and photos."] * 2
+    assert graph.get_state(config).values["final_reply"] == "[es] Please send model and photos."
+
+
 def test_reviewer_rewrite_then_edit_approve(run):
     _, resume, calls = run(SPEC_QUESTION)
 

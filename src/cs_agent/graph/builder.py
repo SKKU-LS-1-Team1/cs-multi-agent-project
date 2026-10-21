@@ -12,12 +12,13 @@
 #             └ 실패 · 재시도 초과 → hold(ON_HOLD) → review
 #   review (interrupt: 상담원 버튼 대기) ─┬ approve / edit_approve → finish(고객 언어 번역) → END
 #                                     │                          └ 번역 실패 → hold → review
+#                                     │   (추가정보 요청문도 같다: 번역 3번 실패 → hold, CSA-27)
 #                                     ├ reject → finish → END
 #                                     ├ rewrite → ⑨ draft (상담원 피드백, 재시도 0으로)
 #                                     ├ info_request → ⑦ → ready → review
 #                                     └ escalate → escalate(상태·부서 변경) → END
 #
-# - 에이전트 함수는 GraphDeps 로 받는다. 아직 구현 안 된 자리는 graph/defaults.py 임시 구현.
+# - 에이전트 함수는 GraphDeps 로 받는다 (기본값은 agents/*.py 실제 구현).
 #   담당자가 agents/*.py 를 만들면 GraphDeps 기본값만 바꾼다.
 # - ③ 추출은 ② 분류 결과(category)를 받아 필요한 항목을 찾으므로 분류 다음에 돈다.
 # - 분석 실패(AnalysisError: Jev·Gemini 모두 실패 등)는 거짓 결과로 메우지 않는다.
@@ -44,11 +45,11 @@ from langgraph.types import interrupt
 
 from cs_agent import domain, schemas
 from cs_agent.agents import analysis, drafting, retrieval, verification
+from cs_agent.agents import info_request as info_request_agent
 from cs_agent.agents.analysis import AnalysisError
 from cs_agent.agents.drafting import DraftingError, TranslationError
 from cs_agent.config import get_settings
 from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
-from cs_agent.graph import defaults
 from cs_agent.graph.state import TicketState
 from cs_agent.llm.router import LLMRouter
 from cs_agent.rules.engine import apply_rules
@@ -70,7 +71,8 @@ class GraphDeps:
     finalize_evidence: Callable = retrieval.finalize_evidence
     write_draft: Callable = drafting.write_draft
     verify: Callable = verification.verify
-    write_info_request: Callable = defaults.write_info_request  # TODO(CSA-27)
+    write_info_request: Callable = info_request_agent.write_info_request
+    localize_info_request: Callable = info_request_agent.localize_request  # 보낼 때 고객 언어로
     translate_reply: Callable = drafting.translate_reply
 
 
@@ -351,10 +353,27 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 "translation_error": None,
             }
         if state.get("pending") == "info_request":
-            text = review.edited_text or state.get("info_request")
+            # 번역 실패로 보류된 뒤 다시 승인하면, 직전에 상담원이 수정 승인한 글을 그대로 쓴다
+            if review.action == ReviewAction.EDIT_APPROVE and review.edited_text:
+                text = review.edited_text
+            elif state.get("translation_error") and state.get("approved_reply"):
+                text = state["approved_reply"]
+            else:
+                text = state.get("info_request")
+            # 승인한 요청문이 고객 언어가 아니면(영어 틀 문장 등) 발송 직전에 옮긴다 (CSA-27).
+            # 3번 다 실패하면 보내지 않고 보류 → 상담원이 다시 승인하면 다시 번역한다
+            try:
+                final_reply = deps.localize_info_request(text, _language(state), deps.llm)
+            except info_request_agent.LocalizationError as error:
+                return {
+                    "status": TicketStatus.ON_HOLD,
+                    "approved_reply": text,
+                    "final_reply": None,
+                    "translation_error": str(error),
+                }
             return {
                 "status": TicketStatus.WAITING_CUSTOMER,
-                "final_reply": text,
+                "final_reply": final_reply,
                 "approved_reply": text,
                 "translation_error": None,
             }
