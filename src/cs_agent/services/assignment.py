@@ -8,6 +8,13 @@
 # - 담당자 명단: data/ref/agents.csv (agent_id, name, dept_code, active, max_open). 시작할 때 읽고
 #   (main.py), 표가 틀리면(없는 부서 코드·겹치는 agent_id·active 가 Y/N 아님) 시작을 멈춘다.
 #   파일이 없으면 빈 명단 → 배정하지 않는다 (assignee NULL, 부서 큐에 남음).
+# - 시연용 명단 (이름은 지어낸 것): 인원은 tickets 부서별 유입량에 비례 — 많은 부서(TS_AUTO·TS_LV·
+#   SCM·SALES_OPS·CERT·GCS_L1) 3명, 나머지 2명(같은 부서 재배정 시연에 최소 2명).
+#   max_open 은 난이도: L1 15, L2 10(적은 부서 TS_MV·TS_TRF 8), L3·현장(QA_CLAIM·RND_FW·
+#   FIELD_SVC) 6. 부서 수용량
+#   (인원 × max_open)이 tickets 로 추정한 동시 열린 건(유입 × 처리 시간 상위 10%, 최대 11건)보다
+#   모두 커서 평소엔 안 걸리고, 시연·평가처럼 한꺼번에 몰릴 때만 부서 큐로 넘친다.
+#   AG-TS_AUTO-04 는 휴직(active=N) 예시.
 # - 자동 배정 assign(): 부서 안 활성 담당자 중 지금 열린 건이 가장 적은 사람. 같으면 agent_id 순.
 #   max_open(0 이면 제한 없음)에 이미 찬 사람은 뺀다. 다 찼으면 None (부서 큐).
 #   services/tickets.py 가 그래프를 돌린 뒤마다 부른다: 아직 담당자가 없거나, 이관으로 부서가 바뀌어
