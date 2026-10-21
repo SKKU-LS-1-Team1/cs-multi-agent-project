@@ -21,7 +21,145 @@
 #
 # 참고: 기획서 v10 4.2, 관리자_대시보드_AI기능_구조검토.md 3장
 #
-# 만들 것 (이름·모양은 다른 파일이 이대로 부른다)
-#
-#   def write_info_request(missing: list[str], language: str, summary: str, llm: LLMRouter) -> str:
-#       """빠진 항목 → 고객 언어 요청문 초안."""
+# 정해 둔 것
+# - 항목 라벨 표는 data/ref/info_field_codebook.csv (rules/tables.py field_labels, 영어 라벨)를
+#   쓴다. LLM 이 고객 언어로 옮긴다. 표에 없는 항목은 이름을 풀어 쓴다(serial_no → "serial no").
+#   빠진 항목이 겹치면 한 번만, 하나도 없으면 "문의 내용을 더 자세히" 한 항목으로 묻는다.
+# - 빠짐 없이 묻기: 프롬프트에서 항목을 번호 목록으로 그 순서대로 쓰게 하고, 받은 글의 번호 목록
+#   개수가 항목 수와 같은지 본다. 고객 언어가 아니면(agents/verification.detect_mismatch) 실패.
+#   실패하면 사유를 붙여 한 번 더 쓰고, 그래도 안 되면 영어 틀 문장(template_request)으로 낸다.
+# - LLM 이 꺼져 있거나(LLM_PROVIDER≠live) 호출이 실패해도 영어 틀 문장을 낸다
+#   (상담원이 고쳐 보낸다).
+# - 프롬프트: 답을 하거나 약속하지 않는다, 목록 밖 질문 금지, 받는 사람·서명 이름은 지어내지 않는다.
+#   문의 원문은 앞 2,000자만 넣는다.
+import logging
+import re
+from collections.abc import Mapping, Sequence
+
+from cs_agent.llm.router import LLMRouter
+
+_LOGGER = logging.getLogger(__name__)
+
+MAX_SUMMARY_CHARS = 2000
+MAX_ATTEMPTS = 2
+FALLBACK_ITEM = "More details about your request (product, symptom or documents needed)"
+
+LANGUAGE_NAMES = {
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "th": "Thai",
+    "it": "Italian",
+    "id": "Indonesian",
+    "zh": "Chinese (Simplified)",
+    "tr": "Turkish",
+    "ar": "Arabic",
+    "ru": "Russian",
+    "vi": "Vietnamese",
+    "pt": "Portuguese",
+    "de": "German",
+    "ja": "Japanese",
+    "pl": "Polish",
+    "ko": "Korean",
+}
+
+# "1. " "2) " "**3.** " 와 전각·중국식 "１．" "1、" (뒤 공백 없어도 됨)
+_NUMBERED = re.compile(r"^\s*(?:\*\*)?\d{1,2}(?:[.)](?:\*\*)?\s+|[．、）](?:\*\*)?\s*)\S", re.M)
+
+
+def _field_labels() -> Mapping[str, str]:
+    from cs_agent.rules.tables import load_tables
+
+    return load_tables().field_labels
+
+
+def item_labels(missing: Sequence[str], labels: Mapping[str, str]) -> list[str]:
+    """빠진 항목 이름 → 고객에게 보일 라벨 (겹친 항목은 한 번, 순서 유지)."""
+    seen: set[str] = set()
+    out = []
+    for field in missing:
+        field = (field or "").strip()
+        if not field or field in seen:
+            continue
+        seen.add(field)
+        out.append(labels.get(field) or field.replace("_", " "))
+    return out or [FALLBACK_ITEM]
+
+
+def language_name(language: str | None) -> str:
+    code = (language or "en").lower().split("-")[0]
+    return LANGUAGE_NAMES.get(code, code)
+
+
+def build_prompt(items: Sequence[str], language: str, summary: str) -> str:
+    numbered = "\n".join(f"{i}. {item}" for i, item in enumerate(items, start=1))
+    return (
+        "You are a customer service agent at an electrical equipment manufacturer.\n"
+        f"Write ONE short, polite message in {language_name(language)} asking the customer to "
+        "send ALL of the items below in a single reply, so we can continue with their inquiry.\n"
+        "Rules:\n"
+        f"- List the items as a numbered list 1. to {len(items)}., one item per line, in this "
+        "order. Translate each item naturally; keep product codes and abbreviations as written.\n"
+        "- Do not answer the inquiry, promise anything, or ask for anything not in the list.\n"
+        "- No subject line. Do not invent names for the customer or the sender; sign off as the "
+        "customer service team.\n\n"
+        f"Items:\n{numbered}\n\n"
+        f"Customer inquiry (for context only):\n{summary[:MAX_SUMMARY_CHARS]}"
+    )
+
+
+def count_items(text: str) -> int:
+    """글 안의 번호 목록 줄 수 ("1." "2)" "**3.**" …)."""
+    return len(_NUMBERED.findall(text))
+
+
+def check_request(text: str, items: Sequence[str], language: str) -> list[str]:
+    """요청문이 항목을 빠짐 없이 고객 언어로 물었나. 문제 목록 (비면 통과)."""
+    from cs_agent.agents.verification import detect_mismatch
+
+    problems = []
+    if not text.strip():
+        return ["empty message"]
+    found = count_items(text)
+    if found != len(items):
+        problems.append(f"the numbered list has {found} items but must have exactly {len(items)}")
+    other = detect_mismatch(text, language, source_text="\n".join(items))
+    if other:
+        problems.append(f"it is written in '{other}', not {language_name(language)}")
+    return problems
+
+
+def template_request(items: Sequence[str]) -> str:
+    """LLM 없이 쓰는 영어 틀 문장. 상담원이 고객 언어로 고쳐 보낸다."""
+    numbered = "\n".join(f"{i}. {item}" for i, item in enumerate(items, start=1))
+    return (
+        "Dear customer,\n\n"
+        "Thank you for contacting us. To review your inquiry, please send us the following "
+        "information in one reply:\n\n"
+        f"{numbered}\n\n"
+        "Once we receive it, we will continue with your request.\n\n"
+        "Best regards,\nCustomer Service Team"
+    )
+
+
+def write_info_request(missing: list[str], language: str, summary: str, llm: LLMRouter) -> str:
+    """빠진 항목 → 고객 언어 요청문 초안."""
+    items = item_labels(missing, _field_labels())
+    if not llm.enabled:
+        return template_request(items)
+    prompt = build_prompt(items, language, summary)
+    problems: list[str] = []
+    for _ in range(MAX_ATTEMPTS):
+        attempt = prompt
+        if problems:
+            attempt += "\n\nYour last message was rejected because " + "; ".join(problems) + "."
+        try:
+            text = llm.write("info_request", attempt).strip()
+        except Exception:
+            _LOGGER.exception("추가정보 요청문 작성 실패 → 영어 틀 문장")
+            return template_request(items)
+        problems = check_request(text, items, language)
+        if not problems:
+            return text
+        _LOGGER.warning("추가정보 요청문 점검 실패: %s", problems)
+    return template_request(items)

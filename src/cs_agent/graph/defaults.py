@@ -7,7 +7,6 @@
 # | 자리 | 임시 동작 | 실제 구현 |
 # |---|---|---|
 # | write_draft | llm.write("draft") 한 번 | agents/drafting.py (CSA-29·30) |
-# | write_info_request | llm.write("info_request") 한 번 | agents/info_request.py (CSA-27) |
 from cs_agent.domain import Category
 from cs_agent.llm.router import LLMRouter
 from cs_agent.schemas import Draft, Evidence, Extraction
@@ -40,11 +39,3 @@ def write_draft(
         cited=[f"{e.doc_id}#{e.section}" for e in evidence],
         model=llm.writer.name,
     )
-
-
-def write_info_request(missing: list[str], language: str, summary: str, llm: LLMRouter) -> str:
-    prompt = (
-        f"Write a short, polite message in language '{language}' asking the customer for all of "
-        f"these items at once: {', '.join(missing)}.\nTheir inquiry: {summary}"
-    )
-    return llm.write("info_request", prompt)
