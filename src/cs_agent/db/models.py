@@ -128,14 +128,16 @@ class Ticket(Base):
 
 
 class DraftRow(_Timestamps, Base):
-    """추천 답변(draft) 또는 추가정보 요청문(info_request) 한 버전."""
+    """추천 답변·추가정보 요청문·이관 요청서 한 버전. slots에 요청서 구조도 보존한다."""
 
     __tablename__ = "drafts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.ticket_id", ondelete="CASCADE"))
     version: Mapped[int] = mapped_column(Integer)  # 티켓 안에서 1, 2, 3 …
-    kind: Mapped[str] = mapped_column(String(16), default="draft")  # draft | info_request
+    kind: Mapped[str] = mapped_column(
+        String(16), default="draft"
+    )  # draft | info_request | escalation
     text: Mapped[str] = mapped_column(Text)
     template: Mapped[str] = mapped_column(String(64), default="")
     slots: Mapped[dict] = mapped_column(JSONB, default=dict)

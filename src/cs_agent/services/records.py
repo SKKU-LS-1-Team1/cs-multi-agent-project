@@ -43,7 +43,9 @@ class Records(Protocol):
 
     def save_state(self, ticket_id: str, values: dict) -> None: ...
 
-    def add_review(self, ticket_id: str, review: ReviewIn) -> None: ...
+    def add_review(
+        self, ticket_id: str, review: ReviewIn, *, draft_kind: str | None = None
+    ) -> None: ...
 
     def save_case(self, case: dict) -> None: ...
 
@@ -146,6 +148,18 @@ def draft_versions(values: dict) -> list[dict]:
         )
     if values.get("info_request"):
         rows.append({"kind": "info_request", "text": values["info_request"]})
+    if request := values.get("escalation_request"):
+        rows.append(
+            {
+                "kind": "escalation",
+                "text": request.text,
+                "slots": request.model_dump(mode="json"),
+                "cited": list(request.cited),
+                "model": request.model,
+                "evidence": [e.model_dump(mode="json") for e in values.get("evidence", [])],
+                "checks": [c.model_dump(mode="json") for c in values.get("checks", [])],
+            }
+        )
     return rows
 
 
@@ -191,7 +205,9 @@ class MemoryRecords:
             if not last or last["text"] != row["text"]:
                 versions.append({**row, "version": len(versions) + 1})
 
-    def add_review(self, ticket_id: str, review: ReviewIn) -> None:
+    def add_review(
+        self, ticket_id: str, review: ReviewIn, *, draft_kind: str | None = None
+    ) -> None:
         self.reviews[ticket_id].append(review)
 
     def save_case(self, case: dict) -> None:
@@ -318,7 +334,9 @@ class SqlRecords:
                     version += 1
                     s.add(DraftRow(ticket_id=ticket_id, version=version, **draft))
 
-    def add_review(self, ticket_id: str, review: ReviewIn) -> None:
+    def add_review(
+        self, ticket_id: str, review: ReviewIn, *, draft_kind: str | None = None
+    ) -> None:
         import sqlalchemy as sa
 
         from cs_agent.db.models import DraftRow, ReviewRow
@@ -327,6 +345,8 @@ class SqlRecords:
             draft_id = s.scalar(
                 sa.select(DraftRow.id)
                 .where(DraftRow.ticket_id == ticket_id)
+                # 최신 행이 아니라 실제 검토한 종류의 최신 버전에 연결한다.
+                .where(DraftRow.kind == draft_kind if draft_kind else sa.true())
                 .order_by(DraftRow.version.desc())
                 .limit(1)
             )

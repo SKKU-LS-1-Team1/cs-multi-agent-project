@@ -12,6 +12,7 @@ from cs_agent.schemas import (
     CheckResult,
     Classification,
     Draft,
+    EscalationRequest,
     Evidence,
     Extraction,
     InquiryIn,
@@ -40,6 +41,7 @@ class TicketState(TypedDict, total=False):
     retries: int  # 자동 점검 재작성 횟수, 최대 2
     fix_notes: list[str]  # ⑩ 실패 사유 → ⑨ 재작성에 넘김
     info_request: str | None  # ⑦ 추가정보 요청문, CSA-27
+    escalation_request: EscalationRequest | None  # CSA-55: 검토 전 생성, 회신 시 무효화
     pending: str  # 상담원이 검토할 대상: draft | info_request
     review: ReviewIn | None  # 상담원 버튼 입력, CSA-25
     review_rounds: int  # 상담원 재작성 요청 횟수, 자동 점검과 따로 센다
