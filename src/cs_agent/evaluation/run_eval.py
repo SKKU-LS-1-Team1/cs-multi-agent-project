@@ -29,9 +29,12 @@
 #   누락 항목·추가정보 요청 여부 → CSA-26 (고객이 준 정보 추출), 근거 → CSA-28.
 # - 저장: data/processed/eval_{split}_{YYYYMMDD}.json (전체 결과) + 같은 이름 .md (표).
 #   같은 날 다시 돌리면 덮어쓴다.
-# - --demo (할 일 5): 검토 대기 초안을 그대로 승인 → 해결 확정해서 사례(live)를 쌓으며 순서대로
-#   처리한다. 앞 절반 vs 뒤 절반의 KPI 와 "live 사례를 근거로 쓴 문의 비율"을 비교한다.
-#   상담원 판단을 흉내 낸 것이라 K2 는 의미가 없다.
+# - --demo (할 일 5, CSA-15 시연 방식): 상담원 대신 실제 회신(tickets.final_reply)을 정답으로 쓴다.
+#   답변 초안은 실제 회신으로 수정 승인(edit_approve) → 해결 확정해서 사례(live)가 사람의 답으로
+#   쌓인다. 실제 회신이 없는 건·추가정보 요청문은 그대로 승인한다. AI 초안을 그대로 승인하면 사례가
+#   AI 자신의 초안으로 쌓여 피드백 루프가 아니게 된다 (PR #31 리뷰).
+#   "같은 내용이면 approve" 는 판정 기준이 없어 하지 않는다 → 시연의 K2 는 재지 않는다 (None).
+#   앞 절반 vs 뒤 절반의 KPI 와 "live 사례를 근거로 쓴 문의 비율"을 비교한다.
 import argparse
 import json
 import time
@@ -152,6 +155,7 @@ def submit_all(
                 "latency_s": round(time.perf_counter() - started, 3),
                 "status": str(out.status),
                 "error": None,
+                "has_draft": getattr(out, "draft", None) is not None,  # 답변 초안 검토 대기인가
             }
         except Exception as e:  # 한 건 실패로 전체 평가를 멈추지 않는다
             run = {
@@ -163,9 +167,11 @@ def submit_all(
         if demo and run["status"] == TicketStatus.READY_FOR_REVIEW:
             # 시연 단계 실패는 평가 결과(처리 여부)와 따로 남긴다
             try:
-                run["status"] = str(demo_approve(service, run["ticket_id"]))
+                gold_reply = _text(row.get("final_reply")) if run["has_draft"] else None
+                run["status"] = str(demo_approve(service, run["ticket_id"], gold_reply))
             except Exception as e:
                 run["demo_error"] = _error(e)
+        run.pop("has_draft", None)
         runs[gold_id] = run
         if progress:
             progress(i, len(rows))
@@ -176,14 +182,22 @@ def _error(e: Exception) -> str:
     return f"{type(e).__name__}: {e}"[:300]
 
 
-def demo_approve(service: Any, ticket_id: str) -> TicketStatus:
-    """시연: 검토 대기 건을 그대로 승인하고, 답변이 나간 건(승인·이관)만 해결 확정해 사례로 남긴다.
+def demo_approve(service: Any, ticket_id: str, gold_reply: str | None = None) -> TicketStatus:
+    """시연: 상담원 대신 실제 회신으로 판단, 답변이 나간 건(승인·이관)만 해결 확정해 사례로 남긴다.
 
+    gold_reply(실제 회신)가 있으면 그 글로 수정 승인, 없으면(추가정보 요청문 등) 그대로 승인.
     추가정보 요청문을 승인하면 고객 회신 대기(WAITING_CUSTOMER)가 되므로 해결하지 않는다.
     """
-    status = service.act(
-        ticket_id, ReviewIn(action=ReviewAction.APPROVE, reviewer=DEMO_REVIEWER)
-    ).status
+    if gold_reply:
+        review = ReviewIn(
+            action=ReviewAction.EDIT_APPROVE,
+            reviewer=DEMO_REVIEWER,
+            edited_text=gold_reply,
+            feedback="시연: 실제 회신으로 수정 승인",
+        )
+    else:
+        review = ReviewIn(action=ReviewAction.APPROVE, reviewer=DEMO_REVIEWER)
+    status = service.act(ticket_id, review).status
     if status in (TicketStatus.APPROVED, TicketStatus.ESCALATED):
         status = service.resolve(ticket_id).status
     return status
@@ -308,8 +322,15 @@ def demo_halves(
     for name, part in (("first_half", ordered[:half]), ("second_half", ordered[half:])):
         done = [r for r in part if r.get("ticket_id")]
         used = sum(1 for r in done if live_cases.get(r["ticket_id"], 0) > 0)
-        result[name] = kpi_report(part) | {"live_case_used": used / len(done) if done else None}
+        result[name] = without_k2(kpi_report(part)) | {
+            "live_case_used": used / len(done) if done else None
+        }
     return result
+
+
+def without_k2(report: dict[str, Any]) -> dict[str, Any]:
+    """시연은 실제 회신으로 수정 승인하므로 K2(무수정 승인)를 재지 않는다."""
+    return report | {"K2_approve_as_is": None, "K2_note": "시연(--demo)에서는 재지 않음"}
 
 
 def _table(report: Mapping[str, Any], groups: Mapping[Any, Mapping[str, Any]], label: str) -> str:
@@ -338,7 +359,7 @@ def build_result(
             "jev_model": settings.jev_model,
             "embedding_model": settings.embedding_model,
         },
-        "report": kpi_report(rows),
+        "report": without_k2(kpi_report(rows)) if demo else kpi_report(rows),
         "by_category": by_group(rows, "gold_category"),
         "by_language": by_group(rows, "language"),
         "mistakes": mistakes(rows),

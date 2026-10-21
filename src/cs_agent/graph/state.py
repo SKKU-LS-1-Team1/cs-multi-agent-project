@@ -26,6 +26,7 @@ class TicketState(TypedDict, total=False):
     inquiry: InquiryIn  # ① 접수
     body_ko: str | None  # 상담원 표시용. 원문 분석에는 사용하지 않는다 (CSA-57)
     translation_parts: list[TranslationPart]  # 회신별 원문·번역 성공 구간 (체크포인트)
+    translation_job: str | None  # 배경 번역 작업 id (intake 가 시작, ready·hold 등이 받음)
     classification: Classification | None  # ② 분류, CSA-26
     extraction: Extraction | None  # ③ 추출, CSA-26
     analysis_error: str | None  # ②③ 실패 사유 (AnalysisError) → 분석 대기

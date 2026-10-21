@@ -11,13 +11,13 @@ from test_db import db as db
 from cs_agent.agents import translation as t
 from cs_agent.cache.store import MemoryKV
 from cs_agent.config import Settings
-from cs_agent.domain import Category
+from cs_agent.domain import Category, ReviewAction
 from cs_agent.graph.builder import GraphDeps, build_ticket_graph, serializer
 from cs_agent.llm import tracing
 from cs_agent.llm.clients import Completion
 from cs_agent.llm.router import LLMRouter
 from cs_agent.main import create_app
-from cs_agent.schemas import InquiryIn
+from cs_agent.schemas import InquiryIn, ReviewIn
 from cs_agent.services.tickets import TicketService
 
 
@@ -308,3 +308,56 @@ def test_postgres_translation_survives_restart_and_reuses_prior_parts(db):
                     "checkpoint_migrations"
                 )
             )
+
+
+# --- 배경 번역 (PR #32 리뷰 반영) ------------------------------------------------------------
+
+
+def test_translation_overlaps_with_drafting_instead_of_adding_to_it():
+    """번역이 그래프 단계를 막지 않는다: 처리 시간 = 답변 작성과 번역 중 긴 쪽 (합이 아니라)."""
+    from cs_agent.schemas import Draft
+
+    def slow_translate(text, language, llm):
+        time.sleep(0.3)
+        return "번역: " + text
+
+    def slow_draft(*args, **kwargs):
+        time.sleep(0.3)
+        return Draft(text="Dimensions: see datasheet.", slots={"draft_language": "en"})
+
+    deps = GraphDeps(
+        llm=router(),
+        **stubs.ANALYSIS,
+        translate=slow_translate,
+        write_draft=slow_draft,
+        verify=lambda *a, **k: [],
+    )
+    svc = TicketService(build_ticket_graph(deps))
+    begin = time.monotonic()
+    ticket = svc.submit(inquiry())
+    assert time.monotonic() - begin < 0.5  # 합이면 0.6초 넘는다
+    assert ticket.body_ko == "번역: " + inquiry().body
+
+
+def test_failed_translation_is_retried_when_reviewer_asks_rewrite():
+    """번역이 비면 상담원이 재작성을 누를 때 다시 시도한다 (예전에는 고객 회신 때만)."""
+    calls = []
+
+    def translate(text, language, llm):
+        calls.append(text)
+        return None if len(calls) == 1 else "번역: " + text
+
+    svc = service(translate)
+    first = svc.submit(inquiry())
+    assert first.body_ko is None
+
+    again = svc.act(first.ticket_id, ReviewIn(action=ReviewAction.REWRITE, feedback="짧게"))
+
+    assert again.body_ko == "번역: " + inquiry().body
+    assert len(calls) == 2
+    assert svc._state(first.ticket_id).values.get("translation_job") is None  # 받은 작업은 지운다
+
+
+def test_collect_unknown_job_is_none():
+    assert t.collect_job(None) is None
+    assert t.collect_job("not-a-job") is None  # 서버를 다시 켜서 작업이 사라진 경우

@@ -221,3 +221,33 @@ def test_prod_refuses_to_start_without_db(monkeypatch):
         from cs_agent.config import get_settings
 
         get_settings.cache_clear()
+
+
+def test_reply_edited_in_customer_language_is_sent_without_translation():
+    """상담원이 고객 언어로 직접 고쳐 승인하면 번역하지 않고 그대로 보낸다 (예전에는 보류됐다)."""
+    calls = []
+
+    def translate(text, source, target, llm):
+        calls.append((source, target))
+        return text  # 실제 모델도 같은 글을 돌려준다 → 예전에는 '번역 안 됨' 으로 보류
+
+    with TestClient(
+        create_app(
+            llm=LLMRouter(Settings(_env_file=None)),
+            agents={**ANALYSIS, "translate_reply": translate},
+            storage="memory",
+            retrievers=(None, None),
+        )
+    ) as client:
+        tid = client.post("/api/tickets", json={**INQUIRY, "language": "es"}).json()["ticket_id"]
+        spanish = (
+            "Las dimensiones del TRF-OIL-1000 están en la sección 2 de la hoja de datos. "
+            "Quedamos atentos a cualquier otra consulta."
+        )
+        done = client.post(
+            f"/api/tickets/{tid}/action", json={"action": "edit_approve", "edited_text": spanish}
+        ).json()
+
+    assert done["status"] == "APPROVED"
+    assert done["final_reply"] == spanish
+    assert calls == []  # 번역을 부르지 않았다

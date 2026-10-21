@@ -86,6 +86,7 @@ class FakeService:
 
     def __init__(self) -> None:
         self.acted: list[str] = []
+        self.reviews: list = []
         self.resolved: list[str] = []
         self.count = 0
 
@@ -98,11 +99,14 @@ class FakeService:
             "info": TicketStatus.READY_FOR_REVIEW,
             "human": TicketStatus.HUMAN_QUEUE,
         }[inquiry.body]
-        return SimpleNamespace(ticket_id=f"T-{inquiry.body}-{self.count}", status=status)
+        draft = SimpleNamespace(text="AI 초안") if inquiry.body == "draft" else None
+        return SimpleNamespace(
+            ticket_id=f"T-{inquiry.body}-{self.count}", status=status, draft=draft
+        )
 
     def act(self, ticket_id, review):
-        assert review.action == ReviewAction.APPROVE
         self.acted.append(ticket_id)
+        self.reviews.append(review)
         # 추가정보 요청문을 승인하면 고객 회신 대기
         status = TicketStatus.WAITING_CUSTOMER if "info" in ticket_id else TicketStatus.APPROVED
         return SimpleNamespace(status=status)
@@ -128,14 +132,22 @@ def test_submit_all_records_latency_and_keeps_going_after_error() -> None:
 def test_demo_resolves_only_sent_answers() -> None:
     service = FakeService()
     rows = [
-        {"ticket_id": "G-0", "inquiry_body": "draft"},
-        {"ticket_id": "G-1", "inquiry_body": "info"},
+        {"ticket_id": "G-0", "inquiry_body": "draft", "final_reply": "실제 회신"},
+        {"ticket_id": "G-1", "inquiry_body": "info", "final_reply": "실제 회신"},
         {"ticket_id": "G-2", "inquiry_body": "human"},
     ]
 
     runs = submit_all(service, rows, "r", demo=True)
 
     assert service.acted == ["T-draft-1", "T-info-2"]  # 사람 큐는 건드리지 않는다
+    # 답변 초안은 실제 회신으로 수정 승인 (CSA-15), 추가정보 요청문은 그대로 승인
+    draft_review, info_review = service.reviews
+    assert (draft_review.action, draft_review.edited_text) == (
+        ReviewAction.EDIT_APPROVE,
+        "실제 회신",
+    )
+    assert info_review.action == ReviewAction.APPROVE and info_review.edited_text is None
+    assert "has_draft" not in runs["G-0"]  # 내부 표시는 결과에 남기지 않는다
     assert service.resolved == ["T-draft-1"]  # 추가정보 요청은 해결하지 않는다
     assert runs["G-0"]["status"] == TicketStatus.RESOLVED
     assert runs["G-1"]["status"] == TicketStatus.WAITING_CUSTOMER
@@ -202,3 +214,27 @@ def test_result_is_saved_as_json_and_markdown(tmp_path, monkeypatch) -> None:
 def test_test_split_needs_final_flag() -> None:
     with pytest.raises(SystemExit, match="N-05"):
         run_eval.main(["--split", "test"])
+
+
+def test_demo_without_gold_reply_approves_draft_as_is() -> None:
+    service = FakeService()
+
+    submit_all(service, [{"ticket_id": "G-0", "inquiry_body": "draft"}], "r", demo=True)
+
+    assert service.reviews[0].action == ReviewAction.APPROVE
+
+
+def test_demo_report_does_not_measure_k2() -> None:
+    from cs_agent.evaluation.run_eval import build_result, demo_halves
+
+    rows = [
+        {"gold_ticket_id": f"G-{i}", "ticket_id": f"T-{i}", "gold_category": "TECH_SPEC",
+         "review_action": "edit_approve", "dept_match": True}
+        for i in range(4)
+    ]  # fmt: skip
+    halves = demo_halves(rows, {}, [f"G-{i}" for i in range(4)])
+    assert halves["first_half"]["K2_approve_as_is"] is None
+    result = build_result("valid", "r", rows, {}, demo=halves)
+    assert result["report"]["K2_approve_as_is"] is None and "K2_note" in result["report"]
+    plain = build_result("valid", "r", rows, {})
+    assert plain["report"]["K2_approve_as_is"] == 0.0  # 시연이 아니면 그대로 잰다
