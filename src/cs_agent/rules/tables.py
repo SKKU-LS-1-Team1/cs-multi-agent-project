@@ -55,6 +55,14 @@ class Product:
     name: str
     family: str
     division: str = ""  # family_divisions.csv (원본에 없음, 할 일 4)
+    # 기준표 원문을 보존한다. 금액·수량 계산 시 사용하는 쪽에서 Decimal 등으로 검증한다.
+    list_price_usd: str = ""
+    std_lead_time_weeks: str = ""
+    moq: str = ""
+    standards: str = ""
+    certifications: str = ""
+    doc_ids: tuple[str, ...] = ()
+    warranty_months: str = ""
 
 
 # eq=False: dict 필드가 있어 값 비교 해시는 못 만든다. 같은 객체인지로 비교·해시해서
@@ -145,6 +153,13 @@ def _load(ref_dir: Path) -> RefTables:
                     r["product_name"],
                     r["family"],
                     family_divisions.get(r["family"], ""),
+                    list_price_usd=r.get("list_price_usd", "").strip(),
+                    std_lead_time_weeks=r.get("std_lead_time_weeks", "").strip(),
+                    moq=r.get("moq", "").strip(),
+                    standards=r.get("standards", "").strip(),
+                    certifications=r.get("certifications", "").strip(),
+                    doc_ids=tuple(_split(r.get("doc_ids", ""))),
+                    warranty_months=r.get("warranty_months", "").strip(),
                 ),
             )
             for r in _read(ref_dir / "product_master.csv")

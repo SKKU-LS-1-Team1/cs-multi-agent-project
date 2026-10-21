@@ -53,6 +53,50 @@ def test_submit_review_approve_resolve(client):
     assert len(client.app.state.tickets.records.cases) == 1  # 승인 건은 사례로 남는다
 
 
+def test_api_exposes_english_review_and_approved_customer_reply():
+    from cs_agent.agents.drafting import TranslationError
+
+    attempts = []
+
+    def translate(text, source, target, llm):
+        attempts.append((text, source, target))
+        if len(attempts) == 1:
+            raise TranslationError("Temporary translation failure")
+        return "Respuesta aprobada."
+
+    with TestClient(
+        create_app(
+            llm=LLMRouter(Settings(_env_file=None)),
+            agents={**ANALYSIS, "translate_reply": translate},
+            storage="memory",
+            retrievers=(None, None),
+        )
+    ) as client:
+        ticket = client.post("/api/tickets", json={**INQUIRY, "language": "es"}).json()
+        tid = ticket["ticket_id"]
+        assert ticket["draft"]["slots"]["draft_language"] == "en"
+        assert ticket["final_reply"] is None
+        assert not attempts  # 검토 전에 번역하지 않음
+        held = client.post(
+            f"/api/tickets/{tid}/action",
+            json={"action": "edit_approve", "edited_text": "Approved English reply."},
+        ).json()
+        assert held["status"] == "ON_HOLD"
+        assert held["approved_reply"] == "Approved English reply."
+        assert held["translation_error"]
+        assert held["final_reply"] is None
+        assert client.post(f"/api/tickets/{tid}/resolve").status_code == 409
+        done = client.post(f"/api/tickets/{tid}/action", json={"action": "approve"}).json()
+        assert attempts == [("Approved English reply.", "en", "es")] * 2
+        assert done["status"] == "APPROVED"
+        assert done["final_reply"] == "Respuesta aprobada."
+        assert done["final_reply_language"] == "es"
+        assert done["translation_error"] is None
+        assert client.get(f"/api/tickets/{tid}").json()["final_reply"] == done["final_reply"]
+        assert client.post(f"/api/tickets/{tid}/resolve").status_code == 200
+        assert client.app.state.tickets.records.cases[0]["final_reply"] == done["final_reply"]
+
+
 def test_llm_calls_are_grouped_per_ticket(client, monkeypatch):
     from cs_agent.llm import router, tracing
 
