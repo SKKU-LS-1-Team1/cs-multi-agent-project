@@ -67,6 +67,8 @@ def _failed(checks) -> set[str]:
         ("1,000", {1000.0, 1.0}),  # 영어 천 단위 또는 유럽식 소수
         ("25.8", {25.8}),
         ("400", {400.0}),
+        ("2 500", {2500.0}),  # 공백 천 단위 (pl·fr·ru)
+        ("1 000,50", {1000.5}),
     ],
 )
 def test_number_values_reads_both_separators(token, expected):
@@ -88,6 +90,19 @@ def test_extract_values_kinds():
     assert {("money", "USD 2,515.00"), ("date", "2025-11-22"), ("number", "3.20")} <= found
     assert {("id", "DS-ACB-AS-2000"), ("id", "FAQ-LV_BREAKER"), ("ip", "IP54")} <= found
     assert {("standard", "IEC 60947-2"), ("mark", "CE")} <= found
+
+
+def test_space_thousands_and_latex_are_read_as_written():
+    # valid 실측 오탐 (CSV1-000326): 폴란드어 "2 500 m" 를 "500 m" 로 읽어 보류까지 갔다
+    sources = V.build_sources(
+        "Site altitude 2500 m. Above 1,000 m derating applies.", [], _draft("x")
+    )
+    text = "Powyżej 1,000 m należy zastosować derating; dla wysokości 2 500 m brak danych."
+    assert all(sources.supports(v) for v in V.extract_values(text))
+    # LLM 이 쓴 인라인 수식의 $ 는 달러가 아니다
+    assert [(v.kind, v.text) for v in V.extract_values("Torque $5\\,\\text{N·m}$.")] == [
+        ("spec", "5 N·m")
+    ]
 
 
 def test_ids_are_not_hyphenated_words():

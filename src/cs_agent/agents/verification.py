@@ -151,7 +151,9 @@ _DATE = re.compile(
     r"|(?<!\d)(\d{4})\s?[年년]\s?(\d{1,2})\s?[月월]\s?(\d{1,2})\s?[日일]?"  # 2025年11月22日
     r"|(?<![\d.])(\d{1,2})[./](\d{1,2})[./](\d{4})(?!\d)"  # 22.11.2025, 22/11/2025
 )
-_NUMBER = re.compile(r"(?<![\w.,])\d+(?:[.,\u202f\u00a0']\d+)*")
+# 공백 천 단위 구분("2 500 m", "1 000,50") 을 먼저 맞춘다 (pl·fr·ru 등)
+_NUM = r"\d{1,3}(?:[ \u202f\u00a0]\d{3})+(?:[.,]\d+)?(?!\d)|\d+(?:[.,\u202f\u00a0']\d+)*"
+_NUMBER = re.compile(rf"(?<![\w.,])(?:{_NUM})")
 _VERSION = re.compile(r"(?<![\w.])[vV](\d+(?:\.\d+)+)(?!\w|\.\d)")  # v3.20
 _LIST_SEP = r"\s*(?:,|/|-|–|—|~|～|〜|to|and|or|à|a|bis|до|至|และ|e|y|i|и|ve|dan|và)\s*"
 
@@ -214,7 +216,6 @@ def _unit_regex(words: Iterable[str]) -> str:
     return "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
 
 
-_NUM = r"\d+(?:[.,\u202f\u00a0']\d+)*"
 _SPEC_Q = re.compile(rf"(?<![\w.,])({_NUM})\s?({_unit_regex(_SPEC_UNITS)})(?![^\W\d_])")
 _IP = re.compile(r"\bIP\s?([0-9X]{2}[A-DHMSW]?)\b")
 _DURATION_UNIT = {w: unit for unit, words in _DURATION_WORDS.items() for w in words}
@@ -228,7 +229,7 @@ _MONEY = re.compile(
 
 def number_values(token: str) -> frozenset[float]:
     """숫자 표기 → 가능한 값들. "1,000" 은 1000 또는 1.0, "2.515,00" 은 2515."""
-    s = token.replace("\u202f", "").replace("\u00a0", "").replace("'", "")
+    s = re.sub(r"[ \u202f\u00a0']", "", token)
     if not s:
         return frozenset()
     if "," in s and "." in s:
@@ -308,12 +309,23 @@ def _propagate(text: str, start: int, unit_pattern: str) -> list[tuple[str, int]
         end = m.start()
 
 
+_LATEX_INLINE = re.compile(r"\$([^$\n]*\\[^$\n]*)\$")  # $5\,\text{N·m}$
+_LATEX_COMMAND = re.compile(r"\\(?:text|mathrm)\{([^}]*)\}|\\[,;:! ]|\\[A-Za-z]+")
+
+
+def _strip_latex(text: str) -> str:
+    """LLM 이 쓴 인라인 수식의 $ 를 달러로 읽지 않게 수식 기호를 벗긴다."""
+    return _LATEX_INLINE.sub(
+        lambda m: " " + _LATEX_COMMAND.sub(lambda c: c.group(1) or " ", m.group(1)) + " ", text
+    )
+
+
 def extract_values(text: str) -> list[Value]:
     """글 → 비교할 값 목록.
 
     ID·규격·날짜를 먼저 뽑고 그 자리를 지워 숫자가 두 번 잡히지 않게 한다.
     """
-    text = _nfkc(text)
+    text = _strip_latex(_nfkc(text))
     values: list[Value] = []
     spans: list[tuple[int, int]] = []
 
