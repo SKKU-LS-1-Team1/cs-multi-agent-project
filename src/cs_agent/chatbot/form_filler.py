@@ -15,10 +15,8 @@
 #
 # 구현 메모
 # - fields 에는 대화에서 찾은 값을 모두 넣는다 (필수가 아니어도 상담원에게 쓸모 있다).
-#   값이 없는 필수 항목은 둘로 나눈다. required_info 의 처리 차단 항목(시리얼·에러코드 …)은
-#   missing_required (빨간 칸, 채우기 전 제출 불가), 나머지(사진·로그 …)는 missing_optional
-#   (칸은 보이지만 비워도 제출 가능). 사진처럼 글로 채울 수 없는 항목 때문에 제출이 막히면 안 된다.
-#   화면(InquiryForm.tsx)이 셋을 합쳐 칸을 만들므로 같은 항목이 두 곳에 있으면 안 된다.
+#   값이 없는 필수 항목은 missing_required 에 넣는다 (빨간 칸, 채우기 전 제출 불가).
+#   화면(InquiryForm.tsx)이 둘을 합쳐 칸을 만들므로 같은 항목이 양쪽에 있으면 안 된다.
 # - 값은 extraction.field_values 가 먼저고, 없으면 error_code · serial_no · fw_version(current_fw) ·
 #   제품명(product_model)으로 채운다. 기준표 항목(info_field_codebook)이 아니거나 빈 값은 버린다.
 # - transcript 는 챗봇 기록 순서(api/chat.py): 고객 말, 챗봇 답변, 고객 말 … 로 번갈아 쌓인다.
@@ -93,8 +91,7 @@ class InquiryDraftForm(BaseModel):
     category: str | None = None
     product_code: str | None = None
     fields: dict[str, str] = Field(default_factory=dict)
-    missing_required: list[str] = Field(default_factory=list)  # 비면 제출 불가 (처리 차단 항목)
-    missing_optional: list[str] = Field(default_factory=list)  # 필수지만 비워도 제출 가능
+    missing_required: list[str] = Field(default_factory=list)
     subject: str = ""
     body: str = ""
 
@@ -110,13 +107,12 @@ def fill_form(
     tables = tables or load_tables()
     product = tables.products.get(extraction.product_code or "")
     family = extraction.product_family or (product.family if product else None)
-    required, blocking = required_info(family, classification.category, tables)
+    required, _ = required_info(family, classification.category, tables)
 
     known = _known_values(extraction, product.name if product else None, tables)
     # 필수 항목 순서가 먼저, 그 밖에 찾은 값은 뒤에
     fields = {name: known[name] for name in required if name in known}
     fields |= {name: value for name, value in known.items() if name not in fields}
-    missing = [name for name in required if name not in fields]
     subject, body = _summary(
         classification, extraction, product.name if product else None, fields, transcript, llm
     )
@@ -124,8 +120,7 @@ def fill_form(
         category=str(classification.category),
         product_code=product.code if product else None,
         fields=fields,
-        missing_required=[name for name in missing if name in blocking],
-        missing_optional=[name for name in missing if name not in blocking],
+        missing_required=[name for name in required if name not in fields],
         subject=subject,
         body=body,
     )

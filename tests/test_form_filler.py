@@ -64,10 +64,14 @@ def test_defect_example_fills_known_fields_and_marks_the_rest_missing() -> None:
         "error_code": "E.OC",
         "operating_condition": "during acceleration",
     }
-    # DRIVE · DEFECT 필수 항목 중 대화에 없던 것. 처리 차단 항목(시리얼)만 제출을 막는다
-    assert form.missing_required == ["serial_no"]
-    # 사진·로그처럼 글로 채울 수 없는 항목은 비워도 제출할 수 있다
-    assert form.missing_optional == ["photos", "logs", "parameter_backup", "motor_nameplate"]
+    # DRIVE · DEFECT 필수 항목 중 대화에 없던 것 (시리얼 번호, 사진·로그 …)
+    assert form.missing_required == [
+        "serial_no",
+        "photos",
+        "logs",
+        "parameter_backup",
+        "motor_nameplate",
+    ]
 
 
 def test_required_fields_come_from_the_rule_table() -> None:
@@ -75,13 +79,9 @@ def test_required_fields_come_from_the_rule_table() -> None:
 
     form = fill_form(classification, extraction, S100_CHAT, tables=TABLES)
 
-    required, blocking = TABLES.required[("DRIVE", "DEFECT")]
-    missing = set(form.missing_required) | set(form.missing_optional)
-    assert (set(form.fields) & set(required)) | missing == set(required)
-    assert set(form.missing_required) <= set(blocking)
-    # 화면이 셋을 합쳐 칸을 만드므로 겹치면 안 된다
-    assert not set(form.fields) & missing
-    assert not set(form.missing_required) & set(form.missing_optional)
+    required = set(TABLES.required[("DRIVE", "DEFECT")][0])
+    assert (set(form.fields) & required) | set(form.missing_required) == required
+    assert not set(form.fields) & set(form.missing_required)
 
 
 def test_serial_and_firmware_are_mapped_to_field_names() -> None:
@@ -117,7 +117,7 @@ def test_blank_and_unknown_values_are_not_filled() -> None:
     form = fill_form(classification, extraction, [], tables=TABLES)
 
     assert "serial_no" in form.missing_required
-    assert "photos" in form.missing_optional
+    assert "photos" in form.missing_required
     assert "not_a_field" not in form.fields
 
 
@@ -137,7 +137,7 @@ def test_family_is_taken_from_product_code_when_missing() -> None:
 
     form = fill_form(classification, extraction, [], tables=TABLES)
 
-    required = set(form.fields) | set(form.missing_required) | set(form.missing_optional)
+    required = set(form.fields) | set(form.missing_required)
     assert required == set(TABLES.required[("ESS", "QUOTE")][0])
 
 
@@ -249,7 +249,6 @@ def test_form_matches_the_shape_the_screen_expects() -> None:
         "product_code",
         "fields",
         "missing_required",
-        "missing_optional",
         "subject",
         "body",
     }
@@ -264,7 +263,7 @@ def test_known_values_outside_the_required_list_are_kept() -> None:
 
     assert list(form.fields)[0] == "product_model"  # 필수 항목이 앞
     assert form.fields["error_code"] == "E.OC" and form.fields["serial_no"] == "SN-1"
-    assert "error_code" not in form.missing_required + form.missing_optional
+    assert "error_code" not in form.missing_required
 
 
 @pytest.mark.parametrize(
