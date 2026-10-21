@@ -105,6 +105,22 @@ class CheckResult(BaseModel):
     reason: str = ""
 
 
+class EscalationRequest(BaseModel):
+    """CSA-55: 상담원이 검토할 한국어 이관 요청서. 생성 자체는 이관이 아니다."""
+
+    to_dept: str
+    reason: str
+    summary: str
+    fields: dict[str, str]
+    cited: list[str]
+    text: str
+    model: str = ""
+
+
+class EscalationRequestIn(BaseModel):
+    to_dept: str | None = None  # 생략하면 기존 규칙의 escalate_to
+
+
 class ReviewIn(BaseModel):
     """상담원 버튼 입력. 그래프 resume 값"""
 
@@ -143,6 +159,7 @@ class TicketOut(BaseModel):
     sla_due_at: datetime | None = None
     draft: Draft | None = None
     info_request: str | None = None
+    escalation_request: EscalationRequest | None = None
     approved_reply: str | None = None
     final_reply: str | None = None
     final_reply_language: str | None = None

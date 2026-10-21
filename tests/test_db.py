@@ -72,6 +72,58 @@ def test_case_columns_match_build_case():
 # --- 실제 DB --------------------------------------------------------------------------------
 
 
+@needs_db
+@pytest.mark.parametrize("action", [ReviewAction.APPROVE, ReviewAction.ESCALATE])
+def test_escalation_request_persistence_and_review_kind(db, action):
+    """요청서 복원 후에도 승인은 답변, 이관은 요청서 버전을 참조한다."""
+    from cs_agent.graph.builder import postgres_checkpointer
+    from cs_agent.schemas import EscalationRequest
+
+    _engine, Session = db
+    inquiry = InquiryIn(
+        channel="email",
+        language="en",
+        category=Category.TECH_SPEC,
+        product_code="TRF-OIL-1000",
+        body="Please confirm the dimensions.",
+        provided_fields={"application": "substation"},
+    )
+    request = EscalationRequest(
+        to_dept="CERT",
+        reason="규격 검토 요청",
+        summary="대상 규격 확인 요청입니다.",
+        fields={"product_code": "TRF-OIL-1000"},
+        cited=[],
+        text="사내 검토 요청서",
+        model="stub",
+    )
+    with postgres_checkpointer(TEST_DATABASE_URL) as saver:
+        service = _db_service(Session, saver)
+        service.escalation_writer = lambda *a, **k: request
+        tid = service.submit(inquiry).ticket_id
+        service.generate_escalation_request(tid)
+        service.generate_escalation_request(tid)  # 동일 문서는 중복 저장하지 않는다
+        with Session() as s:
+            rows = s.scalars(
+                select(DraftRow).where(DraftRow.ticket_id == tid, DraftRow.kind == "escalation")
+            ).all()
+            assert len(rows) == 1
+            assert EscalationRequest.model_validate(rows[0].slots) == request
+
+    with postgres_checkpointer(TEST_DATABASE_URL) as saver:
+        service = _db_service(Session, saver)
+        assert service.get(tid).escalation_request == request
+        assert service._state(tid).next == ("review",)
+        result = service.act(tid, ReviewIn(action=action))
+        expected = "escalation" if action == ReviewAction.ESCALATE else "draft"
+        with Session() as s:
+            review = s.scalar(select(ReviewRow).where(ReviewRow.ticket_id == tid))
+            assert s.get(DraftRow, review.draft_id).kind == expected
+        assert result.status == (
+            TicketStatus.ESCALATED if action == ReviewAction.ESCALATE else TicketStatus.APPROVED
+        )
+
+
 @pytest.fixture
 def db():
     from alembic import command

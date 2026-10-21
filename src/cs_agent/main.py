@@ -24,6 +24,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack, asynccontextmanager, suppress
+from functools import partial
 from typing import Any, Literal
 
 from fastapi import FastAPI
@@ -155,7 +156,10 @@ def create_app(
                 **(agents or {}),
             )
             app.state.tickets = TicketService(
-                build_ticket_graph(deps, checkpointer), records, roster
+                build_ticket_graph(deps, checkpointer),
+                records,
+                roster,
+                escalation_writer=partial(deps.write_escalation_request, llm=deps.llm),
             )
             interval = settings.analysis_retry_interval_s
             retry = (

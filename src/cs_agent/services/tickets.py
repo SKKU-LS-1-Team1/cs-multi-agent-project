@@ -28,18 +28,20 @@
 #   services/records.py (SqlRecords: tickets·drafts·reviews·resolution_cases, 없으면 MemoryRecords).
 #   그래프를 돌릴 때마다 records.save_state() 로 tickets 행을 맞춘다.
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 from langgraph.types import Command
 
 from cs_agent.agents.case_memory import SAVE_ON, build_case
+from cs_agent.agents.escalation import EscalationError, InvalidEscalation
 from cs_agent.agents.translation import new_part, source_body
 from cs_agent.agents.verification import detect_language
-from cs_agent.domain import Route, TicketStatus
+from cs_agent.domain import ReviewAction, Route, TicketStatus
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
-from cs_agent.schemas import AssignIn, InquiryIn, ReviewIn, TicketOut
+from cs_agent.schemas import AssignIn, EscalationRequest, InquiryIn, ReviewIn, TicketOut
 from cs_agent.services import assignment
 from cs_agent.services.assignment import Agent
 from cs_agent.services.records import MemoryRecords, Records
@@ -63,11 +65,17 @@ def ticket_dept(values: dict) -> str | None:
 
 class TicketService:
     def __init__(
-        self, graph: Any, records: Records | None = None, roster: list[Agent] | None = None
+        self,
+        graph: Any,
+        records: Records | None = None,
+        roster: list[Agent] | None = None,
+        *,
+        escalation_writer: Callable[..., EscalationRequest] | None = None,
     ) -> None:
         self.graph = graph
         self.records = records if records is not None else MemoryRecords()
         self.roster = list(roster or [])  # 담당자 명단 (data/ref/agents.csv). 비면 배정 안 함
+        self.escalation_writer = escalation_writer
 
     @staticmethod
     def _config(ticket_id: str) -> dict:
@@ -177,11 +185,68 @@ class TicketService:
         )
         return self.get(ticket_id)
 
+    def generate_escalation_request(self, ticket_id: str, to_dept: str | None = None) -> TicketOut:
+        """검토 중/사람 큐에서 요청서만 생성. 승인·이관·자동 배정은 하지 않는다."""
+        snapshot = self._state(ticket_id)
+        status = snapshot.values.get("status")
+        if status not in {
+            TicketStatus.READY_FOR_REVIEW,
+            TicketStatus.ON_HOLD,
+            TicketStatus.HUMAN_QUEUE,
+        }:
+            raise InvalidAction("검토 대기 또는 사람 큐 문의에서만 요청서를 만들 수 있습니다")
+        if self.escalation_writer is None:
+            raise EscalationError("escalation_writer_unavailable")
+        try:
+            with ticket_scope(ticket_id):
+                request = self.escalation_writer(
+                    snapshot.values,
+                    to_dept=to_dept,
+                    sla_due_at=self.get(ticket_id).sla_due_at,
+                )
+        except InvalidEscalation as exc:
+            raise InvalidAction(str(exc)) from exc
+        # 호출 중 회신·승인이 있었다면 이전 문의로 만든 초안을 덮어쓰지 않는다.
+        latest = self._state(ticket_id)
+        if latest.config != snapshot.config:
+            raise InvalidAction("문의가 변경되었습니다. 최신 내용으로 요청서를 다시 생성해 주세요")
+        node = {
+            TicketStatus.READY_FOR_REVIEW: "ready",
+            TicketStatus.ON_HOLD: "hold",
+            TicketStatus.HUMAN_QUEUE: "human",
+        }[status]
+        self.graph.update_state(
+            self._config(ticket_id), {"escalation_request": request}, as_node=node
+        )
+        values = self._state(ticket_id).values
+        self.records.save_state(ticket_id, values)
+        return self.get(ticket_id)
+
     def act(self, ticket_id: str, review: ReviewIn) -> TicketOut:
         snapshot = self._state(ticket_id)
         if "review" not in snapshot.next:
             raise InvalidAction(f"{ticket_id} 는 상담원 검토 대기 상태가 아니다")
-        self.records.add_review(ticket_id, review)
+        request = snapshot.values.get("escalation_request")
+        if review.action == ReviewAction.ESCALATE and request:
+            if review.escalate_to is not None and review.escalate_to != request.to_dept:
+                raise InvalidAction(
+                    "이관 부서가 바뀌었습니다. 해당 부서 요청서를 다시 생성해 주세요"
+                )
+            if review.edited_text is not None and not review.edited_text.strip():
+                raise InvalidAction("이관 요청서 본문은 비워 둘 수 없습니다")
+            review = review.model_copy(update={"escalate_to": request.to_dept})
+        if request and review.action in {ReviewAction.REWRITE, ReviewAction.INFO_REQUEST}:
+            # 새 초안/검토 결과를 만들면 기존 요청서는 더 이상 최신이 아니다.
+            node = "hold" if snapshot.values.get("status") == TicketStatus.ON_HOLD else "ready"
+            self.graph.update_state(
+                self._config(ticket_id), {"escalation_request": None}, as_node=node
+            )
+        kind = (
+            "escalation"
+            if review.action == ReviewAction.ESCALATE and request
+            else (snapshot.values.get("pending") or "draft")
+        )
+        self.records.add_review(ticket_id, review, draft_kind=kind)
         self._run(ticket_id, Command(resume=review.model_dump(mode="json")))
         return self.get(ticket_id)
 
@@ -236,6 +301,7 @@ class TicketService:
             ),
             draft=v.get("draft"),
             info_request=v.get("info_request"),
+            escalation_request=v.get("escalation_request"),
             approved_reply=v.get("approved_reply"),
             final_reply=v.get("final_reply"),
             final_reply_language=(

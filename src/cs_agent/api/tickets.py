@@ -5,6 +5,8 @@
 #     (고객 문의하기 화면 CSA-39, mock 데이터 CSA-23, 평가 스크립트 CSA-50 이 쓴다)
 # - GET  /api/tickets?dept=               → list[dict]  상담원 작업 목록 (SLA 순, 75% 경고, CSA-40)
 # - GET  /api/tickets/{ticket_id}         → TicketOut  검토 화면 (초안·근거·점검 결과, CSA-41·42)
+# - POST /api/tickets/{ticket_id}/escalation-request → 요청서 생성/재생성 (CSA-55).
+#   {"to_dept": "CERT"} 또는 생략하면 규칙의 이관 부서. 실패는 503, 상태는 유지.
 # - POST /api/tickets/{ticket_id}/action  ReviewIn → TicketOut  승인·수정 후 승인·AI 재작성·
 #     추가정보 요청·이관·반려 (CSA-25)
 # - POST /api/tickets/{ticket_id}/resolve → TicketOut  해결 확정 → 사례 저장 (기획서 7.1)
@@ -18,8 +20,9 @@ from contextlib import contextmanager
 
 from fastapi import APIRouter, HTTPException
 
+from cs_agent.agents.escalation import EscalationError
 from cs_agent.api.deps import Tickets
-from cs_agent.schemas import AssignIn, InquiryIn, ReviewIn, TicketOut
+from cs_agent.schemas import AssignIn, EscalationRequestIn, InquiryIn, ReviewIn, TicketOut
 from cs_agent.services.tickets import InvalidAction, TicketNotFound
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -33,6 +36,8 @@ def _errors() -> Iterator[None]:
         raise HTTPException(404, f"ticket {e} not found") from e
     except InvalidAction as e:
         raise HTTPException(409, str(e)) from e
+    except EscalationError as e:
+        raise HTTPException(503, str(e)) from e
 
 
 @router.post("", response_model=TicketOut, status_code=201)
@@ -55,6 +60,15 @@ def get_ticket(ticket_id: str, tickets: Tickets) -> TicketOut:
 def act(ticket_id: str, review: ReviewIn, tickets: Tickets) -> TicketOut:
     with _errors():
         return tickets.act(ticket_id, review)
+
+
+@router.post("/{ticket_id}/escalation-request", response_model=TicketOut)
+def generate_escalation_request(
+    ticket_id: str, tickets: Tickets, body: EscalationRequestIn | None = None
+) -> TicketOut:
+    """CSA-55: 요청서 생성/재생성. GET /tickets/{id}로 다시 조회. 실제 이관은 /action."""
+    with _errors():
+        return tickets.generate_escalation_request(ticket_id, body.to_dept if body else None)
 
 
 @router.post("/{ticket_id}/resolve", response_model=TicketOut)

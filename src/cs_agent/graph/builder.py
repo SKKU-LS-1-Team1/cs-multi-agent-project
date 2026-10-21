@@ -45,7 +45,7 @@ from langgraph.types import interrupt
 
 import cs_agent.agents.translation as translation
 from cs_agent import domain, schemas
-from cs_agent.agents import analysis, drafting, retrieval, verification
+from cs_agent.agents import analysis, drafting, escalation, retrieval, verification
 from cs_agent.agents import info_request as info_request_agent
 from cs_agent.agents.analysis import AnalysisError
 from cs_agent.agents.drafting import DraftingError, TranslationError
@@ -76,6 +76,7 @@ class GraphDeps:
     write_info_request: Callable = info_request_agent.write_info_request
     localize_info_request: Callable = info_request_agent.localize_request  # 보낼 때 고객 언어로
     translate_reply: Callable = drafting.translate_reply
+    write_escalation_request: Callable = escalation.write_escalation_request
 
 
 def serializer() -> JsonPlusSerializer:
@@ -137,6 +138,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "draft": None,
             "drafting_error": None,
             "info_request": None,
+            "escalation_request": None,
             "checks": [],
             "evidence": [],
             "review": None,
@@ -448,13 +450,18 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
 
     def escalate(state: TicketState) -> dict:
         review = state["review"]
+        request = state.get("escalation_request")
+        rules = state.get("rules")
+        target = review.escalate_to or (request.to_dept if request else None)
+        target = target or (rules.escalate_to or rules.assigned_dept if rules else None)
         return {
             "status": TicketStatus.ESCALATED,
             "translation_error": None,
             "final_reply": None,
-            "escalated_to": review.escalate_to
-            or state["rules"].escalate_to
-            or state["rules"].assigned_dept,
+            "escalated_to": target,
+            "escalation_request": request.model_copy(update={"text": review.edited_text})
+            if request and review.edited_text is not None
+            else request,
         }
 
     g = StateGraph(TicketState)
