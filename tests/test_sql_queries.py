@@ -378,6 +378,41 @@ def test_eval_join(conn, tmp_path) -> None:
 
 
 @needs_db
+def test_live_case_usage(conn) -> None:
+    _ticket(conn, "T-1", 1)
+    _ticket(conn, "T-2", 1)
+    for case_id, split in (("CASE-LIVE", "live"), ("RC-0001", "train")):
+        conn.execute(
+            sa.text(
+                "INSERT INTO resolution_cases (case_id, text, summary, cause, action, final_reply,"
+                " cited, edited, source_fix_needed, active, data_split) VALUES (:c, 't', '', '',"
+                " '', '', '[]', false, false, true, :s)"
+            ),
+            {"c": case_id, "s": split},
+        )
+    evidence = {
+        "T-1": [
+            {"source": "cases", "doc_id": "CASE-LIVE"},
+            {"source": "cases", "doc_id": "RC-0001"},
+        ],
+        "T-2": [{"source": "docs", "doc_id": "CASE-LIVE"}],  # 문서 근거는 세지 않는다
+    }
+    for ticket_id, items in evidence.items():
+        conn.execute(
+            sa.text(
+                "INSERT INTO drafts (ticket_id, version, kind, text, template, slots, cited, "
+                "evidence, checks, fix_notes, model) VALUES (:t, 1, 'draft', 't', '', '{}', "
+                "'[]', CAST(:e AS jsonb), '[]', '[]', '')"
+            ),
+            {"t": ticket_id, "e": json.dumps(items)},
+        )
+
+    rows = run(conn, "eval_join", "live_case_usage", ticket_ids=["T-1", "T-2", "T-NONE"])
+
+    assert rows == [{"ticket_id": "T-1", "live_cases": 1}, {"ticket_id": "T-2", "live_cases": 0}]
+
+
+@needs_db
 def test_eval_leaves_no_view_that_blocks_migrations(conn, tmp_path) -> None:
     from cs_agent.db.queries import load_tickets_gold, ticket_results_view
     from cs_agent.db.session import get_engine

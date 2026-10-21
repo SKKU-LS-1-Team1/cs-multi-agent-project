@@ -250,3 +250,24 @@ FROM ticket_results
 WHERE CAST(:split AS text) IS NULL OR data_split = CAST(:split AS text)
 GROUP BY GROUPING SETS ((data_split), (data_split, gold_category))
 ORDER BY data_split, gold_category NULLS FIRST;
+
+
+-- name: live_case_usage
+-- 시연(CSA-15, run_eval --demo): 문의마다 마지막 답변 초안 근거에 운영 중 쌓인 사례
+-- (resolution_cases.data_split = 'live')가 몇 개 들어갔는지. :ticket_ids 는 이번 실행 티켓 목록.
+SELECT
+    d.ticket_id,
+    count(rc.case_id) AS live_cases
+FROM (
+    SELECT DISTINCT ON (ticket_id) ticket_id, evidence
+    FROM drafts
+    WHERE kind = 'draft' AND ticket_id = ANY(CAST(:ticket_ids AS text[]))
+    ORDER BY ticket_id, version DESC
+) AS d
+LEFT JOIN LATERAL jsonb_array_elements(d.evidence) AS ev (value) ON true
+LEFT JOIN resolution_cases AS rc
+    ON ev.value ->> 'source' = 'cases'
+    AND rc.case_id = ev.value ->> 'doc_id'
+    AND rc.data_split = 'live'
+GROUP BY d.ticket_id
+ORDER BY d.ticket_id;
