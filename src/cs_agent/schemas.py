@@ -53,6 +53,7 @@ class Extraction(BaseModel):
     urgency: Urgency = Urgency.NONE
     language: str | None = None
     provided_info: list[str] = Field(default_factory=list)  # required_info.csv 의 항목 이름
+    field_values: dict[str, str] = Field(default_factory=dict)  # 확인된 항목의 실제 값
     # RETURN 일 때만: 불량 반품(DOA·품질)이면 True, 오배송·주문 착오·잉여면 False, 모르면 None.
     # False 면 RT-ALL-RETURN-NON_DEFECT(SCM) 로 보낸다.
     return_defect: bool | None = None
@@ -129,5 +130,9 @@ class TicketOut(BaseModel):
     sla_due_at: datetime | None = None
     draft: Draft | None = None
     info_request: str | None = None
+    approved_reply: str | None = None
+    final_reply: str | None = None
+    final_reply_language: str | None = None
+    translation_error: str | None = None
     checks: list[CheckResult] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)

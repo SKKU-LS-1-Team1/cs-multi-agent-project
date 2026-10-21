@@ -260,9 +260,92 @@ def test_failed_extraction_preserves_unaffected_fields_but_not_withdrawn_serial(
     assert output.error_code == "E.OC"
     assert output.serial_no is None
     assert "serial_no" not in output.provided_info
+    assert "serial_no" not in output.field_values
     assert result.unconfirmed_fields["serial_no"] == "RETRACTED"
     assert result.unconfirmed_evidence["serial_no"] == inquiry.body
     assert result.field_candidates["serial_no"][0]["value"] == "OLD123"
+
+
+def test_public_extraction_passes_confirmed_field_values(tables, settings):
+    inquiry = InquiryIn(channel="email", body="S100. Quantity: 10. Incoterms: FOB Busan.")
+    extractor = ExtractorStub(
+        response={
+            "fields": {
+                "quantity": {"value": "10", "evidence": "Quantity: 10."},
+                "incoterms": {"value": "FOB Busan", "evidence": "Incoterms: FOB Busan."},
+            },
+            "model": "gemini-test",
+        }
+    )
+    output = a.extract(
+        inquiry,
+        tables,
+        llm=JudgeStub(),
+        extractor=extractor,
+        settings=settings,
+        category=Category.QUOTE,
+        requested_fields=["quantity", "incoterms"],
+    )
+    assert output.field_values["quantity"] == "10"
+    assert output.field_values["incoterms"] == "FOB Busan"
+    assert {"quantity", "incoterms"} <= set(output.provided_info)
+
+
+def test_corrected_quantity_is_passed_without_old_value(tables, settings):
+    inquiry = InquiryIn(
+        channel="chat",
+        product_code=S100,
+        body="Correct the quantity to 10 units.",
+        provided_fields={"quantity": "5"},
+    )
+    extractor = ExtractorStub(
+        response={
+            "fields": {"quantity": {"value": "10", "evidence": inquiry.body}},
+            "model": "gemini-test",
+        }
+    )
+    result = details(
+        inquiry,
+        tables,
+        settings,
+        extractor,
+        requested_fields=["quantity"],
+        transcript=[{"role": "user", "content": "Quantity: 5 units."}],
+    )
+    output = result.to_extraction()
+    assert output.field_values["quantity"] == "10"
+    assert any(c["value"] == "5" for c in result.field_candidates["quantity"])
+    output.field_values["quantity"] = "20"
+    assert result.fields["quantity"] == "10"  # 공통 출력의 변경이 상세 이력을 바꾸지 않는다.
+
+
+def test_secondary_category_required_values_are_extracted_in_same_request(tables, settings):
+    inquiry = InquiryIn(
+        channel="email", body="S100. CE certificate and quote for 10 units, FOB Busan."
+    )
+    extractor = ExtractorStub(
+        response={
+            "fields": {
+                "quantity": {"value": "10", "evidence": inquiry.body},
+                "incoterms": {"value": "FOB Busan", "evidence": inquiry.body},
+            },
+            "model": "gemini-test",
+        }
+    )
+    output = a.extract(
+        inquiry,
+        tables,
+        settings=settings,
+        llm=JudgeStub(),
+        extractor=extractor,
+        category=Category.COMPLIANCE,
+        secondary_category=Category.QUOTE,
+    )
+    assert output.field_values["quantity"] == "10"
+    assert {"target_standard", "quantity", "incoterms"} <= set(
+        extractor.calls[0]["input"]["requested_fields"]
+    )
+    assert len(extractor.calls) == 1
 
 
 @pytest.mark.parametrize("override", [None, "explicit-model"])

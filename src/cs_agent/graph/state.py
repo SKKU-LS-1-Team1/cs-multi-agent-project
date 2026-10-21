@@ -31,6 +31,7 @@ class TicketState(TypedDict, total=False):
     route: str | None  # ⑥ 분기: human | info_request | draft (domain.Route), 분석 대기면 None
     evidence: list[Evidence]  # ⑧ 근거 확정, CSA-28
     draft: Draft | None  # ⑨ 답변 작성, CSA-29·30
+    drafting_error: str | None  # ⑨ 입력 부족·호출/출력 오류 → 기존 보류·검토 흐름
     checks: list[CheckResult]  # ⑩ 자동 점검, CSA-31
     retries: int  # 자동 점검 재작성 횟수, 최대 2
     fix_notes: list[str]  # ⑩ 실패 사유 → ⑨ 재작성에 넘김
@@ -40,5 +41,7 @@ class TicketState(TypedDict, total=False):
     review_rounds: int  # 상담원 재작성 요청 횟수, 자동 점검과 따로 센다
     followups: int  # 고객 회신(재문의)으로 다시 돈 횟수 (services/tickets.py reply)
     final_reply: str | None
+    approved_reply: str | None  # 상담원이 승인·수정 승인한 원문 (번역 실패 시에도 보존)
+    translation_error: str | None  # 고객 언어 번역 실패 → ON_HOLD, 재승인으로 재시도
     escalated_to: str | None
     status: str  # domain.TicketStatus

@@ -104,6 +104,129 @@ def test_simple_inquiry_reaches_review_then_approve(run):
     assert done.values["final_reply"] == "draft 1"
 
 
+@pytest.mark.parametrize("action", [ReviewAction.APPROVE, ReviewAction.EDIT_APPROVE])
+def test_english_review_then_translate_approved_text_to_customer_language(action):
+    translations, checked_languages = [], []
+
+    def translate(text, source, target, llm):
+        translations.append((text, source, target))
+        return "Réponse validée."
+
+    def verify(draft, category, slots, text, language, evidence, llm):
+        checked_languages.append(language)
+        return [CheckResult(name="language", passed=language == "en")]
+
+    def extract(inquiry, tables, **kwargs):
+        return stubs.extract(inquiry, tables, **kwargs).model_copy(update={"language": "en"})
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=stubs.classify,
+        extract=extract,
+        write_draft=lambda *a, **k: Draft(text="English draft.", slots={"draft_language": "en"}),
+        verify=verify,
+        translate_reply=translate,
+    )
+    service = TicketService(build_ticket_graph(deps))
+    ticket = service.submit(SPEC_QUESTION.model_copy(update={"language": "fr"}))
+    assert checked_languages == ["en"]
+    assert not translations
+    assert ticket.final_reply is None
+    edited = "Edited English reply." if action == ReviewAction.EDIT_APPROVE else None
+    result = service.act(ticket.ticket_id, ReviewIn(action=action, edited_text=edited))
+    assert translations == [(edited or "English draft.", "en", "fr")]
+    assert result.approved_reply == (edited or "English draft.")
+    assert result.final_reply == "Réponse validée."
+    assert result.final_reply_language == "fr"
+    assert result.status == TicketStatus.APPROVED
+    assert result.draft.text == "English draft."
+    assert service.records.tickets[ticket.ticket_id]["language"] == "fr"
+
+
+def test_translation_failure_retains_edited_reply_for_retry_and_reopen_clears_it():
+    from cs_agent.agents.drafting import TranslationError
+
+    translations = []
+
+    def translate(text, source, target, llm):
+        translations.append(text)
+        if len(translations) == 1:
+            raise TranslationError("Temporary translation failure")
+        return "Réponse corrigée."
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=stubs.classify,
+        extract=stubs.extract,
+        write_draft=lambda *a, **k: Draft(text="Original draft.", slots={"draft_language": "en"}),
+        translate_reply=translate,
+    )
+    service = TicketService(build_ticket_graph(deps))
+    inquiry = SPEC_QUESTION.model_copy(update={"language": "fr"})
+    ticket = service.submit(inquiry)
+    failed = service.act(
+        ticket.ticket_id, ReviewIn(action="edit_approve", edited_text="Edited reply.")
+    )
+    assert failed.status == TicketStatus.ON_HOLD
+    assert failed.approved_reply == "Edited reply."
+    assert failed.final_reply is None and failed.translation_error
+    assert service.graph.get_state(service._config(ticket.ticket_id)).next == ("review",)
+    recovered = service.act(ticket.ticket_id, ReviewIn(action="approve"))
+    assert translations == ["Edited reply.", "Edited reply."]
+    assert recovered.status == TicketStatus.APPROVED
+    assert recovered.final_reply == "Réponse corrigée."
+    assert recovered.translation_error is None
+    reopened = service.reply(ticket.ticket_id, inquiry)
+    assert reopened.final_reply is None and reopened.approved_reply is None
+    assert reopened.translation_error is None
+
+
+@pytest.mark.parametrize("action", ["reject", "escalate"])
+def test_nonapproval_does_not_translate(action):
+    def forbidden(*args):
+        raise AssertionError("No translation before approval")
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=stubs.classify,
+        extract=stubs.extract,
+        write_draft=lambda *a, **k: Draft(text="Draft", slots={"draft_language": "en"}),
+        translate_reply=forbidden,
+    )
+    service = TicketService(build_ticket_graph(deps))
+    ticket = service.submit(SPEC_QUESTION.model_copy(update={"language": "ar"}))
+    result = service.act(ticket.ticket_id, ReviewIn(action=action, escalate_to="FIELD_SVC"))
+    assert result.final_reply is None
+
+
+def test_extracted_field_values_reach_draft_and_checkpoint():
+    received = []
+
+    def extract(inquiry, tables, *, llm=None, category=None):
+        return stubs.extract(inquiry, tables).model_copy(
+            update={"field_values": {"quantity": "10"}}
+        )
+
+    def write(category, extraction, evidence, text, llm, **kwargs):
+        received.append(dict(extraction.field_values))
+        return Draft(text="draft", slots=dict(extraction.field_values), model="stub")
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=stubs.classify,
+        extract=extract,
+        write_draft=write,
+        verify=Calls().verify,
+    )
+    graph = build_ticket_graph(deps)
+    config = {"configurable": {"thread_id": "field-values"}}
+    graph.invoke({"ticket_id": "field-values", "inquiry": SPEC_QUESTION}, config)
+    state = graph.get_state(config)
+    assert received == [{"quantity": "10"}]
+    assert state.values["extraction"].field_values == {"quantity": "10"}
+    assert state.values["draft"].slots["quantity"] == "10"
+
+
 def test_checkpoint_restores_our_models_without_warnings(run):
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # 등록 안 된 타입이면 역직렬화 경고 → 실패

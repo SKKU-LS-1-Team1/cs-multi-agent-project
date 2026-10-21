@@ -10,7 +10,9 @@
 #   ⑩ verify ─┬ 통과 → ready → review
 #             ├ 실패 · 재시도 남음 → ⑨ draft (실패 사유를 fix_notes 로)
 #             └ 실패 · 재시도 초과 → hold(ON_HOLD) → review
-#   review (interrupt: 상담원 버튼 대기) ─┬ approve / edit_approve / reject → finish → END
+#   review (interrupt: 상담원 버튼 대기) ─┬ approve / edit_approve → finish(고객 언어 번역) → END
+#                                     │                          └ 번역 실패 → hold → review
+#                                     ├ reject → finish → END
 #                                     ├ rewrite → ⑨ draft (상담원 피드백, 재시도 0으로)
 #                                     ├ info_request → ⑦ → ready → review
 #                                     └ escalate → escalate(상태·부서 변경) → END
@@ -41,8 +43,9 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from cs_agent import domain, schemas
-from cs_agent.agents import analysis, retrieval, verification
+from cs_agent.agents import analysis, drafting, retrieval, verification
 from cs_agent.agents.analysis import AnalysisError
+from cs_agent.agents.drafting import DraftingError, TranslationError
 from cs_agent.config import get_settings
 from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
 from cs_agent.graph import defaults
@@ -50,7 +53,7 @@ from cs_agent.graph.state import TicketState
 from cs_agent.llm.router import LLMRouter
 from cs_agent.rules.engine import apply_rules
 from cs_agent.rules.tables import RefTables, load_tables
-from cs_agent.schemas import ReviewIn
+from cs_agent.schemas import CheckResult, ReviewIn
 
 
 @dataclass
@@ -65,9 +68,10 @@ class GraphDeps:
     extract: Callable = analysis.extract
     first_pass: Callable = retrieval.first_pass
     finalize_evidence: Callable = retrieval.finalize_evidence
-    write_draft: Callable = defaults.write_draft  # TODO(CSA-29): agents.drafting.write_draft
+    write_draft: Callable = drafting.write_draft
     verify: Callable = verification.verify
     write_info_request: Callable = defaults.write_info_request  # TODO(CSA-27)
+    translate_reply: Callable = drafting.translate_reply
 
 
 def serializer() -> JsonPlusSerializer:
@@ -107,7 +111,7 @@ def _inquiry_text(state: TicketState) -> str:
 
 def _language(state: TicketState) -> str:
     extraction = state.get("extraction")
-    return (extraction and extraction.language) or state["inquiry"].language or "en"
+    return state["inquiry"].language or (extraction and extraction.language) or "en"
 
 
 def _review(state: TicketState) -> ReviewIn | None:
@@ -127,11 +131,14 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "extraction": None,
             "analysis_error": None,
             "draft": None,
+            "drafting_error": None,
             "info_request": None,
             "checks": [],
             "evidence": [],
             "review": None,
             "final_reply": None,
+            "approved_reply": None,
+            "translation_error": None,
             "escalated_to": None,
         }
 
@@ -144,12 +151,16 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     def extract(state: TicketState) -> dict:
         # 분류가 실패해도 추출은 돈다: 안전 신호는 유형 없이도 사람 큐로 보내야 한다
         classification = state.get("classification")
+        options = {}
+        if deps.extract is analysis.extract and classification:
+            options["secondary_category"] = classification.secondary_category
         try:
             result = deps.extract(
                 state["inquiry"],
                 deps.tables,
                 llm=deps.llm,
                 category=classification.category if classification else None,
+                **options,
             )
         except AnalysisError as e:
             return {"analysis_error": state.get("analysis_error") or str(e)}
@@ -189,7 +200,13 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         else:
             missing = state["rules"].missing_blocking or state["rules"].missing_info
         text = deps.write_info_request(missing, _language(state), _inquiry_text(state), deps.llm)
-        return {"info_request": text, "pending": "info_request"}
+        return {
+            "info_request": text,
+            "pending": "info_request",
+            "approved_reply": None,
+            "translation_error": None,
+            "final_reply": None,
+        }
 
     def evidence(state: TicketState) -> dict:
         return {
@@ -203,32 +220,78 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     def draft(state: TicketState) -> dict:
         review = _review(state)
         feedback = review.feedback if review and review.action == ReviewAction.REWRITE else None
-        result = deps.write_draft(
-            state["classification"].category,
-            state["extraction"],
-            state.get("evidence", []),
-            _inquiry_text(state),
-            deps.llm,
-            fix_notes=state.get("fix_notes") or None,
-            reviewer_feedback=feedback,
-        )
+        options = {"fix_notes": state.get("fix_notes") or None, "reviewer_feedback": feedback}
+        evidence = state.get("evidence", [])
+        if deps.write_draft is drafting.write_draft:
+            # 주입한 기존 호출 대역의 규격은 유지하고 실제 작성기에 조회 문맥을 전달한다.
+            options.update(
+                tables=deps.tables, secondary_category=state["classification"].secondary_category
+            )
+            evidence = drafting.prepare_evidence(
+                state["classification"].category,
+                state["extraction"],
+                evidence,
+                secondary_category=state["classification"].secondary_category,
+                tables=deps.tables,
+                raw_dir=deps.llm.settings.raw_data_dir,
+            )
+        try:
+            result = deps.write_draft(
+                state["classification"].category,
+                state["extraction"],
+                evidence,
+                _inquiry_text(state),
+                deps.llm,
+                **options,
+            )
+        except DraftingError as error:
+            return {
+                "draft": None,
+                "pending": "draft",
+                "drafting_error": str(error),
+                "evidence": evidence,
+            }
         # 점검 실패 사유(fix_notes)를 받아 다시 쓰는 경우만 재시도로 센다
         retries = state.get("retries", 0) + (1 if state.get("fix_notes") else 0)
-        return {"draft": result, "pending": "draft", "retries": retries}
+        return {
+            "draft": result,
+            "pending": "draft",
+            "retries": retries,
+            "drafting_error": None,
+            "evidence": evidence,
+        }
 
     def verify(state: TicketState) -> dict:
+        if error := state.get("drafting_error"):
+            return {
+                "checks": [CheckResult(name="draft_input_or_output", passed=False, reason=error)],
+                "fix_notes": [error],
+            }
+        language = state["draft"].slots.get("draft_language") or _language(state)
+        secondary = state["classification"].secondary_category
+        if deps.verify is verification.verify and secondary:
+            secondary_check = verification.check_banned(state["draft"], secondary, language)
+            if not secondary_check.passed:
+                return {
+                    "checks": [secondary_check.model_copy(update={"name": "banned_secondary"})],
+                    "fix_notes": [secondary_check.reason],
+                }
         checks = deps.verify(
             state["draft"],
             state["classification"].category,
-            (),  # TODO(CSA-29): drafting.TEMPLATES[category].required_slots
+            drafting.required_slots(
+                state["classification"].category, state["classification"].secondary_category
+            ),
             _inquiry_text(state),
-            _language(state),
+            language,
             state.get("evidence", []),
             deps.llm,
         )
         return {"checks": checks, "fix_notes": [c.reason or c.name for c in checks if not c.passed]}
 
     def after_verify(state: TicketState) -> str:
+        if state.get("drafting_error"):
+            return "hold"  # 원천값 누락·호출 장애는 모델 재작성으로 사실을 만들어 채우지 않는다.
         if not state.get("fix_notes"):
             return "ready"
         return "draft" if state.get("retries", 0) < deps.max_retries else "hold"
@@ -251,7 +314,17 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         return {"review": ReviewIn.model_validate(value)}
 
     def after_review(state: TicketState) -> str:
-        action = state["review"].action
+        review = state["review"]
+        action = review.action
+        if action == ReviewAction.EDIT_APPROVE and not (review.edited_text or "").strip():
+            return "hold"
+        if (
+            state.get("pending") == "draft"
+            and not state.get("draft")
+            and not (state.get("translation_error") and state.get("approved_reply"))
+        ):
+            if action == ReviewAction.APPROVE:
+                return "hold"
         return {
             ReviewAction.REWRITE: "rewrite",
             ReviewAction.INFO_REQUEST: "info_request",
@@ -263,25 +336,64 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "retries": 0,
             "fix_notes": [],
             "review_rounds": state.get("review_rounds", 0) + 1,
+            "approved_reply": None,
+            "translation_error": None,
+            "final_reply": None,
         }
 
     def finish(state: TicketState) -> dict:
         review = state["review"]
         if review.action == ReviewAction.REJECT:
-            return {"status": TicketStatus.REJECTED, "final_reply": None}
+            return {
+                "status": TicketStatus.REJECTED,
+                "final_reply": None,
+                "approved_reply": None,
+                "translation_error": None,
+            }
         if state.get("pending") == "info_request":
             text = review.edited_text or state.get("info_request")
-            return {"status": TicketStatus.WAITING_CUSTOMER, "final_reply": text}
-        text = review.edited_text if review.action == ReviewAction.EDIT_APPROVE else None
+            return {
+                "status": TicketStatus.WAITING_CUSTOMER,
+                "final_reply": text,
+                "approved_reply": text,
+                "translation_error": None,
+            }
+        # 번역 재시도에서도 직전에 담당자가 수정 승인한 원문을 보존한다.
+        if review.action == ReviewAction.EDIT_APPROVE:
+            text = review.edited_text
+        elif state.get("translation_error"):
+            text = state.get("approved_reply")
+        else:
+            text = None
+        text = text or (state.get("draft") and state["draft"].text) or ""
+        draft = state.get("draft")
+        source_language = (
+            draft.slots.get("draft_language") or _language(state)
+            if draft
+            else drafting.REVIEW_LANGUAGE
+        )
+        try:
+            final_reply = deps.translate_reply(text, source_language, _language(state), deps.llm)
+        except TranslationError as error:
+            return {
+                "status": TicketStatus.ON_HOLD,
+                "approved_reply": text,
+                "final_reply": None,
+                "translation_error": str(error),
+            }
         return {
             "status": TicketStatus.APPROVED,
-            "final_reply": text or (state.get("draft") and state["draft"].text),
+            "approved_reply": text,
+            "final_reply": final_reply,
+            "translation_error": None,
         }
 
     def escalate(state: TicketState) -> dict:
         review = state["review"]
         return {
             "status": TicketStatus.ESCALATED,
+            "translation_error": None,
+            "final_reply": None,
             "escalated_to": review.escalate_to
             or state["rules"].escalate_to
             or state["rules"].assigned_dept,
@@ -333,10 +445,12 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     g.add_edge("ready", "review")
     g.add_edge("hold", "review")
     g.add_conditional_edges(
-        "review", after_review, ["rewrite", "info_request", "escalate", "finish"]
+        "review", after_review, ["rewrite", "info_request", "escalate", "finish", "hold"]
     )
     g.add_edge("rewrite", "draft")
-    g.add_edge("finish", END)
+    g.add_conditional_edges(
+        "finish", lambda s: "hold" if s.get("translation_error") else END, ["hold", END]
+    )
     g.add_edge("escalate", END)
 
     return g.compile(checkpointer=checkpointer or InMemorySaver(serde=serializer()))

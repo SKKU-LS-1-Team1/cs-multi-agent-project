@@ -61,7 +61,7 @@ def ticket_row(values: dict) -> dict:
         "customer_id": inquiry.customer_id,
         "customer_tier": inquiry.customer_tier,
         "country": inquiry.country,
-        "language": extraction.get("language") or inquiry.language,
+        "language": inquiry.language or extraction.get("language"),
         "subject": inquiry.subject,
         "body": inquiry.body,
         "provided_fields": dict(inquiry.provided_fields),

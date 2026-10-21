@@ -642,9 +642,20 @@ unconfirmed_fields로 구분합니다.
 - 업데이트 목표 버전, 권장 버전, 최신 배포 버전은 current_fw가 아닙니다.
 - 설치된 버전이 명시되지 않았다면 추출하지 않습니다.
 
+[quantity]
+
+- 고객이 견적·주문 대상으로 명시한 제품 수량을 추출합니다. 숫자와 문자로 쓴 수량 모두 대상입니다.
+- 본문의 수량 표현과 수량 항목(Quantity, 数量 등)을 모두 확인합니다. 다른 필드를 추출했더라도
+  요청된 quantity를 빠뜨리지 않았는지 확인합니다.
+- 원문이 "one spare unit", "una unidad", "3 ชุด"이면 그 표현을 유지합니다.
+  계산용 숫자로 변환하지 않습니다. 숫자만 제공됐다면 그 숫자 문자열을 그대로 반환합니다.
+- 제품 코드·정격·날짜·최소 주문량을 고객이 요청한 수량으로 추정하지 않습니다.
+- 수량이 없거나 최종 수량이 불명확하면 제외합니다.
+  제품이 하나 언급됐다고 수량을 1로 만들지 않습니다.
+
 [기타 요청 필드]
 
-quantity, incoterms, required_date, site_condition 등 기타 필드는
+incoterms, required_date, site_condition 등 기타 필드는
 field_definitions에 따라 추출합니다.
 
 - 각 필드의 의미를 정확히 구분합니다. 납기일은 요청된 필드명 required_date를 사용합니다.
@@ -764,7 +775,7 @@ class ExtractionDetails(BaseModel):
     issues: list[str] = Field(default_factory=list)
 
     def to_extraction(self) -> Extraction:
-        """기존 공통 출력만 반환한다. 실제 판단/근거/미확인 값은 상세 결과에 보존한다.
+        """공통 출력에 확정 필드값을 전달한다. 근거/미확인 이력은 상세 결과에 보존한다.
 
         기존 그래프는 urgency == SAFETY만 사람 큐로 보낸다. 별도 검토 필드가 없으므로
         안전 검토가 필요한 건의 공통 출력은 SAFETY로 보수적으로 전달한다.
@@ -801,6 +812,7 @@ class ExtractionDetails(BaseModel):
             urgency=Urgency.SAFETY if review_required else self.urgency,
             language=self.language,
             provided_info=list(self.provided_info),
+            field_values=dict(self.fields),
             return_defect=self.return_defect,
         )
 
@@ -1471,6 +1483,7 @@ def extract(
     transcript: Sequence[ChatMessage | Mapping[str, str]] = (),
     settings: Settings | None = None,
     category: Category | None = None,
+    secondary_category: Category | None = None,
     extraction_model: str | None = None,
 ) -> Extraction:
     """스켈레톤의 extract(inquiry, tables) 호출과 기존 공통 Extraction을 유지한다.
@@ -1502,6 +1515,7 @@ def extract(
         transcript=transcript,
         settings=settings,
         category=category,
+        secondary_category=secondary_category,
         extraction_model=extraction_model,
     ).to_extraction()
 
@@ -1516,11 +1530,12 @@ def extract_details(
     transcript: Sequence[ChatMessage | Mapping[str, str]] = (),
     settings: Settings | None = None,
     category: Category | None = None,
+    secondary_category: Category | None = None,
     extraction_model: str | None = None,
 ) -> ExtractionDetails:
     """상세 결과: llm은 Jev 판단, 추출 모델은 Settings.gemini_model_fast(.env) 사용.
 
-    requested_fields=None이면 category/제품군 기준 자동 조회, []이면 추가 요청 없음.
+    requested_fields=None이면 주·보조 category/제품군 기준 자동 조회, []이면 추가 요청 없음.
     transcript는 과거 발언, inquiry.body는 최신 발언이다. 대화 시 폼 값은 이전 상태로 취급한다.
     모델을 주입하지 않으면 실제 호출하지 않으며 미판단/미연결을 issues에 기록한다.
     대화 상태 저장/폼 갱신은 호출자 책임이고 이 함수는 입력을 수정하지 않는다.
@@ -1643,7 +1658,12 @@ def extract_details(
     def auto_required_fields() -> list[str]:
         code = result.fields.get("product_model")
         family = products[code].family if code in products else None
-        return required_info(family, effective_category, tables)[0] if effective_category else []
+        categories = [c for c in (effective_category, secondary_category) if c is not None]
+        return list(
+            dict.fromkeys(
+                field for c in categories for field in required_info(family, c, tables)[0]
+            )
+        )
 
     # 대화에서 폼 값도 재평가한다. 철회·충돌 후보를 확정값과 구분해서 보존한다.
     if requested_fields is None:

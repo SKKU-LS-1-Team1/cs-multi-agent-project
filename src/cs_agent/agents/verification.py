@@ -9,7 +9,7 @@
 # 2. values: 답변 속 수치·문서 ID가 슬롯(조회값)과 같은가 (정규식으로 값 뽑아 비교)
 # 3. specs: 고객이 말하지 않았고 근거에도 없는 사양(kV, kA, kW, IEC/UL …)을 넣었는가 (C-05).
 #    비교할 때 공백 차이("1000 kVA" vs "1000kVA")는 무시한다.
-# 4. language: 답변 언어 = 고객 언어 (C-02). 언어 감지 라이브러리 사용
+# 4. language: 초안 언어 = 전달받은 검토 언어(en). 고객 언어 번역은 상담원 승인 후 수행한다.
 # 5. banned: 진단형이 원인을 단정했나 / 정책형이 승인·반려를 썼나 (금지 표현 목록)
 # 6. grounding: 모든 문장이 근거에서 나왔는가 — llm.judge("verify_grounding", …, ["yes","no"])
 #    근거 없는 문장 번호를 받아 reason 에 넣으면 재작성 때 그대로 쓴다.
@@ -543,6 +543,13 @@ def build_sources(inquiry_text: str, evidence: Sequence[Evidence], draft: Draft)
         if e.source == "docs" and "-" in e.doc_id:
             codes.add(e.doc_id.split("-", 1)[1])  # DS-ACB-AS-2000 → ACB-AS-2000
     texts += [f"{k}: {v}" for k, v in draft.slots.items()]
+    # CSA-29 견적 슬롯은 수치만 담고 필드명으로 USD를 명시한다.
+    # 통화를 원천 문맥에도 붙여야 코드가 계산한 합계를 근거 없는 금액으로 오인하지 않는다.
+    texts += [
+        f"{key}: {draft.slots[key]} USD"
+        for key in ("unit_price_usd", "total_usd")
+        if draft.slots.get(key)
+    ]
     texts += list(draft.cited)
     texts += _reference_rows(texts, codes)
     text = _nfkc("\n".join(t for t in texts if t))
@@ -771,13 +778,13 @@ def check_language(draft: Draft, language: str, sources: Sources) -> CheckResult
         return CheckResult(
             name="language",
             passed=False,
-            reason=f"답변 언어가 고객 언어({language})와 다름: {found}로 보임",
+            reason=f"답변 언어가 검토 대상 언어({language})와 다름: {found}로 보임",
         )
     if mixed:
         return CheckResult(
             name="language",
             passed=False,
-            reason=f"고객 언어({language})가 아닌 문장: " + "; ".join(mixed),
+            reason=f"검토 대상 언어({language})가 아닌 문장: " + "; ".join(mixed),
         )
     return CheckResult(name="language", passed=True)
 
