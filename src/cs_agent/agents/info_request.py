@@ -22,8 +22,11 @@
 # 참고: 기획서 v10 4.2, 관리자_대시보드_AI기능_구조검토.md 3장
 #
 # 정해 둔 것
-# - 항목 라벨 표는 data/ref/info_field_codebook.csv (rules/tables.py field_labels, 영어 라벨)를
-#   쓴다. LLM 이 고객 언어로 옮긴다. 표에 없는 항목은 이름을 풀어 쓴다(serial_no → "serial no").
+# - 항목 라벨 표(할 일 2)는 data/ref/info_request_labels.csv (rules/tables.py request_labels):
+#   고객이 알아듣는 쉬운 영어 + 어디서 찾는지 (serial_no → "Serial number printed on the
+#   product's nameplate label"). LLM 이 고객 언어로 옮긴다. 이 표에 없으면 info_field_codebook.csv
+#   라벨(field_labels), 거기도 없으면 이름을 풀어 쓴다(serial_no → "serial no").
+#   codebook 라벨은 고객 문의서·분석(CSA-26)이 쓰는 형식이라 바꾸지 않는다.
 #   빠진 항목이 겹치면 한 번만, 하나도 없으면 "문의 내용을 더 자세히" 한 항목으로 묻는다.
 # - 빠짐 없이 묻기: 프롬프트에서 항목을 번호 목록으로 그 순서대로 쓰게 하고, 받은 글의 번호 목록
 #   개수가 항목 수와 같은지 본다. 고객 언어가 아니면(agents/verification.detect_mismatch) 실패.
@@ -82,7 +85,8 @@ _NUMBERED = re.compile(r"^\s*(?:\*\*)?\d{1,2}(?:[.)](?:\*\*)?\s+|[．、）](?:\
 def _field_labels() -> Mapping[str, str]:
     from cs_agent.rules.tables import load_tables
 
-    return load_tables().field_labels
+    tables = load_tables()
+    return {**tables.field_labels, **tables.request_labels}
 
 
 def item_labels(missing: Sequence[str], labels: Mapping[str, str]) -> list[str]:

@@ -1,0 +1,33 @@
+field,label
+product_model,Product model name or order code (on the nameplate or your order)
+serial_no,Serial number printed on the product's nameplate label
+application,"How the product is used (voltage, what it powers, how long it runs)"
+target_standard,"Which standard or certificate you need (for example IEC, UL or KC)"
+target_country,Country where the product will be installed or sold
+site_condition,"Site conditions: room temperature, altitude and humidity"
+wiring_diagram,Wiring drawing or single-line diagram of the installation
+photos,Photos of the product and of its nameplate label
+purchase_doc,Purchase order (PO) or invoice number
+install_date,Date the product was installed or first switched on
+failure_description,What went wrong and when it happened
+po_number,Purchase order (PO) number
+quantity,How many units you need
+required_date,Date you need the delivery by
+incoterms,"Delivery terms and delivery address (for example EXW or DAP, if you know them)"
+document_type,"Which document you need (for example datasheet, manual or certificate)"
+doc_language,Language you would like the document in
+error_code,Error code or message shown on the display
+operating_condition,"What the equipment was doing when it failed (load, speed, temperature)"
+logs,Event or trip history saved in the device (exported file or photo of the screen)
+current_fw,Firmware version installed now (shown in the device menu)
+tool_version,Version of the setup or programming software you use
+return_reason,Why you want to return the product
+packaging_condition,Condition of the box and packing when it arrived
+parameter_backup,Saved copy of the drive settings (parameter file)
+motor_nameplate,Photo or details of the motor's nameplate
+program_backup,Saved copy of the PLC or operator panel program
+battery_status,Battery charge level and cell temperature when the problem happened
+load_profile,Records of load current and temperature over time
+oil_test,"Transformer oil test report (DGA), if you have one"
+string_config,How the solar panels are wired (number of panels in each string)
+battery_age,When the batteries were installed (or how old they are)
