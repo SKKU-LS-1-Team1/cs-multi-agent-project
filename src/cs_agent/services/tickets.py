@@ -30,6 +30,7 @@ from typing import Any
 from langgraph.types import Command
 
 from cs_agent.agents.case_memory import SAVE_ON, build_case
+from cs_agent.agents.translation import new_part, source_body
 from cs_agent.domain import Route, TicketStatus
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
@@ -149,7 +150,22 @@ class TicketService:
             self.records.deactivate_case(ticket_id)  # 다시 열린 문의의 사례는 검색에서 뺀다
         merged = merge_reply(values["inquiry"], inquiry)
         followups = values.get("followups", 0) + 1
-        self._run(ticket_id, {"ticket_id": ticket_id, "inquiry": merged, "followups": followups})
+        original = values["inquiry"]
+        parts = list(values.get("translation_parts", []))
+        if not parts or source_body(parts) != original.body.strip():
+            parts = [new_part(original.body, original.language)]
+        stamp = inquiry.received_at.strftime("%Y-%m-%d %H:%M")
+        parts.append(new_part(inquiry.body, inquiry.language, f"\n\n[Customer reply {stamp}]\n"))
+        self._run(
+            ticket_id,
+            {
+                "ticket_id": ticket_id,
+                "inquiry": merged,
+                "followups": followups,
+                "body_ko": None,
+                "translation_parts": parts,
+            },
+        )
         return self.get(ticket_id)
 
     def act(self, ticket_id: str, review: ReviewIn) -> TicketOut:
@@ -191,6 +207,7 @@ class TicketService:
         extraction = v.get("extraction")
         return TicketOut(
             ticket_id=ticket_id,
+            body_ko=v.get("body_ko"),
             status=v.get("status", TicketStatus.NEW),
             route=Route(v["route"]) if v.get("route") else None,
             category=classification.category if classification else None,

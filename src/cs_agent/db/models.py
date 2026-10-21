@@ -69,6 +69,7 @@ class Ticket(Base):
     language: Mapped[str | None] = mapped_column(String(8))
     subject: Mapped[str] = mapped_column(Text, default="")
     body: Mapped[str] = mapped_column(Text)
+    body_ko: Mapped[str | None] = mapped_column(Text)  # 상담원 표시용 원문 번역 (CSA-57)
     provided_fields: Mapped[dict] = mapped_column(JSONB, default=dict)  # 문의서에서 고객이 채운 값
     thread_ref: Mapped[str | None] = mapped_column(String(128))  # 후속 문의 연결 키
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

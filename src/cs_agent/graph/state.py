@@ -7,6 +7,7 @@
 #   4장
 from typing import TypedDict
 
+from cs_agent.agents.translation import TranslationPart
 from cs_agent.schemas import (
     CheckResult,
     Classification,
@@ -23,6 +24,8 @@ class TicketState(TypedDict, total=False):
     # 괄호 = 채우는 노드
     ticket_id: str
     inquiry: InquiryIn  # ① 접수
+    body_ko: str | None  # 상담원 표시용. 원문 분석에는 사용하지 않는다 (CSA-57)
+    translation_parts: list[TranslationPart]  # 회신별 원문·번역 성공 구간 (체크포인트)
     classification: Classification | None  # ② 분류, CSA-26
     extraction: Extraction | None  # ③ 추출, CSA-26
     analysis_error: str | None  # ②③ 실패 사유 (AnalysisError) → 분석 대기

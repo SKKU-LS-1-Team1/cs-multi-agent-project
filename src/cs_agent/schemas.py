@@ -129,6 +129,7 @@ class TicketOut(BaseModel):
     """API 응답"""
 
     ticket_id: str
+    body_ko: str | None = None
     status: TicketStatus
     route: Route | None = None
     category: Category | None = None

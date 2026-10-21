@@ -43,6 +43,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+import cs_agent.agents.translation as translation
 from cs_agent import domain, schemas
 from cs_agent.agents import analysis, drafting, retrieval, verification
 from cs_agent.agents import info_request as info_request_agent
@@ -65,6 +66,7 @@ class GraphDeps:
     cases: Any = None  # Retriever (CSA-28)
     max_retries: int = field(default_factory=lambda: get_settings().max_verify_retries)
     # 에이전트 함수 (모양은 agents/*.py "만들 것" 주석)
+    translate: Callable = translation.translate_to_korean
     classify: Callable = analysis.classify
     extract: Callable = analysis.extract
     first_pass: Callable = retrieval.first_pass
@@ -149,6 +151,17 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             return {"classification": deps.classify(state["inquiry"], deps.llm)}
         except AnalysisError as e:
             return {"analysis_error": str(e)}
+
+    def translate(state: TicketState) -> dict:
+        inquiry = state["inquiry"]
+        body_ko, parts = translation.translate_parts(
+            inquiry.body,
+            inquiry.language,
+            state.get("translation_parts", []),
+            deps.translate,
+            deps.llm,
+        )
+        return {"body_ko": body_ko, "translation_parts": parts}
 
     def extract(state: TicketState) -> dict:
         # 분류가 실패해도 추출은 돈다: 안전 신호는 유형 없이도 사람 큐로 보내야 한다
@@ -422,6 +435,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     for name, fn in [
         ("intake", intake),
         ("classify", classify),
+        ("translate", translate),
         ("extract", extract),
         ("retrieve", retrieve),
         ("rules", rules),
@@ -442,6 +456,8 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
 
     g.add_edge(START, "intake")
     g.add_edge("intake", "classify")
+    g.add_edge("intake", "translate")  # 원문 분석과 병렬. 번역 대기는 설정된 상한 이내
+    g.add_edge("translate", END)
     g.add_edge("intake", "retrieve")  # ④ 는 ②③ 과 병렬
     g.add_edge("classify", "extract")
     g.add_edge(["extract", "retrieve"], "rules")
