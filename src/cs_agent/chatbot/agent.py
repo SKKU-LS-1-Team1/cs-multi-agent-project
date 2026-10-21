@@ -52,6 +52,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from pydantic import BaseModel, Field
 
 from cs_agent.agents.analysis import AnalysisError, classify, extract, extract_details
+from cs_agent.agents.drafting import plain_text
 from cs_agent.agents.info_request import in_language, language_name
 from cs_agent.agents.retrieval import Retriever, finalize_evidence, first_pass
 from cs_agent.chatbot.form_filler import InquiryDraftForm, fill_form
@@ -104,6 +105,8 @@ Rules:
   Offer to open the inquiry form instead.
 - Be concise: a few sentences. When you give a value or a step, name the document section it
   comes from.
+- Plain text only: no Markdown (no **bold**, # headings or backticks). The chat window shows
+  it as is.
 - Do not repeat steps the assistant already advised earlier in the conversation. Build on them.
 
 Product: {product}
@@ -239,7 +242,7 @@ def respond(
         conversation=_conversation(history) or "(first message)",
         message=chat.message,
     )
-    answer = llm.write("chat_answer", prompt)
+    answer = plain_text(llm.write("chat_answer", prompt))
     extraction = _with_viewing(_joined(full, quick, EXTRACT_GRACE_S), viewing, tables)
     return ChatOut(
         answer=answer,

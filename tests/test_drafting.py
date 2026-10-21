@@ -586,3 +586,31 @@ def test_graph_uses_actual_drafting_and_passes_secondary_request():
     refs = {d._ref(e) for e in state["evidence"] if e.source == "docs"}
     assert set(writer.contexts[0]["allowed_citations"]) == refs
     assert set(state["draft"].cited) <= refs
+
+
+@pytest.mark.parametrize(
+    ("markdown", "plain"),
+    [
+        ("### E.OC causes\nText", "E.OC causes\nText"),
+        ("1. **Load inertia:** too short [TG-INV-LSLV0075-S100#3.1].",
+         "1. Load inertia: too short [TG-INV-LSLV0075-S100#3.1]."),
+        ("*RMA note:* use the RMA number `F23`.", "RMA note: use the RMA number F23."),
+        ("- __Event log__ (current)\n* item", "- Event log (current)\n* item"),
+        ("2*3*4 and [POL-SERVICE#4]", "2*3*4 and [POL-SERVICE#4]"),
+    ],
+)  # fmt: skip
+def test_plain_text_strips_markdown_but_keeps_citations_and_lists(markdown, plain):
+    assert d.plain_text(markdown) == plain
+
+
+def test_draft_is_plain_text_for_email_and_customer_screen():
+    """실제 시연에서 고객 회신에 **·### 가 그대로 보였다. 규칙 + 출력에서 걷어 낸다."""
+    writer = Writer(
+        response="### Next steps\n1. **Megger test** at 1,000 V [TG-INV-LSLV0075-S100#3.2]."
+    )
+    item = extraction(Category.DEFECT)
+
+    draft = d.write_draft(Category.DEFECT, item, [], "E.OC", router(writer))
+
+    assert draft.text == "Next steps\n1. Megger test at 1,000 V [TG-INV-LSLV0075-S100#3.2]."
+    assert "마크다운" in d.COMMON_INSTRUCTIONS

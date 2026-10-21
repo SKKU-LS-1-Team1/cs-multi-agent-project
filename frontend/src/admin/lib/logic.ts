@@ -190,12 +190,19 @@ export const needsLocalization = (t: Ticket) => customerLanguage(t) !== "English
 export const composerKey = (purpose: string, language: string) => purpose + "::" + language;
 
 export type Ctx = any;
+/** 백엔드 티켓의 검색 근거 (CSA-61, api-sync 가 apiEvidence 로 넣는다). 공식 문서 상위 3개. */
+function apiDocuments(t: Ticket) {
+  return (t.apiEvidence || [])
+    .filter((e: any) => e.source === "docs")
+    .slice(0, 3)
+    .map((e: any) => ({ id: e.section ? `${e.doc_id}#${e.section}` : e.doc_id, label: e.section ? `${e.doc_id} §${e.section}` : e.doc_id, text: String(e.text || "").slice(0, 240), kind: "document" }));
+}
 export function answerContext(t: Ticket, purpose?: string): Ctx {
   const isSample = t.id === "CSV1-000050";
   const extra = t.events.filter((e) => ["customer", "customer-followup"].includes(e.kind));
   const expert = t.events.findLast((e) => e.kind === "expert");
   const missing = informationAssessment(t).filter((x) => x.status !== "confirmed").map((x) => x.label);
-  const documents = isSample ? [{ id: "TG-iS7-3.2", label: "iS7 Guide §3.2 · §3.3", text: "E.OC 발생 시점별 과전류 검토", kind: "document" }] : [];
+  const documents = isSample ? [{ id: "TG-iS7-3.2", label: "iS7 Guide §3.2 · §3.3", text: "E.OC 발생 시점별 과전류 검토", kind: "document" }] : apiDocuments(t);
   const similar = isSample
     ? cases
         .filter((c) => c.ticketId !== t.id && c.product.includes("iS7") && c.raw.error_code === "E.OC")
