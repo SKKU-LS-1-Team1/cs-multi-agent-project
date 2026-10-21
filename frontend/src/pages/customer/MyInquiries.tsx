@@ -54,7 +54,7 @@ function InquiryRow({ row, onReplied }: { row: CustomerInquiry; onReplied: () =>
     if (!reply.trim() || !threadRef) return;
     setSending(true);
     try {
-      await api.submitInquiry({ channel: "WEB_FORM", subject: row.subject, body: reply, thread_ref: threadRef });
+      await api.createInquiry({ channel: "WEB_FORM", subject: row.subject, body: reply, thread_ref: threadRef });
       setReply("");
       onReplied();
     } finally {

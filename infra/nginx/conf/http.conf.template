@@ -1,0 +1,28 @@
+# HTTP 모드 (CSA-46): HTTPS 인증서가 없을 때 — 로컬 개발, VM 에서 첫 인증서 발급 전.
+# 한 주소에서 경로로 화면을 나눈다: / 고객, /admin/ 관리자, /api 전부.
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+
+    # Let's Encrypt 발급 확인 (infra/gcp/issue-cert.sh)
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location /api/ {
+        include /etc/nginx/snippets/api-proxy.conf;
+    }
+
+    location = /admin {
+        return 302 /admin/;
+    }
+
+    location /admin/ {
+        try_files $uri /admin/index.html;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}

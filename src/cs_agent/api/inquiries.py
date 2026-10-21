@@ -1,11 +1,11 @@
-# 고객용 문의 조회 API (CSA-61 · 담당 김동규) — 고객 화면 "내 문의 내역" (CSA-39)
+# 고객용 문의 API (CSA-61 · CSA-46 · 담당 김동규) — 고객 화면 문의하기·내 문의 내역 (CSA-39)
 #
-# main.py 에서 "/api" 아래 등록.
+# main.py 에서 "/api" 아래 등록. 고객 도메인(nginx)은 /api/tickets(상담원용)를 막고 이것만 연다.
+# - POST /api/inquiries InquiryIn → CustomerInquiry  문의 제출. thread_ref 가 처음 문의와 같으면
+#   고객 회신(추가정보 보내기)이다 (services/tickets.py submit → reply). 고객 화면이 만들어 둔다.
 # - GET /api/inquiries/{ticket_id} → CustomerInquiry  고객이 볼 상태와 받은 회신만
 #   /api/tickets/{id}(상담원용)와 달리 AI 초안·근거·점검 결과·담당자·부서는 내보내지 않는다.
 #   상담원이 승인해 보낸 글(final_reply: 답변 또는 추가정보 요청)만 message 로 준다.
-# - 고객 회신(추가정보 보내기)은 POST /api/tickets 에 처음 문의와 같은 thread_ref 로 보낸다
-#   (services/tickets.py submit → reply). 고객 화면이 문의할 때 thread_ref 를 만들어 둔다.
 #
 # 정해 둔 것
 # - 고객 상태는 5가지: RECEIVED(접수, 아직 분석 전) · IN_PROGRESS(분석·검토·이관 중) ·
@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from cs_agent.api.deps import Tickets
 from cs_agent.domain import TicketStatus
+from cs_agent.schemas import InquiryIn, TicketOut
 from cs_agent.services.tickets import TicketNotFound
 
 router = APIRouter(prefix="/inquiries", tags=["inquiries"])
@@ -47,12 +48,20 @@ class CustomerInquiry(BaseModel):
     message_language: str | None = None
 
 
+@router.post("", response_model=CustomerInquiry, status_code=201)
+def submit_inquiry(inquiry: InquiryIn, tickets: Tickets) -> CustomerInquiry:
+    return _customer_view(tickets.submit(inquiry))
+
+
 @router.get("/{ticket_id}", response_model=CustomerInquiry)
 def customer_inquiry(ticket_id: str, tickets: Tickets) -> CustomerInquiry:
     try:
-        ticket = tickets.get(ticket_id)
+        return _customer_view(tickets.get(ticket_id))
     except TicketNotFound as e:
         raise HTTPException(404, f"inquiry {ticket_id} not found") from e
+
+
+def _customer_view(ticket: TicketOut) -> CustomerInquiry:
     inquiry = ticket.inquiry
     sent = ticket.status in _SENT and ticket.final_reply
     return CustomerInquiry(

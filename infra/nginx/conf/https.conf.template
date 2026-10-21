@@ -1,0 +1,85 @@
+# HTTPS 모드 (CSA-46): ${DOMAIN} 인증서가 있을 때 (VM). infra/nginx/select-conf.sh 가 고른다.
+#   https://${DOMAIN}        고객 화면. 고객이 쓰는 API 만 연다
+#   https://admin.${DOMAIN}  관리자 화면 + 모든 API. Basic Auth (infra/gcp/admin-password.sh)
+# 로그인이 아직 없어서 상담원 API(작업 목록·승인·배정 …)를 고객 도메인에 열면 누구나 부를 수 있다.
+
+server {
+    listen 80;
+    server_name ${DOMAIN} admin.${DOMAIN};
+
+    # 인증서 갱신 확인 (certbot 컨테이너, webroot)
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# 고객 --------------------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    root /usr/share/nginx/html;
+
+    # 고객 화면이 부르는 API: 챗봇 · 제품 대시보드 · 문의 제출/조회(고객용) · 상태 확인
+    location ~ ^/api/(chat|products|inquiries|health)(/|$) {
+        include /etc/nginx/snippets/api-proxy.conf;
+    }
+
+    # 그 밖(/api/tickets · agents · dashboard)은 상담원용 — 관리자 도메인에서만
+    location /api/ {
+        return 404;
+    }
+
+    location /admin {
+        return 301 https://admin.${DOMAIN}/admin/;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}
+
+# 관리자 ------------------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name admin.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    root /usr/share/nginx/html;
+    auth_basic "LS ELECTRIC CS Admin";
+    auth_basic_user_file /etc/nginx/auth/admin.htpasswd;
+
+    location /api/ {
+        include /etc/nginx/snippets/api-proxy.conf;
+    }
+
+    # 관리자 화면(BrowserRouter basename=/admin)과 빌드 파일(/assets, 고객 화면과 공용)
+    location /admin/ {
+        try_files $uri /admin/index.html;
+    }
+
+    location /assets/ {
+        try_files $uri =404;
+    }
+
+    location / {
+        return 302 /admin/;
+    }
+}

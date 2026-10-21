@@ -7,8 +7,26 @@ services:
       dockerfile: infra/nginx/Dockerfile
     ports:
       - "80:80"
+      - "443:443"
+    # DOMAIN 과 그 인증서가 있으면 HTTPS(고객/관리자 도메인 분리), 없으면 HTTP (CSA-46)
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - ./infra/certbot/conf:/etc/letsencrypt:ro
+      - ./infra/certbot/www:/var/www/certbot:ro
+      - ./infra/nginx/auth:/etc/nginx/auth:ro
     depends_on:
       - api
+
+  # HTTPS 인증서 자동 갱신 (CSA-46). 첫 발급은 infra/gcp/issue-cert.sh. 인증서가 없으면 아무것도 안 한다.
+  certbot:
+    image: certbot/certbot:v2.11.0
+    volumes:
+      - ./infra/certbot/conf:/etc/letsencrypt
+      - ./infra/certbot/www:/var/www/certbot
+    entrypoint: >-
+      /bin/sh -c 'trap exit TERM; while :; do
+      certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
 
   api:
     build: .

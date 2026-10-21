@@ -12,3 +12,7 @@ build/
 data/processed/
 data/mock/
 .DS_Store
+
+# HTTPS 인증서·관리자 비밀번호 (VM 에서만 만든다, CSA-46)
+infra/certbot/
+infra/nginx/auth/
