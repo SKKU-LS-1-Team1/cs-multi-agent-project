@@ -53,6 +53,7 @@ class Extraction(BaseModel):
     urgency: Urgency = Urgency.NONE
     language: str | None = None
     provided_info: list[str] = Field(default_factory=list)  # required_info.csv 의 항목 이름
+    field_values: dict[str, str] = Field(default_factory=dict)  # 확인된 항목의 실제 값
     # RETURN 일 때만: 불량 반품(DOA·품질)이면 True, 오배송·주문 착오·잉여면 False, 모르면 None.
     # False 면 RT-ALL-RETURN-NON_DEFECT(SCM) 로 보낸다.
     return_defect: bool | None = None
@@ -66,6 +67,8 @@ class Evidence(BaseModel):
     section: str | None = None
     text: str
     score: float = 0.0
+    # 제품 거르기·유형별 재정렬용 (CSA-28): doc_type·product_code·family·title, 사례는 category 등
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class RuleResult(BaseModel):
@@ -102,6 +105,22 @@ class CheckResult(BaseModel):
     reason: str = ""
 
 
+class EscalationRequest(BaseModel):
+    """CSA-55: 상담원이 검토할 한국어 이관 요청서. 생성 자체는 이관이 아니다."""
+
+    to_dept: str
+    reason: str
+    summary: str
+    fields: dict[str, str]
+    cited: list[str]
+    text: str
+    model: str = ""
+
+
+class EscalationRequestIn(BaseModel):
+    to_dept: str | None = None  # 생략하면 기존 규칙의 escalate_to
+
+
 class ReviewIn(BaseModel):
     """상담원 버튼 입력. 그래프 resume 값"""
 
@@ -114,18 +133,36 @@ class ReviewIn(BaseModel):
     info_items: list[str] = Field(default_factory=list)  # 요청할 항목
 
 
+class AssignIn(BaseModel):
+    """담당자 재배정 입력 (CSA-53). 같은 부서 담당자만"""
+
+    assignee: str  # data/ref/agents.csv agent_id
+    reason: str = ""  # 예: "SLA 75% 경고 — 부재"
+    by: str = ""  # 넘긴 사람 (상담원·관리자)
+
+
 class TicketOut(BaseModel):
     """API 응답"""
 
     ticket_id: str
+    inquiry: InquiryIn | None = (
+        None  # 고객 문의 원문 (회신이 오면 이어 붙인 본문). 관리자 화면 표시용
+    )
+    body_ko: str | None = None
     status: TicketStatus
     route: Route | None = None
     category: Category | None = None
     product_code: str | None = None
     priority: str | None = None
-    assigned_dept: str | None = None
+    assigned_dept: str | None = None  # 이관됐으면 이관 부서
+    assignee: str | None = None  # 담당 상담원 agent_id (CSA-53). 없으면 부서 큐
     sla_due_at: datetime | None = None
     draft: Draft | None = None
     info_request: str | None = None
+    escalation_request: EscalationRequest | None = None
+    approved_reply: str | None = None
+    final_reply: str | None = None
+    final_reply_language: str | None = None
+    translation_error: str | None = None
     checks: list[CheckResult] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)

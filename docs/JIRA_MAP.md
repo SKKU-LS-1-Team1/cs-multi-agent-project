@@ -1,6 +1,6 @@
 # Jira 작업 ↔ 코드 위치
 
-Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 38개(CSA-14~51)를 저장소 위치에 연결한 표다.
+Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 46개(CSA-14~51, CSA-53~58, CSA-60~61)를 저장소 위치에 연결한 표다.
 코드 안의 `TODO(CSA-n)` 는 그 작업에서 채울 자리다. `grep -rn "TODO(CSA-22)" src frontend` 로 찾는다.
 
 브랜치·PR 제목에는 작업 키를 넣는다. 예: `feature/CSA-26-analysis-agent`, `CSA-26 문의 분석 에이전트 키워드 → Jev 분류`.
@@ -28,6 +28,8 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 38개(CSA-14~51)�
 | CSA-23 | mock 데이터 생성 | 김동규 | 1 | `pipeline/mock_data.py` |
 | CSA-24 | PostgreSQL 스키마 | 조수빈 | 1 | `db/models.py`, `db/session.py` |
 | CSA-25 | 상담원 승인·수정·반려 API와 피드백 기록 | 김동규 | 2 | `api/tickets.py` (`/action`, `/resolve`), `graph/builder.py` (`review`) |
+| CSA-53 | 담당 부서·담당자 자동 배정 + 재배정 API | 김동규 | 2 | `services/assignment.py`, `api/tickets.py` (`/assign`, `/assignments`), `api/agents.py`, `data/ref/agents.csv`, `services/records.py` (`set_assignee`) |
+| CSA-61 | 시연 흐름 화면-API 연결 (고객 문의 → 상담원 승인 → 고객 회신) | 김동규 | 2 | `frontend/src/admin/lib/api-sync.ts`, `frontend/src/lib/myInquiries.ts`, `api/inquiries.py`, `frontend/src/pages/customer/MyInquiries.tsx` |
 
 ## CSA-8 상담 처리 에이전트
 | 키 | 작업 | 담당 | 스프린트 | 위치 |
@@ -38,6 +40,8 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 38개(CSA-14~51)�
 | CSA-29 | 답변 작성 – 단순 문의(정보 안내형) | 김도연 | 1 | `agents/drafting.py` |
 | CSA-30 | 답변 작성 – 유형별(문서·영업·수리) 확장 | 김도연 | 2 | `agents/drafting.py` (`TEMPLATES`) |
 | CSA-31 | 자동 점검(검증) 에이전트 | 김동규 | 2 | `agents/verification.py` |
+| CSA-55 | 이관 요청서 작성 에이전트 (부서·사유·진단 요약·근거) | 김도연 | 2 | `agents/escalation.py` |
+| CSA-57 | 원문 한국어 번역 생성 (상담원 표시용) | 김도연 | 2 | `agents/translation.py` |
 
 ## CSA-9 고객 챗봇 에이전트
 | 키 | 작업 | 담당 | 스프린트 | 위치 |
@@ -50,8 +54,9 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 38개(CSA-14~51)�
 ## CSA-10 사용자 화면
 | 키 | 작업 | 담당 | 스프린트 | 위치 |
 |---|---|---|---|---|
-| CSA-36 | 제품 대시보드 분류 트리 (대 3·중 11·소 23) | 조수빈 | 1 | `frontend/src/pages/customer/ProductTree.tsx`, `api/products.py` |
-| CSA-37 | 제품 상세 탭 화면 | 조수빈 | 1 | `frontend/src/pages/customer/ProductDetail.tsx` |
+| CSA-36 | 제품 대시보드 분류 트리 (대 3·중 11·소 23) | 조수빈 | 1 | `frontend/src/pages/customer/ProductTree.tsx` (API: CSA-60) |
+| CSA-37 | 제품 상세 탭 화면 | 조수빈 | 1 | `frontend/src/pages/customer/ProductDetail.tsx` (API: CSA-60) |
+| CSA-60 | 제품 대시보드 API (트리·상세 탭 내용) | 김동규 | 2 | `api/products.py`, `services/catalog.py` |
 | CSA-38 | 우측 챗봇 창 + 대시보드 이동 연동 | 조수빈 | 2 | `frontend/src/pages/customer/ChatPanel.tsx`, `CustomerHome.tsx` |
 | CSA-39 | 문의하기(자동 채움) · 내 문의 내역 | 조수빈 | 2 | `InquiryForm.tsx`, `MyInquiries.tsx` |
 
@@ -62,6 +67,9 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 38개(CSA-14~51)�
 | CSA-41 | 추천 답변 검토·승인·수정·반려 + 수정 사유 | 김도연 | 2 | `frontend/src/pages/admin/ReviewPage.tsx` |
 | CSA-42 | 근거 문서·자동 점검 결과 표시 | 김도연 | 2 | `frontend/src/pages/admin/EvidencePanel.tsx` |
 | CSA-43 | 부서별 대시보드 | 김도연 | 2 | `frontend/src/pages/admin/DeptDashboard.tsx`, `api/dashboard.py` |
+| CSA-54 | 담당자 배정·재배정 (75% 경고 시 넘기기) | 김도연 | 2 | `frontend/src/pages/admin/WorkList.tsx`, `ReviewPage.tsx` (API: CSA-53) |
+| CSA-56 | 이관 요청서 검토·전달 | 김도연 | 2 | `frontend/src/pages/admin/ReviewPage.tsx` (요청서: CSA-55) |
+| CSA-58 | 원문·번역 보기 전환 | 김도연 | 2 | `frontend/src/pages/admin/ReviewPage.tsx` (번역: CSA-57) |
 
 ## CSA-12 인프라·배포
 | 키 | 작업 | 담당 | 스프린트 | 위치 |

@@ -22,6 +22,10 @@
 # - navigation_rules.csv  기획서 5.4 표 (CSA-33). 원본에 없어 직접 만든 표
 # - family_divisions.csv  제품군 → 대분류(전력·자동화·에너지). 원본에 없어 직접 만든 표 (가정,
 #                         기획서 5.2 확정본으로 맞춘다)
+# - info_request_labels.csv 추가정보 요청문에 쓰는 쉬운 항목 이름 (CSA-27). 원본에 없어 직접
+#                         만든 표. info_field_codebook.csv 라벨은 고객 문의서·분석(CSA-26)이 쓰는
+#                         형식이라 그대로 두고, 고객에게 묻는 문장에만 이 표를 쓴다.
+#                         필드는 codebook 에 있는 것만.
 #
 # 할 일
 # 1. load_tables(): 위 CSV를 읽어 RefTables 로 돌려준다. 한 번만 읽도록 캐시(lru_cache).
@@ -55,6 +59,14 @@ class Product:
     name: str
     family: str
     division: str = ""  # family_divisions.csv (원본에 없음, 할 일 4)
+    # 기준표 원문을 보존한다. 금액·수량 계산 시 사용하는 쪽에서 Decimal 등으로 검증한다.
+    list_price_usd: str = ""
+    std_lead_time_weeks: str = ""
+    moq: str = ""
+    standards: str = ""
+    certifications: str = ""
+    doc_ids: tuple[str, ...] = ()
+    warranty_months: str = ""
 
 
 # eq=False: dict 필드가 있어 값 비교 해시는 못 만든다. 같은 객체인지로 비교·해시해서
@@ -72,6 +84,7 @@ class RefTables:
     divisions: dict[str, str] = field(default_factory=dict)  # division -> 표시 이름
     family_divisions: dict[str, str] = field(default_factory=dict)  # family -> division
     field_labels: dict[str, str] = field(default_factory=dict)  # info_field_codebook
+    request_labels: dict[str, str] = field(default_factory=dict)  # info_request_labels (쉬운 말)
     urgency: dict[str, str] = field(default_factory=dict)  # urgency -> 설명
     departments: dict[str, dict[str, str]] = field(default_factory=dict)  # dept_code -> row
     customers: dict[str, dict[str, str]] = field(default_factory=dict)  # customer_id -> row
@@ -145,6 +158,13 @@ def _load(ref_dir: Path) -> RefTables:
                     r["product_name"],
                     r["family"],
                     family_divisions.get(r["family"], ""),
+                    list_price_usd=r.get("list_price_usd", "").strip(),
+                    std_lead_time_weeks=r.get("std_lead_time_weeks", "").strip(),
+                    moq=r.get("moq", "").strip(),
+                    standards=r.get("standards", "").strip(),
+                    certifications=r.get("certifications", "").strip(),
+                    doc_ids=tuple(_split(r.get("doc_ids", ""))),
+                    warranty_months=r.get("warranty_months", "").strip(),
                 ),
             )
             for r in _read(ref_dir / "product_master.csv")
@@ -191,6 +211,17 @@ def _load(ref_dir: Path) -> RefTables:
         ((r["intent"], r) for r in _read(ref_dir / "navigation_rules.csv")),
         "navigation_rules.csv",
     )
+    field_labels = _unique(
+        ((r["field"], r["label"]) for r in _read(ref_dir / "info_field_codebook.csv")),
+        "info_field_codebook.csv",
+    )
+    request_labels = _unique(
+        ((r["field"], r["label"]) for r in _read(ref_dir / "info_request_labels.csv")),
+        "info_request_labels.csv",
+    )
+    unknown = sorted(set(request_labels) - set(field_labels))
+    if unknown:
+        raise ValueError(f"info_request_labels.csv: codebook 에 없는 항목 {unknown}")
     return RefTables(
         products,
         routing,
@@ -201,10 +232,8 @@ def _load(ref_dir: Path) -> RefTables:
         escalation,
         divisions=divisions,
         family_divisions=family_divisions,
-        field_labels=_unique(
-            ((r["field"], r["label"]) for r in _read(ref_dir / "info_field_codebook.csv")),
-            "info_field_codebook.csv",
-        ),
+        field_labels=field_labels,
+        request_labels=request_labels,
         urgency=_unique(
             ((r["urgency"], r["description"]) for r in _read(ref_dir / "urgency_codebook.csv")),
             "urgency_codebook.csv",

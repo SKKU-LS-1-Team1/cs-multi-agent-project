@@ -6,7 +6,9 @@
 #   generation(name=task, model, input, output, 지연 시간, 토큰) 을 남긴다. 지연 시간은 Langfuse 가
 #   시작·종료 시각으로 잰다. 비용은 Langfuse 가 모델 이름과 토큰으로 계산한다.
 # - 키(settings.langfuse_public_key / secret_key)가 없으면 기록하지 않는다.
-#   langfuse 패키지(extra: obs)도 키가 있을 때만 불러온다.
+#   langfuse 패키지(extra: obs)도 키가 있을 때만 불러온다. 키는 있는데 패키지가 없거나 클라이언트를
+#   만들지 못하면 경고를 한 번 남기고 기록만 건너뛴다 — LLM 호출은 그대로 간다 (기록 장애로
+#   분석이 실패해 문의가 전부 분석 대기가 되던 문제, PR #31).
 # - ticket_scope(ticket_id): 문의 1건의 노드 실행 전체를 하나의 trace 로 묶는다.
 #   그래프 실행을 이걸로 감싸면 안에서 일어난 호출이 모두 같은 trace
 #   (id = ticket_id 에서 만든 값)에 들어간다.
@@ -18,6 +20,7 @@
 #   with trace("classify", "jev-1", prompt, options=options) as span:
 #       span.output = call()
 #       span.usage = {"input": 120, "output": 8}
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -26,6 +29,8 @@ from functools import lru_cache
 from typing import Any
 
 from cs_agent.config import get_settings
+
+_LOGGER = logging.getLogger(__name__)
 
 _ticket_id: ContextVar[str | None] = ContextVar("ticket_id", default=None)
 
@@ -42,18 +47,31 @@ class Span:
 
 @lru_cache
 def _client() -> Any | None:
-    """키가 있으면 Langfuse 클라이언트, 없으면 None (기록 안 함)."""
+    """키가 있으면 Langfuse 클라이언트, 없거나 만들 수 없으면 None (기록 안 함).
+
+    lru_cache 라 실패 경고는 프로세스에서 한 번만 남는다.
+    """
     settings = get_settings()
     if not (settings.langfuse_public_key and settings.langfuse_secret_key):
         return None
-    from langfuse import Langfuse
-
-    return Langfuse(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key,
-        host=settings.langfuse_host,
-        environment=settings.app_env,
-    )
+    try:
+        from langfuse import Langfuse
+    except ImportError:
+        _LOGGER.warning(
+            "LANGFUSE 키가 있지만 langfuse 패키지가 없다 → LLM 기록을 건너뛴다 "
+            "(설치: uv sync --extra obs)"
+        )
+        return None
+    try:
+        return Langfuse(
+            public_key=settings.langfuse_public_key,
+            secret_key=settings.langfuse_secret_key,
+            host=settings.langfuse_host,
+            environment=settings.app_env,
+        )
+    except Exception as e:
+        _LOGGER.warning("Langfuse 클라이언트를 만들지 못했다 → LLM 기록을 건너뛴다: %s", e)
+        return None
 
 
 @contextmanager

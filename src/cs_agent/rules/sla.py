@@ -12,7 +12,8 @@
 # 4. is_at_risk(): 경과 / 목표 ≥ settings.sla_at_risk_ratio (0.75).
 # 5. 그래프 밖 SLA 감시 작업(주기 실행): 남은 시간 정렬, 75% 경고, 재문의 2회 팀장 알림,
 #    이관 건(해결 시간 2배)을 더 일찍 표시. 스케줄러 위치는 정해서 여기 적는다.
-#    TODO(CSA-40): 아직 없음. 작업 목록(services/tickets.py work_list)이 아래 함수로 매번 계산한다.
+#    TODO(CSA-40): 아직 없음. 작업 목록은 조회할 때마다 계산한다 (db/sql/work_list.sql, DB 없으면
+#    services/tickets.py 가 아래 함수로). 고객 대기 시간은 services/records.py 가 tickets 에 남긴다.
 #
 # 완료 기준: tickets 의 sla_first_response_target_h / sla_resolution_target_h 와 100% 일치
 from dataclasses import dataclass

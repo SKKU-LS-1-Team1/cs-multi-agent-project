@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="400" viewBox="0 0 980 400" font-family="Pretendard, &#x27;Noto Sans KR&#x27;, &#x27;Apple SD Gothic Neo&#x27;, sans-serif" role="img">
+<title>핵심 지표 K1~K5</title>
+<rect width="980" height="400" fill="#fcfcfb"/>
+<text x="24.0" y="44.0" font-size="20" fill="#0b0b0b" text-anchor="start" font-weight="600">핵심 지표 K1~K5</text>
+<rect x="24" y="60" width="300" height="150" rx="8" fill="#ffffff" stroke="rgba(11,11,11,0.10)"/>
+<text x="40.0" y="88.0" font-size="15" fill="#52514e" text-anchor="start" font-weight="600">K1 처리 지연 p95</text>
+<text x="40.0" y="136.0" font-size="36" fill="#0b0b0b" text-anchor="start" font-weight="600">—</text>
+<text x="40.0" y="164.0" font-size="12" fill="#898781" text-anchor="start" font-weight="400">문의 접수부터 상담원 검토 대기까지</text>
+<text x="40.0" y="192.0" font-size="13" fill="#52514e" text-anchor="start" font-weight="400">목표 ≤ 60.0초</text>
+<text x="308.0" y="192.0" font-size="13" fill="#898781" text-anchor="end" font-weight="400">평가 전</text>
+<rect x="340" y="60" width="300" height="150" rx="8" fill="#ffffff" stroke="rgba(11,11,11,0.10)"/>
+<text x="356.0" y="88.0" font-size="15" fill="#52514e" text-anchor="start" font-weight="600">K2 무수정 승인</text>
+<text x="356.0" y="136.0" font-size="36" fill="#0b0b0b" text-anchor="start" font-weight="600">—</text>
+<text x="356.0" y="164.0" font-size="12" fill="#898781" text-anchor="start" font-weight="400">정보 안내형 초안을 고치지 않고 승인</text>
+<text x="356.0" y="192.0" font-size="13" fill="#52514e" text-anchor="start" font-weight="400">목표 미정</text>
+<text x="624.0" y="192.0" font-size="13" fill="#898781" text-anchor="end" font-weight="400">평가 전</text>
+<rect x="656" y="60" width="300" height="150" rx="8" fill="#ffffff" stroke="rgba(11,11,11,0.10)"/>
+<text x="672.0" y="88.0" font-size="15" fill="#52514e" text-anchor="start" font-weight="600">K3 근거 일치</text>
+<text x="672.0" y="136.0" font-size="36" fill="#0b0b0b" text-anchor="start" font-weight="600">—</text>
+<text x="672.0" y="164.0" font-size="12" fill="#898781" text-anchor="start" font-weight="400">정답 문서·절이 근거 상위 3개 안</text>
+<text x="672.0" y="192.0" font-size="13" fill="#52514e" text-anchor="start" font-weight="400">목표 미정</text>
+<text x="940.0" y="192.0" font-size="13" fill="#898781" text-anchor="end" font-weight="400">평가 전</text>
+<rect x="24" y="226" width="300" height="150" rx="8" fill="#ffffff" stroke="rgba(11,11,11,0.10)"/>
+<text x="40.0" y="254.0" font-size="15" fill="#52514e" text-anchor="start" font-weight="600">K4 부서 일치</text>
+<text x="40.0" y="302.0" font-size="36" fill="#0b0b0b" text-anchor="start" font-weight="600">—</text>
+<text x="40.0" y="330.0" font-size="12" fill="#898781" text-anchor="start" font-weight="400">담당 부서 배정 (게이트)</text>
+<text x="40.0" y="358.0" font-size="13" fill="#52514e" text-anchor="start" font-weight="400">목표 ≥ 100.0%</text>
+<text x="308.0" y="358.0" font-size="13" fill="#898781" text-anchor="end" font-weight="400">평가 전</text>
+<rect x="340" y="226" width="300" height="150" rx="8" fill="#ffffff" stroke="rgba(11,11,11,0.10)"/>
+<text x="356.0" y="254.0" font-size="15" fill="#52514e" text-anchor="start" font-weight="600">K4 우선순위 일치</text>
+<text x="356.0" y="302.0" font-size="36" fill="#0b0b0b" text-anchor="start" font-weight="600">—</text>
+<text x="356.0" y="330.0" font-size="12" fill="#898781" text-anchor="start" font-weight="400">상담원 조정 건 제외 규칙 일치</text>
+<text x="356.0" y="358.0" font-size="13" fill="#52514e" text-anchor="start" font-weight="400">목표 미정</text>
+<text x="624.0" y="358.0" font-size="13" fill="#898781" text-anchor="end" font-weight="400">평가 전</text>
+<rect x="656" y="226" width="300" height="150" rx="8" fill="#ffffff" stroke="rgba(11,11,11,0.10)"/>
+<text x="672.0" y="254.0" font-size="15" fill="#52514e" text-anchor="start" font-weight="600">K5 누락 탐지</text>
+<text x="672.0" y="302.0" font-size="36" fill="#0b0b0b" text-anchor="start" font-weight="600">—</text>
+<text x="672.0" y="330.0" font-size="12" fill="#898781" text-anchor="start" font-weight="400">빠진 필수정보를 찾아낸 비율</text>
+<text x="672.0" y="358.0" font-size="13" fill="#52514e" text-anchor="start" font-weight="400">목표 미정</text>
+<text x="940.0" y="358.0" font-size="13" fill="#898781" text-anchor="end" font-weight="400">평가 전</text>
+</svg>

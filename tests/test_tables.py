@@ -1,10 +1,11 @@
+import csv
 import shutil
 from pathlib import Path
 
 import pytest
 
 from cs_agent.config import get_settings
-from cs_agent.rules.tables import ALL, audit_tickets, load_tables
+from cs_agent.rules.tables import ALL, Product, audit_tickets, load_tables
 
 
 def test_load_tables_reads_reference_files() -> None:
@@ -34,6 +35,36 @@ def test_every_product_has_division() -> None:
     assert set(tables.family_divisions) == {p.family for p in tables.products.values()}
     assert all(product.division for product in tables.products.values())
     assert tables.products["INV-LSLV0075-S100"].division == "AUTOMATION"
+
+
+def test_products_preserve_drafting_reference_values():
+    tables = load_tables()
+    with (get_settings().ref_dir / "product_master.csv").open(
+        encoding="utf-8-sig", newline=""
+    ) as f:
+        rows = list(csv.DictReader(f))
+    for row in rows:
+        product = tables.products[row["product_code"]]
+        for key in (
+            "list_price_usd",
+            "std_lead_time_weeks",
+            "moq",
+            "standards",
+            "certifications",
+            "warranty_months",
+        ):
+            assert getattr(product, key) == row[key].strip()
+        assert product.doc_ids == tuple(filter(None, row["doc_ids"].split(";")))
+    product = tables.products["MCCB-ABS-103c"]
+    assert (product.list_price_usd, product.std_lead_time_weeks, product.moq) == ("85", "4", "10")
+    assert "(-U variant)" in tables.products["MCCB-ABS-403c"].certifications
+
+
+def test_old_product_constructor_keeps_missing_values_unconfirmed():
+    product = Product("TEST", "Test product", "DRIVE", "AUTOMATION")
+    assert product.list_price_usd == product.std_lead_time_weeks == product.moq == ""
+    assert product.doc_ids == ()
+    assert product.warranty_months == ""
 
 
 def _ticket(**overrides: str) -> dict[str, str]:
@@ -124,3 +155,17 @@ def test_duplicate_sla_key_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="sla_policy.csv: 키"):
         load_tables(ref)
+
+
+def test_request_labels_cover_required_fields_in_plain_words() -> None:
+    tables = load_tables()
+    required = {f for fields, _ in tables.required.values() for f in fields}
+
+    assert required <= set(tables.request_labels)  # 묻는 항목은 모두 쉬운 이름이 있다
+    assert set(tables.request_labels) <= set(tables.field_labels)
+    assert "nameplate" in tables.request_labels["serial_no"]
+    # 원본 라벨(고객 문의서·분석 CSA-26 이 쓰는 형식)은 그대로
+    assert tables.field_labels["serial_no"] == "Serial number (nameplate)"
+    assert all(
+        "\n" not in label and not label[:1].isdigit() for label in tables.request_labels.values()
+    )  # 번호 목록 세기를 흐트러뜨리지 않는다

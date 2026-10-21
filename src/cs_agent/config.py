@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +39,11 @@ class Settings(BaseSettings):
     jev_base_url: str = "https://api.typesafe.ai/v1"  # TypeSafe 공식 API
     jev_model: str = ""
     jev_min_confidence: float = 0.7  # 임시값. 시험 문의로 확정 (CSA-49)
+    # 같은 요청 캐시·분당 호출 제한 (CSA-45, cache/store.py). live 일 때만 켠다 (main.py)
+    llm_cache_ttl_s: int = 86400  # 같은 단계·같은 프롬프트 응답을 하루 재사용. 0 이면 캐시 끔
+    gemini_rpm: int = 0  # Gemini 분당 호출 상한 (판단·작성 합산). 0 이면 제한 없음
+    jev_rpm: int = 0  # Jev 분당 호출 상한. 0 이면 제한 없음
+    llm_rate_wait_s: float = 20.0  # 상한에 걸리면 다음 창까지 이만큼만 기다리고, 넘으면 실패
 
     # 임베딩 (CSA-18). 다국어 15개 언어 문의 → 영어 문서. 적재와 검색이 반드시 같은 값을 쓴다.
     # gemini-embedding-2 기본은 3072차원인데 pgvector HNSW 인덱스는 2000차원까지라 1536으로 줄인다
@@ -53,6 +59,9 @@ class Settings(BaseSettings):
     # 처리 흐름
     max_verify_retries: int = 2  # 자동 점검 재작성 최대 (S-06)
     sla_at_risk_ratio: float = 0.75  # SLA 경고 기준 (CSA-40)
+    analysis_retry_interval_s: float = 60.0  # 분석 대기 문의 재시도 간격. 0 이면 자동 재시도 끔
+    inquiry_translation_timeout_s: float = Field(default=20.0, gt=0, le=60)
+    case_embed_interval_s: float = 300.0  # 벡터 없는 해결 사례 임베딩 간격 (live). 0 이면 끔
 
 
 @lru_cache
