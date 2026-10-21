@@ -15,6 +15,9 @@
 # - save_case(): 해결 확정 사례 (agents/case_memory.build_case). 임베딩을 같이 넣어야 사례 검색
 #   (agents/retrieval.py)에 잡힌다. LLM_PROVIDER=live 가 아니면 벡터 없이 남긴다.
 # - deactivate_case(): 재문의로 다시 열린 문의의 사례를 검색에서 뺀다 (active=false).
+# - set_assignee(): 담당자 배정·재배정 (CSA-53). tickets.assignee 를 바꾸고 assignments 에 이력을
+#   한 행 남긴다. assignee 는 그래프 상태에 없어서 save_state() 가 덮어쓰지 않는다.
+#   assignee_of() · open_counts()(담당자별 열린 건수, 자동 배정용) · assignments() 로 읽는다.
 import logging
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -43,6 +46,20 @@ class Records(Protocol):
     def save_case(self, case: dict) -> None: ...
 
     def deactivate_case(self, ticket_id: str) -> None: ...
+
+    def set_assignee(
+        self, ticket_id: str, assignee: str | None, reason: str = "", by: str = ""
+    ) -> None: ...
+
+    def assignee_of(self, ticket_id: str) -> str | None: ...
+
+    def open_counts(self, exclude: frozenset[str] = frozenset()) -> dict[str, int]:
+        """담당자별 열린 건수. exclude 상태(닫힌 상태)의 티켓은 세지 않는다."""
+        ...
+
+    def assignments(self, ticket_id: str) -> list[dict]:
+        """배정 이력 (오래된 순): from_assignee · to_assignee · reason · assigned_by · created_at"""
+        ...
 
 
 def _dump(value: Any) -> dict:
@@ -135,11 +152,17 @@ class MemoryRecords:
         self.drafts: dict[str, list[dict]] = {}
         self.reviews: dict[str, list[ReviewIn]] = {}
         self.cases: list[dict] = []
+        self.assignment_log: dict[str, list[dict]] = {}
 
     def add_ticket(self, ticket_id: str, inquiry: InquiryIn) -> None:
-        self.tickets[ticket_id] = {"thread_ref": inquiry.thread_ref, "status": TicketStatus.NEW}
+        self.tickets[ticket_id] = {
+            "thread_ref": inquiry.thread_ref,
+            "status": TicketStatus.NEW,
+            "assignee": None,
+        }
         self.drafts[ticket_id] = []
         self.reviews[ticket_id] = []
+        self.assignment_log[ticket_id] = []
 
     def exists(self, ticket_id: str) -> bool:
         return ticket_id in self.tickets
@@ -168,6 +191,34 @@ class MemoryRecords:
         for case in self.cases:
             if case["ticket_id"] == ticket_id:
                 case["active"] = False
+
+    def set_assignee(
+        self, ticket_id: str, assignee: str | None, reason: str = "", by: str = ""
+    ) -> None:
+        row = self.tickets[ticket_id]
+        self.assignment_log[ticket_id].append(
+            {
+                "from_assignee": row["assignee"],
+                "to_assignee": assignee,
+                "reason": reason,
+                "assigned_by": by,
+                "created_at": _now(),
+            }
+        )
+        row["assignee"] = assignee
+
+    def assignee_of(self, ticket_id: str) -> str | None:
+        return self.tickets[ticket_id]["assignee"]
+
+    def open_counts(self, exclude: frozenset[str] = frozenset()) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in self.tickets.values():
+            if row["assignee"] and row["status"] not in exclude:
+                counts[row["assignee"]] = counts.get(row["assignee"], 0) + 1
+        return counts
+
+    def assignments(self, ticket_id: str) -> list[dict]:
+        return [dict(a) for a in self.assignment_log.get(ticket_id, [])]
 
 
 # PostgreSQL -----------------------------------------------------------------------------------
@@ -321,3 +372,66 @@ class SqlRecords:
                 .where(ResolutionCase.ticket_id == ticket_id)
                 .values(active=False)
             )
+
+    def set_assignee(
+        self, ticket_id: str, assignee: str | None, reason: str = "", by: str = ""
+    ) -> None:
+        from cs_agent.db.models import AssignmentRow, Ticket
+
+        with self.sessionmaker.begin() as s:
+            ticket = s.get(Ticket, ticket_id, with_for_update=True)
+            s.add(
+                AssignmentRow(
+                    ticket_id=ticket_id,
+                    from_assignee=ticket.assignee,
+                    to_assignee=assignee,
+                    reason=reason,
+                    assigned_by=by,
+                )
+            )
+            ticket.assignee = assignee
+
+    def assignee_of(self, ticket_id: str) -> str | None:
+        import sqlalchemy as sa
+
+        from cs_agent.db.models import Ticket
+
+        with self.sessionmaker() as s:
+            return s.scalar(sa.select(Ticket.assignee).where(Ticket.ticket_id == ticket_id))
+
+    def open_counts(self, exclude: frozenset[str] = frozenset()) -> dict[str, int]:
+        import sqlalchemy as sa
+
+        from cs_agent.db.models import Ticket
+
+        query = (
+            sa.select(Ticket.assignee, sa.func.count())
+            .where(Ticket.assignee.is_not(None))
+            .group_by(Ticket.assignee)
+        )
+        if exclude:
+            query = query.where(Ticket.status.not_in([str(s) for s in exclude]))
+        with self.sessionmaker() as s:
+            return {assignee: n for assignee, n in s.execute(query)}
+
+    def assignments(self, ticket_id: str) -> list[dict]:
+        import sqlalchemy as sa
+
+        from cs_agent.db.models import AssignmentRow
+
+        query = (
+            sa.select(AssignmentRow)
+            .where(AssignmentRow.ticket_id == ticket_id)
+            .order_by(AssignmentRow.id)
+        )
+        with self.sessionmaker() as s:
+            return [
+                {
+                    "from_assignee": a.from_assignee,
+                    "to_assignee": a.to_assignee,
+                    "reason": a.reason,
+                    "assigned_by": a.assigned_by,
+                    "created_at": a.created_at,
+                }
+                for a in s.scalars(query)
+            ]

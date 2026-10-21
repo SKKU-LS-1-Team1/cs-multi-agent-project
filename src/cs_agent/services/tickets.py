@@ -14,6 +14,10 @@
 #   규칙이 없는 사람 큐(분류 실패한 안전 건)는 맨 위에 둔다.
 # - retry_pending(): 분석 대기(ANALYSIS_PENDING, LLM 장애 등) 문의를 처음부터 다시 돌린다.
 #   main.py 가 analysis_retry_interval_s 마다 부른다.
+# - 담당자 (CSA-53, services/assignment.py): 그래프를 돌린 뒤마다 부서 안 담당자를 자동 배정한다
+#   (아직 없거나, 이관으로 부서가 바뀌어 지금 담당자가 그 부서 사람이 아닐 때).
+#   assign(ticket_id, AssignIn): 같은 부서 다른 담당자로 넘기기. agents(dept): 재배정 후보 목록.
+#   명단(roster)이 비면 배정하지 않는다. 부서 = 이관 부서(escalated_to) 또는 assigned_dept.
 #
 # 저장소: 그래프 상태는 체크포인터(PostgresSaver, DB 없으면 메모리), 조회·집계용 행은
 #   services/records.py (SqlRecords: tickets·drafts·reviews·resolution_cases, 없으면 MemoryRecords).
@@ -30,7 +34,9 @@ from cs_agent.agents.translation import new_part, source_body
 from cs_agent.domain import Route, TicketStatus
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
-from cs_agent.schemas import InquiryIn, ReviewIn, TicketOut
+from cs_agent.schemas import AssignIn, InquiryIn, ReviewIn, TicketOut
+from cs_agent.services import assignment
+from cs_agent.services.assignment import Agent
 from cs_agent.services.records import MemoryRecords, Records
 
 CLOSED = frozenset({TicketStatus.APPROVED, TicketStatus.REJECTED, TicketStatus.RESOLVED})
@@ -44,10 +50,19 @@ class InvalidAction(ValueError):
     """지금 상태에서 할 수 없는 처리 (예: 검토 대기가 아닌데 승인)"""
 
 
+def ticket_dept(values: dict) -> str | None:
+    """지금 맡은 부서: 이관됐으면 이관 부서, 아니면 규칙이 정한 부서 (work_list.sql 과 같다)."""
+    rules = values.get("rules")
+    return values.get("escalated_to") or (rules.assigned_dept if rules else None)
+
+
 class TicketService:
-    def __init__(self, graph: Any, records: Records | None = None) -> None:
+    def __init__(
+        self, graph: Any, records: Records | None = None, roster: list[Agent] | None = None
+    ) -> None:
         self.graph = graph
         self.records = records if records is not None else MemoryRecords()
+        self.roster = list(roster or [])  # 담당자 명단 (data/ref/agents.csv). 비면 배정 안 함
 
     @staticmethod
     def _config(ticket_id: str) -> dict:
@@ -61,7 +76,64 @@ class TicketService:
     def _run(self, ticket_id: str, graph_input: Any) -> None:
         with ticket_scope(ticket_id):  # 문의 1건의 LLM 호출을 Langfuse trace 하나로
             self.graph.invoke(graph_input, self._config(ticket_id))
-        self.records.save_state(ticket_id, self.graph.get_state(self._config(ticket_id)).values)
+        values = self.graph.get_state(self._config(ticket_id)).values
+        self.records.save_state(ticket_id, values)
+        self._auto_assign(ticket_id, values)
+
+    def _auto_assign(self, ticket_id: str, values: dict) -> None:
+        """부서가 정해졌는데 그 부서 담당자가 없으면 배정한다. 이관으로 부서가 바뀌면 다시."""
+        dept = ticket_dept(values)
+        if not self.roster or not dept or values.get("status") in CLOSED:
+            return
+        current = self.records.assignee_of(ticket_id)
+        if any(a.agent_id == current and a.dept == dept and a.active for a in self.roster):
+            return
+        picked = assignment.assign(dept, self.records.open_counts(exclude=CLOSED), self.roster)
+        if picked == current:
+            return
+        if current is None:
+            reason = "자동 배정"
+        elif picked is None:
+            reason = f"{dept} 로 넘어감 — 받을 담당자 없음 (부서 큐)"
+        else:
+            reason = f"{dept} 로 넘어가 자동 재배정"
+        self.records.set_assignee(ticket_id, picked, reason)
+
+    def assign(self, ticket_id: str, change: AssignIn) -> TicketOut:
+        """같은 부서 다른 담당자로 넘긴다. 다른 부서·없는 담당자·닫힌 문의는 InvalidAction."""
+        values = self._state(ticket_id).values
+        if values.get("status") in CLOSED:
+            raise InvalidAction(f"{ticket_id} 는 닫힌 문의라 담당자를 바꿀 수 없다")
+        dept = ticket_dept(values)
+        if not dept:
+            raise InvalidAction(f"{ticket_id} 는 부서가 정해지지 않았다 (유형·부서를 먼저 정한다)")
+        try:
+            assignment.reassign(dept, change.assignee, self.roster)
+        except ValueError as e:
+            raise InvalidAction(str(e)) from e
+        if self.records.assignee_of(ticket_id) != change.assignee:
+            self.records.set_assignee(ticket_id, change.assignee, change.reason, change.by)
+        return self.get(ticket_id)
+
+    def agents(self, dept: str | None = None) -> list[dict]:
+        """담당자 목록 + 열린 건수 (재배정 선택용). dept 가 있으면 그 부서 활성 담당자만."""
+        counts = self.records.open_counts(exclude=CLOSED)
+        return [
+            {
+                "agent_id": a.agent_id,
+                "name": a.name,
+                "dept": a.dept,
+                "active": a.active,
+                "max_open": a.max_open,
+                "open_count": counts.get(a.agent_id, 0),
+            }
+            for a in self.roster
+            if dept is None or (a.dept == dept and a.active)
+        ]
+
+    def assignments(self, ticket_id: str) -> list[dict]:
+        self._state(ticket_id)  # 없는 문의면 TicketNotFound
+        return self.records.assignments(ticket_id)
 
     def submit(self, inquiry: InquiryIn) -> TicketOut:
         if inquiry.thread_ref and (existing := self.records.find_thread(inquiry.thread_ref)):
@@ -141,7 +213,8 @@ class TicketService:
             category=classification.category if classification else None,
             product_code=extraction.product_code if extraction else None,
             priority=rules.priority if rules else None,
-            assigned_dept=rules.assigned_dept if rules else None,
+            assigned_dept=ticket_dept(v),
+            assignee=self.records.assignee_of(ticket_id),
             sla_due_at=due_at(v["inquiry"].received_at, rules.sla_resolution_h) if rules else None,
             draft=v.get("draft"),
             info_request=v.get("info_request"),
@@ -157,7 +230,13 @@ class TicketService:
             evidence=v.get("evidence", []),
         )
 
-    def work_list(self, dept: str | None = None, now: datetime | None = None) -> list[dict]:
+    def work_list(
+        self,
+        dept: str | None = None,
+        now: datetime | None = None,
+        assignee: str | None = None,
+    ) -> list[dict]:
+        """assignee 를 주면 그 담당자 건만 (부서 큐·사람 큐 안전 건은 빠진다)."""
         now = now or datetime.now(UTC)
         rows = []
         for ticket_id in self.records.ticket_ids(exclude=CLOSED):
@@ -166,12 +245,15 @@ class TicketService:
             if v.get("status") in CLOSED:
                 continue
             if rules is None:
-                if v.get("status") == TicketStatus.HUMAN_QUEUE and not dept:
+                if v.get("status") == TicketStatus.HUMAN_QUEUE and not dept and not assignee:
                     rows.append(_unruled_row(ticket_id, v))
                 continue
             # 이관됐으면 이관 부서 목록에 보인다 (db/sql/work_list.sql 과 같다)
-            assigned_dept = v.get("escalated_to") or rules.assigned_dept
+            assigned_dept = ticket_dept(v)
             if dept and assigned_dept != dept:
+                continue
+            current = self.records.assignee_of(ticket_id)
+            if assignee and current != assignee:
                 continue
             # TODO(CSA-40): WAITING_CUSTOMER 동안 멈춘 시간(customer_wait_hours)을 빼기 (DB 필요)
             elapsed = elapsed_hours(v["inquiry"].received_at, now)
@@ -182,6 +264,7 @@ class TicketService:
                     "category": v["classification"].category,
                     "priority": rules.priority,
                     "assigned_dept": assigned_dept,
+                    "assignee": current,
                     "sla_due_at": due_at(v["inquiry"].received_at, rules.sla_resolution_h),
                     "sla_ratio": round(elapsed / rules.sla_resolution_h, 3),
                     "at_risk": is_at_risk(elapsed, rules.sla_resolution_h),
@@ -199,6 +282,7 @@ def _unruled_row(ticket_id: str, v: dict) -> dict:
         "category": None,
         "priority": None,
         "assigned_dept": None,
+        "assignee": None,
         "sla_due_at": None,
         "sla_ratio": None,
         "at_risk": True,

@@ -117,6 +117,14 @@ class ReviewIn(BaseModel):
     info_items: list[str] = Field(default_factory=list)  # 요청할 항목
 
 
+class AssignIn(BaseModel):
+    """담당자 재배정 입력 (CSA-53). 같은 부서 담당자만"""
+
+    assignee: str  # data/ref/agents.csv agent_id
+    reason: str = ""  # 예: "SLA 75% 경고 — 부재"
+    by: str = ""  # 넘긴 사람 (상담원·관리자)
+
+
 class TicketOut(BaseModel):
     """API 응답"""
 
@@ -127,7 +135,8 @@ class TicketOut(BaseModel):
     category: Category | None = None
     product_code: str | None = None
     priority: str | None = None
-    assigned_dept: str | None = None
+    assigned_dept: str | None = None  # 이관됐으면 이관 부서
+    assignee: str | None = None  # 담당 상담원 agent_id (CSA-53). 없으면 부서 큐
     sla_due_at: datetime | None = None
     draft: Draft | None = None
     info_request: str | None = None
