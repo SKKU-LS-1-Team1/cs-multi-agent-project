@@ -58,7 +58,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   productTree: () => request<ProductTree>("/products/tree"),
   product: (code: string) => request<{ code: string; name: string; family: string; tabs: string[] }>(`/products/${code}`),
-  chat: (body: { session_id: string; message: string; language?: string; viewing_product?: string | null }) =>
+  chat: (body: {
+    session_id: string;
+    message: string;
+    language?: string;
+    viewing_product?: string | null;
+    unresolved?: boolean; // "해결 안 됐어요" 버튼 → 바로 문의 전환
+  }) =>
     request<ChatReply>("/chat", { method: "POST", body: JSON.stringify(body) }),
   submitInquiry: (body: Record<string, unknown>) =>
     request<Ticket>("/tickets", { method: "POST", body: JSON.stringify(body) }),

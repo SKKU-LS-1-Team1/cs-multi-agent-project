@@ -17,6 +17,11 @@ S100 = "INV-LSLV0075-S100"
 
 # 챗봇 기록: 고객 / 챗봇 답변 순서로 번갈아 쌓인다 (api/chat.py)
 ADVICE = "가속 시간(F23)을 늘려 보세요."
+# 고객 언어로 확인되는 전환 안내 번역 (info_request.in_language: 글자 20자 이상)
+HANDOFF_KO = (
+    "같은 문제가 다시 생겨서 담당 엔지니어가 확인해야 합니다. "
+    "지금까지 나눈 내용으로 문의서를 열어 드릴게요."
+)
 
 
 class ScriptedWriter:
@@ -111,8 +116,8 @@ def analysis(monkeypatch):
     return state
 
 
-def say(message="S100 가속 중 E.OC", **kw) -> ChatIn:
-    return ChatIn(session_id="s1", message=message, language="ko", **kw)
+def say(message="S100 가속 중 E.OC", language="ko", **kw) -> ChatIn:
+    return ChatIn(session_id="s1", message=message, language=language, **kw)
 
 
 # 기획서 5.4 · 5.5 시나리오: S100 E.OC → 고장 탭 → 재발 → 문의하기
@@ -144,7 +149,7 @@ def test_answer_prompt_forbids_deciding_and_uses_customer_language(analysis):
     respond(say(), [], FakeDocs([tg()]), live(writer), TABLES)
 
     prompt = writer.prompts[0]
-    assert "in ko" in prompt  # 추출된 언어
+    assert "in Korean" in prompt  # 고객 언어
     assert "Never confirm a quotation amount" in prompt
     assert "ONLY the reference documents" in prompt
 
@@ -157,8 +162,8 @@ def test_recurrence_after_remote_advice_hands_off_with_prefilled_form(analysis):
         ADVICE,
     ]
     writer = ScriptedWriter(
+        HANDOFF_KO,  # 전환 안내 번역 (추출을 기다리는 동안 먼저)
         "Repeated E.OC\n\nWe already increased the acceleration time.",
-        "같은 문제가 다시 생겨 문의서로 이동합니다.",  # 전환 안내 번역
     )
 
     out = respond(say("E.OC AGAIN"), history, FakeDocs([tg()]), live(writer), TABLES)  # 재발 2
@@ -170,8 +175,8 @@ def test_recurrence_after_remote_advice_hands_off_with_prefilled_form(analysis):
     assert out.form.product_code == S100
     assert out.form.fields["error_code"] == "E.OC"
     assert out.form.subject == "Repeated E.OC"
-    assert out.answer == "같은 문제가 다시 생겨 문의서로 이동합니다."
-    assert out.handoff_reason in writer.prompts[1]  # 번역 요청에 전환 이유가 들어간다
+    assert out.answer == HANDOFF_KO
+    assert out.handoff_reason in writer.prompts[0]  # 번역 요청에 전환 이유가 들어간다
 
 
 def test_single_recurrence_is_not_enough(analysis):
@@ -388,30 +393,95 @@ def test_intent_judgement_failure_is_treated_as_nothing_happened(analysis):
 
 
 def test_handoff_answer_is_translated_to_the_customer_language(analysis):
-    writer = ScriptedWriter(
-        "Subject\n\nBody", "해결되지 않아 문의하기로 넘깁니다."
-    )  # 문의서 요약, 번역 순서
+    writer = ScriptedWriter(HANDOFF_KO, "Subject\n\nBody")  # 번역, 문의서 요약 순서
 
     out = respond(say(unresolved=True), [], FakeDocs([tg()]), live(writer), TABLES)
 
-    assert out.answer == "해결되지 않아 문의하기로 넘깁니다."
-    assert "Translate the text into ko" in writer.prompts[1]
+    assert out.answer == HANDOFF_KO
+    assert "Translate the text into Korean" in writer.prompts[0]
 
 
-def test_handoff_answer_falls_back_to_english_when_translation_fails(analysis):
-    writer = ScriptedWriter("Subject\n\nBody", RuntimeError("boom"))  # 문의서 요약, 번역 순서
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        [RuntimeError("boom")] * 3,  # 번역 호출 실패
+        ["Since this wasn't resolved, we'll pass it to a support engineer."] * 3,  # 영어 그대로
+        [RuntimeError("boom"), "영어", "still English text, not Korean at all"],
+    ],
+)
+def test_handoff_answer_is_never_sent_in_english_to_other_languages(analysis, outputs):
+    """세 번 옮겨도 고객 언어로 확인되지 않으면 영어가 아니라 언어별 고정 문장."""
+    writer = ScriptedWriter(*outputs, "Subject\n\nBody")
 
     out = respond(say(unresolved=True), [], FakeDocs([tg()]), live(writer), TABLES)
 
-    assert out.answer.startswith("Since this wasn't resolved")
-    assert out.answer.endswith("what we've discussed so far.")
+    assert out.answer == agent.HANDOFF_FALLBACK["ko"]
+    assert sum(p.startswith("Translate the text") for p in writer.prompts) == 3
+    assert out.form is not None and out.form.subject == "Subject"
+
+
+def test_handoff_retry_after_a_wrong_language_answer(analysis):
+    writer = ScriptedWriter("still English text, not Korean at all", HANDOFF_KO, "S\n\nB")
+
+    out = respond(say(unresolved=True), [], FakeDocs([tg()]), live(writer), TABLES)
+
+    assert out.answer == HANDOFF_KO
+
+
+def test_handoff_without_llm_uses_the_fixed_sentence_in_customer_language(analysis):
+    out = respond(
+        say(unresolved=True), [], FakeDocs([tg()]), LLMRouter(Settings(_env_file=None)), TABLES
+    )
+
+    assert out.answer == agent.HANDOFF_FALLBACK["ko"]
+
+
+def test_unknown_language_falls_back_to_english(analysis):
+    out = respond(
+        say(unresolved=True, language="xx"),
+        [],
+        FakeDocs([tg()]),
+        LLMRouter(Settings(_env_file=None)),
+        TABLES,
+    )
+
+    assert out.answer == agent.HANDOFF_FALLBACK["en"]
+
+
+def test_fallback_sentences_cover_customer_languages() -> None:
+    from cs_agent.agents.drafting import _CUSTOMER_LANGUAGES
+    from cs_agent.agents.info_request import in_language
+
+    assert set(agent.HANDOFF_FALLBACK) == set(_CUSTOMER_LANGUAGES)
+    for code, text in agent.HANDOFF_FALLBACK.items():
+        assert in_language(text, code), code  # 고정 문장도 그 언어로 확인된다
+
+
+@pytest.mark.parametrize(
+    ("history", "message", "language"),
+    [
+        ([], "S100 인버터가 가속할 때 E.OC 에러가 떠요", "ko"),
+        ([], "Mi variador S100 se dispara con E.OC al acelerar", "es"),
+        (["S100 가속 중 E.OC 가 떠요", ADVICE], "E.OC?", "ko"),  # 짧은 말은 지난 고객 말로
+        ([], "S100 E.OC", "en"),  # 글자가 거의 없으면 영어
+        ([], "S100 加速时出现 E.OC 故障", "zh"),
+        ([], "S100 で加速中に E.OC が出ます", "ja"),  # 한자가 섞여도 가나가 있으면 일본어
+    ],
+)
+def test_language_is_detected_when_the_screen_does_not_send_it(
+    analysis, history, message, language
+):
+    writer = ScriptedWriter()
+
+    respond(ChatIn(session_id="s", message=message), history, FakeDocs([tg()]), live(writer))
+
+    assert f"in {agent.language_name(language)}" in writer.prompts[0]
 
 
 def test_english_customers_get_the_english_text_without_a_model_call(analysis):
-    analysis["extraction"] = analysis["extraction"].model_copy(update={"language": "en"})
     writer = ScriptedWriter("Subject\n\nBody")
 
-    out = respond(say(unresolved=True), [], FakeDocs([tg()]), live(writer), TABLES)
+    out = respond(say(unresolved=True, language="en"), [], FakeDocs([tg()]), live(writer), TABLES)
 
     assert out.answer.startswith("Since this wasn't resolved")
     assert len(writer.prompts) == 1  # 문의서 요약 한 번뿐
@@ -486,3 +556,90 @@ def test_chat_response_has_the_shape_the_screen_expects(client):
         "form",
     }
     assert set(body["navigation"]) == {"product_code", "tab", "anchor", "rule_id", "candidates"}
+
+
+# 응답 시간: LLM 추출은 답변 작성과 함께 돈다
+
+
+def test_llm_extraction_runs_while_the_answer_is_written(analysis, monkeypatch):
+    import time
+
+    extracted = analysis["extraction"]
+
+    def slow_extract(inquiry, tables, **kw):
+        time.sleep(0.4)
+        return extracted
+
+    class SlowWriter(ScriptedWriter):
+        def write(self, prompt):
+            time.sleep(0.4)
+            return super().write(prompt)
+
+    monkeypatch.setattr(agent, "extract", slow_extract)
+    started = time.monotonic()
+
+    out = respond(say(), [], FakeDocs([tg()]), live(SlowWriter()), TABLES)
+
+    assert time.monotonic() - started < 0.75  # 0.4 + 0.4 를 더한 시간이 아니다
+    assert out.navigation.tab == "faults"
+
+
+def test_rule_extraction_feeds_the_answer_and_llm_extraction_the_screen(analysis):
+    """답변은 규칙 추출(메시지에 S100)로, 화면 이동·ask_fields 는 LLM 추출로."""
+    analysis["extraction"] = Extraction(
+        product_code=S100, product_family="DRIVE", error_code="E.OC", serial_no="SN-1"
+    )
+    writer = ScriptedWriter()
+
+    out = respond(say("S100 가속 중 트립"), [], FakeDocs([tg()]), live(writer), TABLES)
+
+    assert "LSLV S100 7.5kW VFD" in writer.prompts[0]
+    assert out.navigation.anchor == "E.OC"  # 메시지에는 없고 LLM 추출에만 있다
+    assert "serial_no" not in out.ask_fields
+
+
+def test_failed_llm_extraction_falls_back_to_rule_extraction(analysis, monkeypatch):
+    def broken(inquiry, tables, **kw):
+        raise AnalysisError("structured_extraction_failed")
+
+    monkeypatch.setattr(agent, "extract", broken)
+
+    out = respond(say("S100 가속 중 E.OC"), [], FakeDocs([tg()]), live(), TABLES)
+
+    assert out.handoff is False
+    assert (out.navigation.product_code, out.navigation.anchor) == (S100, "E.OC")
+
+
+def test_failed_llm_extraction_still_fills_the_form_on_handoff(analysis, monkeypatch):
+    monkeypatch.setattr(
+        agent, "extract", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("slow"))
+    )
+
+    out = respond(
+        say("S100 E.OC 해결 안 됐어요", unresolved=True), [], FakeDocs([tg()]), live(), TABLES
+    )
+
+    assert out.form is not None
+    assert out.form.fields["error_code"] == "E.OC"  # 규칙 추출 값
+
+
+def test_slow_llm_extraction_does_not_hold_the_answer(analysis, monkeypatch):
+    """전환이 아니면 답변 뒤 EXTRACT_GRACE_S 만 기다리고 규칙 추출로 답한다."""
+    import threading
+    import time
+
+    release = threading.Event()
+
+    def stuck(inquiry, tables, **kw):
+        release.wait(5)
+        return analysis["extraction"]
+
+    monkeypatch.setattr(agent, "extract", stuck)
+    monkeypatch.setattr(agent, "EXTRACT_GRACE_S", 0.1)
+    started = time.monotonic()
+
+    out = respond(say("S100 가속 중 E.OC"), [], FakeDocs([tg()]), live(), TABLES)
+    release.set()
+
+    assert time.monotonic() - started < 1.0
+    assert (out.navigation.product_code, out.navigation.anchor) == (S100, "E.OC")  # 규칙 추출
