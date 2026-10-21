@@ -49,16 +49,20 @@
 #       """이관 요청서 초안. to_dept 가 없으면 rules.escalate_to."""
 # 생성은 TicketService.generate_escalation_request에서 명시적으로 호출한다.
 # 일반 접수 그래프에는 LLM 호출을 추가하지 않는다. 전달 확정은 기존 ESCALATE 액션이다.
+# 모델 출력이 검사(인용·보호값·한국어)를 통과하지 못하거나 호출이 실패하면 거절 사유를 붙여
+# 최대 ESCALATION_ATTEMPTS 번 다시 쓴다. 분당 호출 상한(RateLimited)은 기다리지 않고 바로 실패.
+# 본문(text)의 [확인 정보]는 한국어 항목 이름, SLA 마감은 KST 로 쓴다. fields 는 기계용 원래 값
+# (ISO 시각·필드 코드)을 그대로 둔다.
 from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from cs_agent.llm.router import LLMRouter
+from cs_agent.llm.router import LLMRouter, RateLimited
 from cs_agent.rules.sla import due_at
 from cs_agent.rules.tables import RefTables, load_tables
 from cs_agent.schemas import EscalationRequest
@@ -85,6 +89,44 @@ ESCALATION_TARGETS = frozenset(
     }
 )
 UNKNOWN = "확인 필요"
+ESCALATION_ATTEMPTS = 3
+KST = timezone(timedelta(hours=9), "KST")
+# 요청서 본문의 항목 이름 (info_field_codebook.csv 의 필드).
+# 표의 label 은 고객 문의서용 영어라 따로 둔다
+FIELD_LABELS_KO = {
+    "product_model": "제품 모델",
+    "serial_no": "시리얼 번호",
+    "application": "용도·사용 조건",
+    "target_standard": "요청 규격/인증",
+    "target_country": "대상 국가",
+    "site_condition": "현장 조건",
+    "wiring_diagram": "결선도",
+    "photos": "사진",
+    "purchase_doc": "구매 증빙",
+    "install_date": "설치일",
+    "failure_description": "불량 증상",
+    "po_number": "PO 번호",
+    "quantity": "수량",
+    "required_date": "필요 일자",
+    "incoterms": "인코텀즈·납품지",
+    "document_type": "요청 문서 종류",
+    "doc_language": "문서 언어",
+    "error_code": "오류 코드",
+    "operating_condition": "발생 당시 운전 조건",
+    "logs": "이벤트·트립 로그",
+    "current_fw": "현재 펌웨어",
+    "tool_version": "설정 툴 버전",
+    "return_reason": "반품 사유",
+    "packaging_condition": "포장 상태",
+    "parameter_backup": "파라미터 백업",
+    "motor_nameplate": "모터 명판",
+    "program_backup": "프로그램 백업",
+    "battery_status": "배터리 상태",
+    "load_profile": "부하 이력",
+    "oil_test": "절연유 시험",
+    "string_config": "스트링 구성",
+    "battery_age": "배터리 사용 기간",
+}
 PROMPT_VERSION = "escalation-v2-citation-validation"
 INSTRUCTIONS = """
 # ROLE
@@ -257,7 +299,48 @@ def _fields(state: TicketState, target: str, sla_due_at: datetime | None = None)
     for name, value in sorted(confirmed.items()):
         if value and name not in fields:
             fields[name] = value
+    if fields.get("product_model") == fields["product_code"]:
+        del fields["product_model"]  # 제품 코드와 같은 값을 두 번 쓰지 않는다
     return fields
+
+
+def _kst(value: str) -> str:
+    """ISO 시각 → "2026-10-26 15:51 (KST)". 시각이 아니면(확인 필요) 그대로."""
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(KST).strftime("%Y-%m-%d %H:%M (KST)")
+
+
+def _write_narrative(
+    base: str, allowed: set[str], llm: LLMRouter, tables: RefTables
+) -> tuple[_Narrative, list[str]]:
+    """모델 출력 → (요약·요청, 인용). 검사에 걸리면 거절 사유를 붙여 다시 쓴다."""
+    prompt, failure = base, "escalation_generation_failed"
+    for _ in range(ESCALATION_ATTEMPTS):
+        try:
+            raw = llm.write("escalation_request", prompt)
+        except RateLimited as exc:
+            raise EscalationError("escalation_generation_failed") from exc
+        except Exception:
+            failure = "escalation_generation_failed"
+            continue
+        try:
+            narrative = _Narrative.model_validate_json(raw)
+            return narrative, _check_narrative(narrative, allowed, tables)
+        except (ValidationError, ValueError) as exc:
+            llm.invalidate_write("escalation_request", prompt)
+            failure = "escalation_output_invalid"
+            reason = str(exc).splitlines()[0][:300]
+            prompt = (
+                base
+                + "\n\n# PREVIOUS OUTPUT REJECTED\n"
+                + f"{reason}\nReturn a corrected JSON object that follows every RULE."
+            )
+    raise EscalationError(failure)
 
 
 def write_escalation_request(
@@ -307,26 +390,18 @@ def write_escalation_request(
         "documents": documents,
         "checks": [c.model_dump(mode="json") for c in state.get("checks", [])],
     }
-    prompt = INSTRUCTIONS + "\n\n# INPUT DATA\n" + json.dumps(payload, ensure_ascii=False)
-    try:
-        raw = llm.write("escalation_request", prompt)
-    except Exception as exc:
-        raise EscalationError("escalation_generation_failed") from exc
-    try:
-        narrative = _Narrative.model_validate_json(raw)
-        allowed = {d["id"] for d in documents}
-        cited = _check_narrative(narrative, allowed, tables)
-    except (ValidationError, ValueError) as exc:
-        llm.invalidate_write("escalation_request", prompt)
-        raise EscalationError("escalation_output_invalid") from exc
+    base = INSTRUCTIONS + "\n\n# INPUT DATA\n" + json.dumps(payload, ensure_ascii=False)
+    allowed = {d["id"] for d in documents}
+    narrative, cited = _write_narrative(base, allowed, llm, tables)
     labels = {
         "product_code": "제품 코드",
         "product_family": "제품군",
         "customer_tier": "고객 등급",
         "country": "국가",
         "priority": "우선순위",
-        "sla_due_at": "SLA 마감 (시간대 포함)",
+        "sla_due_at": "SLA 마감",
         "return_defect": "불량 반품 여부",
+        **FIELD_LABELS_KO,
         **dict(DEPARTMENT_FIELDS.get(target, ())),
     }
     lines = [
@@ -335,7 +410,9 @@ def write_escalation_request(
         "",
         "[확인 정보]",
     ]
-    lines.extend(f"- {labels.get(k, k)}: {v}" for k, v in fields.items())
+    lines.extend(
+        f"- {labels.get(k, k)}: {_kst(v) if k == 'sla_due_at' else v}" for k, v in fields.items()
+    )
     lines.extend(
         [
             "",

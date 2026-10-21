@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from stubs import ANALYSIS
 
 from cs_agent.agents.escalation import (
+    ESCALATION_ATTEMPTS,
+    KST,
     EscalationError,
     InvalidEscalation,
     write_escalation_request,
@@ -40,6 +42,7 @@ class Writer:
     def __init__(self):
         self.prompts = []
         self.error = False
+        self.queue = []  # 차례로 돌려줄 출력 (비면 self.output)
         self.output = {
             "summary": "고객이 대상 제품의 규격 확인을 요청했습니다.",
             "request": "적용 규격과 확인에 필요한 자료를 검토해 주세요.",
@@ -51,7 +54,14 @@ class Writer:
         self.prompts.append(prompt)
         if self.error:
             raise TimeoutError("provider timeout")
-        return Completion(json.dumps(self.output, ensure_ascii=False), self.name)
+        out = self.queue.pop(0) if self.queue else self.output
+        if isinstance(out, Exception):
+            raise out
+        return Completion(json.dumps(out, ensure_ascii=False), self.name)
+
+
+def kst(moment):
+    return moment.astimezone(KST).strftime("%Y-%m-%d %H:%M (KST)")
 
 
 @pytest.fixture
@@ -122,8 +132,9 @@ def test_department_fields_and_fixed_facts(state, llm, writer, dept, expected):
     assert result.fields["priority"] == state["rules"].priority
     expected_due = state["inquiry"].received_at + timedelta(hours=state["rules"].sla_resolution_h)
     assert result.fields["sla_due_at"] == expected_due.isoformat()
-    for name in ("product_code", "priority", "sla_due_at"):
+    for name in ("product_code", "priority"):
         assert result.fields[name] in result.text
+    assert f"- SLA 마감: {kst(expected_due)}" in result.text  # 본문은 KST, fields 는 ISO
     assert result.fields["serial_no"] == "**MASKED**"
     assert result.fields["photos"] == "[attachment: 6 photos]"
     assert "WITHDRAWN-111" not in result.text
@@ -205,9 +216,10 @@ def test_invalid_output_is_not_cached_as_success(state, llm, writer, bad):
     writer.output.update(bad)
     with pytest.raises(EscalationError, match="output_invalid"):
         write_escalation_request(state, llm)
+    assert len(writer.prompts) == ESCALATION_ATTEMPTS  # 거절 사유를 붙여 다시 썼다
     writer.output = good
     assert write_escalation_request(state, llm).summary == good["summary"]
-    assert len(writer.prompts) == 2
+    assert len(writer.prompts) == ESCALATION_ATTEMPTS + 1
 
 
 def test_provider_failure_is_explicit(state, llm, writer):
@@ -442,7 +454,7 @@ def test_request_uses_ticket_sla_deadline(client, state, monkeypatch, writer, wa
     request = result["escalation_request"]
     assert datetime.fromisoformat(request["fields"]["sla_due_at"]) == expected_due
     assert datetime.fromisoformat(result["sla_due_at"]) == expected_due
-    assert expected_due.isoformat() in request["text"]
+    assert kst(expected_due) in request["text"]
     payload = json.loads(writer.prompts[-1].split("# INPUT DATA\n")[1])
     assert payload["fixed_fields"]["sla_due_at"] == expected_due.isoformat()
 
@@ -520,3 +532,58 @@ def test_review_links_the_kind_the_operator_reviewed(client, state, monkeypatch)
         response = client.post(f"/api/tickets/{tid}/action", json={"action": action})
         assert response.status_code == 200
     assert kinds == ["draft", "escalation"]
+
+
+def test_rejected_output_is_retried_with_the_reason(state, llm, writer):
+    """검사에 한 번 걸려도 거절 사유를 붙여 다시 쓰면 요청서가 나온다 (다시 누르지 않게)."""
+    bad = {**writer.output, "summary": "우선순위 P1입니다."}
+    writer.queue = [bad]
+
+    result = write_escalation_request(state, llm)
+
+    assert result.summary == writer.output["summary"]
+    assert len(writer.prompts) == 2
+    assert "# PREVIOUS OUTPUT REJECTED" not in writer.prompts[0]
+    assert "# PREVIOUS OUTPUT REJECTED" in writer.prompts[1]
+    assert "protected field repeated" in writer.prompts[1]
+
+
+def test_provider_failure_is_retried(state, llm, writer):
+    writer.queue = [TimeoutError("provider timeout")]
+
+    assert write_escalation_request(state, llm).summary == writer.output["summary"]
+    assert len(writer.prompts) == 2
+
+
+def test_rate_limit_is_not_retried(state, llm, writer):
+    from cs_agent.llm.router import RateLimited
+
+    writer.queue = [RateLimited("gemini")]
+
+    with pytest.raises(EscalationError, match="generation_failed"):
+        write_escalation_request(state, llm)
+    assert len(writer.prompts) == 1
+
+
+def test_request_text_uses_korean_field_names_without_duplicate_product(state, llm, writer):
+    state["extraction"] = state["extraction"].model_copy(
+        update={
+            "error_code": "E.OC",
+            "field_values": {
+                **state["extraction"].field_values,
+                "product_model": "TRF-OIL-1000",
+                "operating_condition": "during acceleration",
+            },
+        }
+    )
+
+    result = write_escalation_request(state, llm, "FIELD_SVC")
+
+    assert "- 오류/증상: E.OC" in result.text
+    assert "- 시리얼 번호: **MASKED**" in result.text
+    assert "- 용도·사용 조건: substation" in result.text
+    assert "product_model" not in result.fields  # 제품 코드와 같은 값은 한 번만
+    assert not any(
+        line.startswith(("- serial_no", "- application", "- product_model", "- error_code"))
+        for line in result.text.splitlines()
+    )
