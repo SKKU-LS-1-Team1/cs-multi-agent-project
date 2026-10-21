@@ -327,6 +327,52 @@ def test_trace_is_noop_without_keys(monkeypatch):
     assert span.output == "x"
 
 
+# conftest 가 모든 테스트에서 _client 를 "기록 안 함"으로 바꾸므로, 실제 함수는 불러올 때 잡아 둔다
+_REAL_CLIENT = tracing._client
+
+
+@pytest.fixture
+def langfuse_keys(monkeypatch):
+    """키가 있는 설정 + 실제 _client() (lru_cache 를 비우고, 끝나면 다시 비운다)."""
+    monkeypatch.setattr(
+        tracing,
+        "get_settings",
+        lambda: settings(langfuse_public_key="pk", langfuse_secret_key="sk"),
+    )
+    monkeypatch.setattr(tracing, "_client", _REAL_CLIENT)
+    _REAL_CLIENT.cache_clear()
+    yield
+    _REAL_CLIENT.cache_clear()
+
+
+def test_missing_langfuse_package_skips_tracing_not_llm_calls(langfuse_keys, monkeypatch, caplog):
+    """키는 있는데 langfuse 가 설치 안 됐으면 기록만 건너뛴다 — 판단·작성은 그대로 (PR #31)."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "langfuse", None)  # import langfuse → ImportError
+
+    router = LLMRouter(settings(), jev=StubJudge("jev"), writer=StubWriter())
+    assert router.judge("classify", "p", OPTIONS).answer == "RETURN"
+    assert router.write("draft", "q") == "답변: q"
+    assert tracing._client() is None
+    tracing.flush()  # 종료 때도 문제없다
+    assert sum("langfuse 패키지가 없다" in r.message for r in caplog.records) == 1  # 경고는 한 번
+
+
+def test_langfuse_client_error_skips_tracing(langfuse_keys, monkeypatch):
+    import sys
+    import types
+
+    def broken(**kwargs):
+        raise ValueError("bad host")
+
+    monkeypatch.setitem(sys.modules, "langfuse", types.SimpleNamespace(Langfuse=broken))
+
+    with tracing.trace("draft", "m", "p") as span:
+        span.output = "x"
+    assert span.output == "x" and tracing._client() is None
+
+
 def test_router_calls_are_traced_under_ticket(langfuse):
     jev, gemini = StubJudge("jev", confidence=0.4), StubJudge("gemini-fast", answer="QUOTE")
     router = LLMRouter(settings(), jev=jev, gemini_judge=gemini, writer=StubWriter())
