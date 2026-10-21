@@ -20,6 +20,11 @@
 # - set_assignee(): 담당자 배정·재배정 (CSA-53). tickets.assignee 를 바꾸고 assignments 에 이력을
 #   한 행 남긴다. assignee 는 그래프 상태에 없어서 save_state() 가 덮어쓰지 않는다.
 #   assignee_of() · open_counts()(담당자별 열린 건수, 자동 배정용) · assignments() 로 읽는다.
+# - 고객 대기(CSA-40): save_state() 가 상태를 보고 SLA 정지 시간을 남긴다. WAITING_CUSTOMER 가 되면
+#   waiting_since = 지금, 풀리면 그동안의 시간을 customer_wait_hours 에 더하고 waiting_since 를
+#   비운다 (next_wait). wait_hours() 는 끝난 대기 + 지금 대기 중이면 그 시간.
+# - work_list(): 작업 목록. SqlRecords 는 db/sql/work_list.sql 결과, MemoryRecords 는 None
+#   (services/tickets.py 가 그래프 상태로 같은 규칙을 계산한다).
 import logging
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -71,6 +76,14 @@ class Records(Protocol):
 
     def assignments(self, ticket_id: str) -> list[dict]:
         """배정 이력 (오래된 순): from_assignee · to_assignee · reason · assigned_by · created_at"""
+        ...
+
+    def wait_hours(self, ticket_id: str, now: datetime | None = None) -> float:
+        """SLA 가 멈춘 고객 대기 시간 (끝난 대기 누적 + 지금 대기 중이면 그 시간)."""
+        ...
+
+    def work_list(self, dept: str | None, assignee: str | None, now: datetime) -> list[dict] | None:
+        """작업 목록 행. 계산할 수 없으면(DB 없음) None — 서비스가 그래프 상태로 계산한다."""
         ...
 
 
@@ -167,6 +180,21 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def next_wait(
+    status: str, waiting_since: datetime | None, wait_hours: float, now: datetime
+) -> tuple[datetime | None, float]:
+    """새 상태 → (waiting_since, customer_wait_hours). 고객 회신 대기 동안 SLA 가 멈춘다."""
+    if status == TicketStatus.WAITING_CUSTOMER:
+        return waiting_since or now, wait_hours
+    return None, current_wait(waiting_since, wait_hours, now)  # 대기가 끝났으면 그 시간을 더한다
+
+
+def current_wait(waiting_since: datetime | None, wait_hours: float, now: datetime) -> float:
+    if waiting_since is None:
+        return wait_hours
+    return wait_hours + max((now - waiting_since).total_seconds(), 0) / 3600
+
+
 # 메모리 ---------------------------------------------------------------------------------------
 
 
@@ -183,6 +211,8 @@ class MemoryRecords:
             "thread_ref": inquiry.thread_ref,
             "status": TicketStatus.NEW,
             "assignee": None,
+            "waiting_since": None,
+            "customer_wait_hours": 0.0,
         }
         self.drafts[ticket_id] = []
         self.reviews[ticket_id] = []
@@ -198,7 +228,12 @@ class MemoryRecords:
         return next((t for t, r in self.tickets.items() if r["thread_ref"] == thread_ref), None)
 
     def save_state(self, ticket_id: str, values: dict) -> None:
-        self.tickets[ticket_id].update(ticket_row(values))
+        row = ticket_row(values)
+        ticket = self.tickets[ticket_id]
+        ticket["waiting_since"], ticket["customer_wait_hours"] = next_wait(
+            row["status"], ticket["waiting_since"], ticket["customer_wait_hours"], _now()
+        )
+        ticket.update(row)
         versions = self.drafts[ticket_id]
         for row in draft_versions(values):
             last = next((d for d in reversed(versions) if d["kind"] == row["kind"]), None)
@@ -252,8 +287,14 @@ class MemoryRecords:
     def assignments(self, ticket_id: str) -> list[dict]:
         return [dict(a) for a in self.assignment_log.get(ticket_id, [])]
 
+    # PostgreSQL -----------------------------------------------------------------------------------
 
-# PostgreSQL -----------------------------------------------------------------------------------
+    def wait_hours(self, ticket_id: str, now: datetime | None = None) -> float:
+        ticket = self.tickets[ticket_id]
+        return current_wait(ticket["waiting_since"], ticket["customer_wait_hours"], now or _now())
+
+    def work_list(self, dept: str | None, assignee: str | None, now: datetime) -> list[dict] | None:
+        return None  # DB 가 없으면 services/tickets.py 가 그래프 상태로 계산한다
 
 
 class SqlRecords:
@@ -307,6 +348,9 @@ class SqlRecords:
         row = ticket_row(values)
         with self.sessionmaker.begin() as s:
             ticket = s.get(Ticket, ticket_id)
+            ticket.waiting_since, ticket.customer_wait_hours = next_wait(
+                row["status"], ticket.waiting_since, ticket.customer_wait_hours or 0.0, _now()
+            )
             for key, value in row.items():
                 setattr(ticket, key, value)
             if row["status"] == TicketStatus.RESOLVED and ticket.resolved_at is None:
@@ -528,3 +572,20 @@ class SqlRecords:
                 }
                 for a in s.scalars(query)
             ]
+
+    def wait_hours(self, ticket_id: str, now: datetime | None = None) -> float:
+        from cs_agent.db.models import Ticket
+
+        with self.sessionmaker() as s:
+            ticket = s.get(Ticket, ticket_id)
+            return current_wait(
+                ticket.waiting_since, ticket.customer_wait_hours or 0.0, now or _now()
+            )
+
+    def work_list(self, dept: str | None, assignee: str | None, now: datetime) -> list[dict] | None:
+        from cs_agent.db.queries import run
+
+        with self.sessionmaker() as s:
+            return run(
+                s.connection(), "work_list", "work_list", dept=dept, assignee=assignee, now=now
+            )

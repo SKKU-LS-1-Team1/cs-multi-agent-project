@@ -91,6 +91,30 @@ class TranslationWriter:
         return Completion(self.text, self.name)
 
 
+@pytest.mark.parametrize(
+    ("language", "target"),
+    [
+        (
+            "ko",
+            "S100에서 케이블과 모터를 1,000 V에서 절연 시험하십시오 [TG-INV-LSLV0075-S100#3.2]. "
+            "정격 7.5kW, 40 °C에서.",
+        ),
+        (
+            "ja",
+            "S100で、ケーブルとモーターを1,000 Vで絶縁試験してください [TG-INV-LSLV0075-S100#3.2]。"
+            "定格7.5kW、40 °Cで。",
+        ),
+    ],
+)
+def test_translation_with_particles_attached_to_units_and_codes_is_accepted(language, target):
+    """한국어·일본어는 조사가 단위·코드에 바로 붙는다 ("1,000 V에서"). 맞는 번역을 막지 않는다"""
+    source = (
+        "On the S100, megger test the cable and motor at 1,000 V [TG-INV-LSLV0075-S100#3.2]. "
+        "Rated 7.5kW, at 40 °C."
+    )
+    assert d.translate_reply(source, "en", language, router(TranslationWriter(target))) == target
+
+
 def test_translation_preserves_approved_numbers_codes_and_citations():
     source = "S100 warranty: 24 months; price 260.00 USD [POL-WARRANTY#1]."
     target = "Garantie S100 : 24 mois ; prix 260.00 USD [POL-WARRANTY#1]."

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="808" height="418" viewBox="0 0 808 418" font-family="Pretendard, &#x27;Noto Sans KR&#x27;, &#x27;Apple SD Gothic Neo&#x27;, sans-serif" role="img">
+<title>시연: 앞 절반 vs 뒤 절반</title>
+<rect width="808" height="418" fill="#fcfcfb"/>
+<text x="24.0" y="44.0" font-size="20" fill="#0b0b0b" text-anchor="start" font-weight="600">시연: 사례가 쌓이며 좋아지는가</text>
+<rect x="24" y="58" width="12" height="12" rx="2" fill="#2a78d6"/>
+<text x="42.0" y="69.0" font-size="13" fill="#52514e" text-anchor="start" font-weight="400">앞 절반</text>
+<rect x="134" y="58" width="12" height="12" rx="2" fill="#eb6834"/>
+<text x="152.0" y="69.0" font-size="13" fill="#52514e" text-anchor="start" font-weight="400">뒤 절반</text>
+<line x1="154.0" y1="82" x2="154.0" y2="378" stroke="#c3c2b7" stroke-width="1"/>
+<text x="154.0" y="396.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="400">0%</text>
+<line x1="294.0" y1="82" x2="294.0" y2="378" stroke="#e1e0d9" stroke-width="1"/>
+<text x="294.0" y="396.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="400">25%</text>
+<line x1="434.0" y1="82" x2="434.0" y2="378" stroke="#e1e0d9" stroke-width="1"/>
+<text x="434.0" y="396.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="400">50%</text>
+<line x1="574.0" y1="82" x2="574.0" y2="378" stroke="#e1e0d9" stroke-width="1"/>
+<text x="574.0" y="396.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="400">75%</text>
+<line x1="714.0" y1="82" x2="714.0" y2="378" stroke="#e1e0d9" stroke-width="1"/>
+<text x="714.0" y="396.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="400">100%</text>
+<text x="144.0" y="121.0" font-size="13" fill="#52514e" text-anchor="end" font-weight="400">유형</text>
+<text x="144.0" y="179.0" font-size="13" fill="#52514e" text-anchor="end" font-weight="400">근거 K3</text>
+<text x="144.0" y="237.0" font-size="13" fill="#52514e" text-anchor="end" font-weight="400">부서 K4</text>
+<text x="144.0" y="295.0" font-size="13" fill="#52514e" text-anchor="end" font-weight="400">누락 K5</text>
+<text x="144.0" y="353.0" font-size="13" fill="#52514e" text-anchor="end" font-weight="400">live 사례 사용</text>
+<text x="434.0" y="233.0" font-size="16" fill="#898781" text-anchor="middle" font-weight="400">평가 후 채움</text>
+</svg>

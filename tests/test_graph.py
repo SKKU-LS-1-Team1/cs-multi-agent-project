@@ -511,3 +511,52 @@ def test_escalated_ticket_moves_to_receiving_dept_in_work_list():
     assert [r["assigned_dept"] for r in service.work_list()] == ["FIELD_SVC"]
     assert [r["ticket_id"] for r in service.work_list(dept="FIELD_SVC")] == [ticket.ticket_id]
     assert service.work_list(dept=original) == []
+
+
+def _waiting_scenario(service, monkeypatch):
+    """0시 접수 → 2시 추가정보 요청 승인(대기 시작) → 12시 고객 회신(대기 10시간 끝)."""
+    from datetime import UTC, datetime, timedelta
+
+    from cs_agent.services import records
+
+    t0 = datetime(2026, 10, 21, 0, 0, tzinfo=UTC)
+    clock = {"now": t0}
+    monkeypatch.setattr(records, "_now", lambda: clock["now"])
+    at = lambda hours: t0 + timedelta(hours=hours)  # noqa: E731
+    inquiry = SPEC_QUESTION.model_copy(
+        update={
+            "subject": "Transformer dimensions",
+            "body": "What are the dimensions?",
+            "received_at": t0,
+        }
+    )
+
+    ticket = service.submit(inquiry)
+    target_h = (service.get(ticket.ticket_id).sla_due_at - t0).total_seconds() / 3600
+    clock["now"] = at(2)
+    waiting = service.act(ticket.ticket_id, ReviewIn(action=ReviewAction.APPROVE))
+    assert waiting.status == TicketStatus.WAITING_CUSTOMER
+    return ticket.ticket_id, target_h, clock, at
+
+
+def test_work_list_pauses_sla_while_waiting_for_customer(monkeypatch):
+    service = _service(Calls())
+    tid, target_h, clock, at = _waiting_scenario(service, monkeypatch)
+
+    def ratio(hours):
+        [row] = service.work_list(now=at(hours))
+        return row["sla_ratio"]
+
+    # 대기 중(2시~)에는 시계가 멈춘다: 12시에도 경과 2시간
+    assert ratio(12) == ratio(2) == round(2 / target_h, 3)
+    clock["now"] = at(12)
+    reply = SPEC_QUESTION.model_copy(
+        update={"body": "Model is TRF-OIL-1000.", "received_at": at(12)}
+    )
+    service.reply(tid, reply)  # 회신 → 대기 10시간이 쌓인다
+
+    assert service.records.wait_hours(tid) == 10
+    assert ratio(20) == round((20 - 10) / target_h, 3)
+    [row] = service.work_list(now=at(20))
+    assert row["sla_due_at"] == at(target_h + 10)
+    assert service.get(tid).sla_due_at == at(target_h + 10)  # 상세 화면 마감도 같이 밀린다

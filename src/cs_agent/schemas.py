@@ -145,6 +145,9 @@ class TicketOut(BaseModel):
     """API 응답"""
 
     ticket_id: str
+    inquiry: InquiryIn | None = (
+        None  # 고객 문의 원문 (회신이 오면 이어 붙인 본문). 관리자 화면 표시용
+    )
     body_ko: str | None = None
     status: TicketStatus
     route: Route | None = None

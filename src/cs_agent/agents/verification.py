@@ -680,6 +680,35 @@ def strip_copied(text: str, source_text: str) -> str:
     return " ".join(w for w, k in zip(original, keep, strict=True) if k)
 
 
+# 고유 문자 → 언어. 가나가 있으면 한자가 섞여도 일본어라 가나를 한자보다 먼저 본다
+_SCRIPT_LANGUAGE = (
+    ("HANGUL", "ko"),
+    ("HIRAGANA", "ja"),
+    ("KATAKANA", "ja"),
+    ("CJK", "zh"),
+    ("THAI", "th"),
+    ("ARABIC", "ar"),
+    ("CYRILLIC", "ru"),
+)
+
+
+def detect_language(text: str, default: str = "en") -> str:
+    """고객 글 → 언어 코드 (LANGUAGE_CODES 중). 고객 언어를 모를 때 쓴다 (챗봇·웹 문의서).
+
+    고유 문자(한글·가나·한자 …)가 있으면 그 언어 — 제품 코드가 섞인 짧은 말도 정해진다.
+    그 밖은 lingua. 글자가 거의 없거나 판단하지 못하면 default.
+    """
+    rest = strip_copied(text, "")  # 제품 코드·숫자를 뺀 글
+    scripts = {_script(ch) for ch in rest if ch.isalpha()}
+    for script, code in _SCRIPT_LANGUAGE:
+        if script in scripts:
+            return code
+    if sum(ch.isalpha() for ch in rest) < 2:
+        return default
+    detected = _detector().detect_language_of(rest)
+    return detected.iso_code_639_1.name.lower() if detected is not None else default
+
+
 def detect_mismatch(text: str, language: str, source_text: str = "") -> str | None:
     """고객 언어와 다르면 그 언어(또는 문자 종류)를, 같거나 판단할 수 없으면 None."""
     language = (language or "").lower().split("-")[0]

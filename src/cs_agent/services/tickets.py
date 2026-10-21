@@ -4,13 +4,18 @@
 #
 # - submit(inquiry): ticket_id 발급 → graph.invoke → 상담원 검토 지점(또는 사람 큐)에서
 #   멈춘 상태로 반환. thread_ref 가 기존 티켓과 같으면 새 티켓이 아니라 고객 회신이다 (reply).
+#   language 가 없으면(웹 문의서) 제목·본문에서 감지한다 (verification.detect_language).
 # - reply(ticket_id, inquiry): 고객 회신 → 원문에 회신을 붙여 같은 thread_id 로 ① 접수부터 다시
 #   돈다. 재문의 횟수(followups) +1, 해결된 문의였으면 그 사례를 검색에서 뺀다.
 # - act(ticket_id, review): 상담원 버튼 → Command(resume=...) 로 그래프 재개 (CSA-25)
 # - resolve(ticket_id): 해결 확정 → 상태 RESOLVED, 저장 대상이면 사례로 남김
 #   (agents/case_memory.py)
-# - get(ticket_id): 그래프 상태 → TicketOut. sla_due_at = 접수 + 해결 목표 시간 (rules/sla.py)
-# - work_list(dept): 열린 티켓을 SLA 경과 비율 큰 순으로, at_risk(≥ 75%) 표시 (CSA-40)
+# - get(ticket_id): 그래프 상태 → TicketOut. sla_due_at = 접수 + 해결 목표 시간 + 고객 대기 시간
+#   (rules/sla.py due_at, 대기 시간은 records.wait_hours)
+# - work_list(dept, assignee): 열린 티켓을 SLA 경과 비율 큰 순으로, at_risk(≥ 75%) 표시 (CSA-40).
+#   DB 가 있으면 db/sql/work_list.sql (records.work_list), 없으면 그래프 상태로 같은 규칙을
+#   계산한다.
+#   경과 시간에서 고객 회신 대기(WAITING_CUSTOMER) 시간을 뺀다 — 그동안 SLA 가 멈춘다.
 #   규칙이 없는 사람 큐(분류 실패한 안전 건)는 맨 위에 둔다.
 # - retry_pending(): 분석 대기(ANALYSIS_PENDING, LLM 장애 등) 문의를 처음부터 다시 돌린다.
 #   main.py 가 analysis_retry_interval_s 마다 부른다.
@@ -22,7 +27,6 @@
 # 저장소: 그래프 상태는 체크포인터(PostgresSaver, DB 없으면 메모리), 조회·집계용 행은
 #   services/records.py (SqlRecords: tickets·drafts·reviews·resolution_cases, 없으면 MemoryRecords).
 #   그래프를 돌릴 때마다 records.save_state() 로 tickets 행을 맞춘다.
-# TODO(CSA-20·40): work_list 를 db/sql/work_list.sql 로 (지금은 열린 티켓의 그래프 상태로 계산).
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -33,6 +37,7 @@ from langgraph.types import Command
 from cs_agent.agents.case_memory import SAVE_ON, build_case
 from cs_agent.agents.escalation import EscalationError, InvalidEscalation
 from cs_agent.agents.translation import new_part, source_body
+from cs_agent.agents.verification import detect_language
 from cs_agent.domain import ReviewAction, Route, TicketStatus
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
@@ -146,6 +151,10 @@ class TicketService:
     def submit(self, inquiry: InquiryIn) -> TicketOut:
         if inquiry.thread_ref and (existing := self.records.find_thread(inquiry.thread_ref)):
             return self.reply(existing, inquiry)
+        if not inquiry.language:  # 웹 문의서는 언어를 보내지 않는다 → 회신이 영어로 나가지 않게
+            inquiry = inquiry.model_copy(
+                update={"language": detect_language(f"{inquiry.subject}\n{inquiry.body}")}
+            )
         ticket_id = f"T-{uuid.uuid4().hex[:12].upper()}"
         self.records.add_ticket(ticket_id, inquiry)
         self._run(ticket_id, {"ticket_id": ticket_id, "inquiry": inquiry, "followups": 0})
@@ -272,6 +281,7 @@ class TicketService:
         extraction = v.get("extraction")
         return TicketOut(
             ticket_id=ticket_id,
+            inquiry=v.get("inquiry"),
             body_ko=v.get("body_ko"),
             status=v.get("status", TicketStatus.NEW),
             route=Route(v["route"]) if v.get("route") else None,
@@ -280,7 +290,15 @@ class TicketService:
             priority=rules.priority if rules else None,
             assigned_dept=ticket_dept(v),
             assignee=self.records.assignee_of(ticket_id),
-            sla_due_at=due_at(v["inquiry"].received_at, rules.sla_resolution_h) if rules else None,
+            sla_due_at=(
+                due_at(
+                    v["inquiry"].received_at,
+                    rules.sla_resolution_h,
+                    self.records.wait_hours(ticket_id),
+                )
+                if rules
+                else None
+            ),
             draft=v.get("draft"),
             info_request=v.get("info_request"),
             escalation_request=v.get("escalation_request"),
@@ -304,6 +322,10 @@ class TicketService:
     ) -> list[dict]:
         """assignee 를 주면 그 담당자 건만 (부서 큐·사람 큐 안전 건은 빠진다)."""
         now = now or datetime.now(UTC)
+        rows = self.records.work_list(dept, assignee, now)
+        if rows is not None:  # DB: db/sql/work_list.sql
+            return rows
+        # DB 없음(메모리 기록): 그래프 상태로 work_list.sql 과 같은 규칙을 계산한다
         rows = []
         for ticket_id in self.records.ticket_ids(exclude=CLOSED):
             v = self.graph.get_state(self._config(ticket_id)).values
@@ -321,8 +343,8 @@ class TicketService:
             current = self.records.assignee_of(ticket_id)
             if assignee and current != assignee:
                 continue
-            # TODO(CSA-40): WAITING_CUSTOMER 동안 멈춘 시간(customer_wait_hours)을 빼기 (DB 필요)
-            elapsed = elapsed_hours(v["inquiry"].received_at, now)
+            wait = self.records.wait_hours(ticket_id, now)  # 고객 회신 대기 동안 SLA 정지
+            elapsed = elapsed_hours(v["inquiry"].received_at, now, wait)
             rows.append(
                 {
                     "ticket_id": ticket_id,
@@ -331,7 +353,7 @@ class TicketService:
                     "priority": rules.priority,
                     "assigned_dept": assigned_dept,
                     "assignee": current,
-                    "sla_due_at": due_at(v["inquiry"].received_at, rules.sla_resolution_h),
+                    "sla_due_at": due_at(v["inquiry"].received_at, rules.sla_resolution_h, wait),
                     "sla_ratio": round(elapsed / rules.sla_resolution_h, 3),
                     "at_risk": is_at_risk(elapsed, rules.sla_resolution_h),
                 }

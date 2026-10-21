@@ -21,7 +21,9 @@ from cs_agent.llm.clients import Completion
 from cs_agent.llm.router import LLMRouter
 from cs_agent.rules.tables import load_tables
 
-LABELS = load_tables().field_labels
+_TABLES = load_tables()
+# 요청문이 실제로 쓰는 라벨: 쉬운 이름(info_request_labels) 우선, 없으면 codebook 라벨
+LABELS = {**_TABLES.field_labels, **_TABLES.request_labels}
 
 
 class ScriptedWriter:
@@ -74,8 +76,8 @@ def test_every_field_has_a_customer_label() -> None:
 
 def test_item_labels_dedupes_and_falls_back() -> None:
     assert item_labels(["serial_no", "serial_no", " ", "photos"], LABELS) == [
-        "Serial number (nameplate)",
-        "Photos of product and nameplate",
+        "Serial number printed on the product's nameplate label",
+        "Photos of the product and of its nameplate label",
     ]
     assert item_labels(["unknown_field"], LABELS) == ["unknown field"]
     assert item_labels([], LABELS) == [FALLBACK_ITEM]
@@ -146,7 +148,7 @@ def test_prompt_lists_every_item_in_order_with_language() -> None:
     prompt = build_prompt(items, "es", "x" * 5000)
 
     assert "in Spanish" in prompt
-    assert "1. Incoterms and delivery destination\n2. Quantity" in prompt
+    assert f"1. {LABELS['incoterms']}\n2. {LABELS['quantity']}" in prompt
     assert "numbered list 1. to 2." in prompt
     assert prompt.endswith("\n" + "x" * 2000)  # 문의 원문은 앞 2,000자만
 
@@ -156,7 +158,7 @@ def test_without_llm_returns_english_template_with_all_items() -> None:
         ["product_model", "serial_no"], "es", "inquiry", LLMRouter(Settings(_env_file=None))
     )
     assert count_items(text) == 2
-    assert "1. Product model / ordering code\n2. Serial number (nameplate)" in text
+    assert f"1. {LABELS['product_model']}\n2. {LABELS['serial_no']}" in text
 
 
 def test_live_writes_in_customer_language() -> None:
@@ -308,3 +310,17 @@ def test_short_english_is_never_sent_as_is(language, short_english) -> None:
     with pytest.raises(LocalizationError):
         localize_request(short_english, language, live(writer))
     assert len(writer.prompts) == 3
+
+
+def test_request_uses_plain_labels_for_customers() -> None:
+    from cs_agent.agents.info_request import _field_labels
+
+    labels = _field_labels()
+    assert labels == LABELS
+    items = item_labels(["serial_no", "incoterms", "unknown_field"], labels)
+
+    assert items[0] == "Serial number printed on the product's nameplate label"
+    assert items[1].startswith("Delivery terms and delivery address")
+    assert items[2] == "unknown field"
+    text = template_request(items)
+    assert all(f"{i}. {item}" in text for i, item in enumerate(items, 1))
