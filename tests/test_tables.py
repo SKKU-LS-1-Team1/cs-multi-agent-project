@@ -45,7 +45,14 @@ def test_products_preserve_drafting_reference_values():
         rows = list(csv.DictReader(f))
     for row in rows:
         product = tables.products[row["product_code"]]
-        for key in ("list_price_usd", "std_lead_time_weeks", "moq", "standards", "certifications"):
+        for key in (
+            "list_price_usd",
+            "std_lead_time_weeks",
+            "moq",
+            "standards",
+            "certifications",
+            "warranty_months",
+        ):
             assert getattr(product, key) == row[key].strip()
         assert product.doc_ids == tuple(filter(None, row["doc_ids"].split(";")))
     product = tables.products["MCCB-ABS-103c"]
@@ -57,6 +64,7 @@ def test_old_product_constructor_keeps_missing_values_unconfirmed():
     product = Product("TEST", "Test product", "DRIVE", "AUTOMATION")
     assert product.list_price_usd == product.std_lead_time_weeks == product.moq == ""
     assert product.doc_ids == ()
+    assert product.warranty_months == ""
 
 
 def _ticket(**overrides: str) -> dict[str, str]:

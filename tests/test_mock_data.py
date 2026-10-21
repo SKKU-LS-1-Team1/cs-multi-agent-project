@@ -10,7 +10,7 @@ from cs_agent.graph.builder import GraphDeps, build_ticket_graph
 from cs_agent.llm.router import LLMRouter
 from cs_agent.main import create_app
 from cs_agent.pipeline import mock_data
-from cs_agent.schemas import Draft, InquiryIn
+from cs_agent.schemas import CheckResult, Draft, InquiryIn
 from cs_agent.services.tickets import TicketService
 
 NOW = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
@@ -26,6 +26,8 @@ AGENTS = {
     "classify": _expected_category,
     "extract": stubs.extract,
     "write_draft": lambda *a, **k: Draft(text="draft", model="stub"),
+    # 답변이 대역이라 자동 점검도 대역으로 (점검은 tests/test_verification.py 에서 본다)
+    "verify": lambda *a, **k: [CheckResult(name="stub", passed=True)],
     "write_info_request": lambda missing, *a: f"please send {', '.join(missing)}",
 }
 

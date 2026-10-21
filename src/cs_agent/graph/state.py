@@ -41,5 +41,7 @@ class TicketState(TypedDict, total=False):
     review_rounds: int  # 상담원 재작성 요청 횟수, 자동 점검과 따로 센다
     followups: int  # 고객 회신(재문의)으로 다시 돈 횟수 (services/tickets.py reply)
     final_reply: str | None
+    approved_reply: str | None  # 상담원이 승인·수정 승인한 원문 (번역 실패 시에도 보존)
+    translation_error: str | None  # 고객 언어 번역 실패 → ON_HOLD, 재승인으로 재시도
     escalated_to: str | None
     status: str  # domain.TicketStatus

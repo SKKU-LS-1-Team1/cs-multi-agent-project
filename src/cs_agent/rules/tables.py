@@ -62,6 +62,7 @@ class Product:
     standards: str = ""
     certifications: str = ""
     doc_ids: tuple[str, ...] = ()
+    warranty_months: str = ""
 
 
 # eq=False: dict 필드가 있어 값 비교 해시는 못 만든다. 같은 객체인지로 비교·해시해서
@@ -158,6 +159,7 @@ def _load(ref_dir: Path) -> RefTables:
                     standards=r.get("standards", "").strip(),
                     certifications=r.get("certifications", "").strip(),
                     doc_ids=tuple(_split(r.get("doc_ids", ""))),
+                    warranty_months=r.get("warranty_months", "").strip(),
                 ),
             )
             for r in _read(ref_dir / "product_master.csv")

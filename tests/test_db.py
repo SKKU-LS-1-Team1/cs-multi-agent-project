@@ -1,7 +1,6 @@
 import os
 
 import pytest
-import sqlalchemy as sa
 from sqlalchemy import inspect, select, text
 
 from cs_agent.agents.case_memory import build_case
@@ -45,9 +44,9 @@ def test_embedding_dim_matches_settings():
 
 
 def test_rows_keep_every_schema_field():
-    """schemas.py 에 필드가 생기면 DB 열도 같이 만들어야 한다."""
+    """조회용 필드는 열로, 추출 실제 값은 체크포인트·초안 slots로 보존한다."""
     assert set(InquiryIn.model_fields) - {"category", "product_code"} <= _columns(Ticket)
-    assert set(Extraction.model_fields) - {"urgency"} <= _columns(Ticket)  # urgency_flag
+    assert set(Extraction.model_fields) - {"urgency", "field_values"} <= _columns(Ticket)
     assert set(RuleResult.model_fields) - {
         "escalate_to",
         "required_info",
@@ -87,51 +86,11 @@ def db():
 
 
 @needs_db
-def test_field_values_migration_preserves_existing_rows():
-    from alembic import command
-
-    from cs_agent.db.session import alembic_config, get_engine
-    from cs_agent.services.records import ticket_row
-
-    config = alembic_config(TEST_DATABASE_URL)
-    engine = get_engine(TEST_DATABASE_URL)
-    command.downgrade(config, "base")
-    try:
-        command.upgrade(config, "0001")
-        old_table = sa.Table("tickets", sa.MetaData(), autoload_with=engine)
-        inquiry = InquiryIn(channel="email", body="Existing ticket before migration")
-        row = ticket_row({"inquiry": inquiry})
-        row.pop("field_values")
-        with engine.begin() as conn:
-            conn.execute(
-                old_table.insert().values(ticket_id="T-OLD", **row, customer_wait_hours=0.0)
-            )
-        command.upgrade(config, "head")
-        with engine.begin() as conn:
-            stored = conn.execute(
-                select(Ticket.body, Ticket.field_values).where(Ticket.ticket_id == "T-OLD")
-            ).one()
-            assert stored.body == inquiry.body
-            assert stored.field_values == {}
-            # 업그레이드 전 코드처럼 새 열을 생략한 INSERT도 서버 기본값으로 동작한다.
-            conn.execute(
-                old_table.insert().values(ticket_id="T-NEW", **row, customer_wait_hours=0.0)
-            )
-            assert (
-                conn.execute(
-                    select(Ticket.field_values).where(Ticket.ticket_id == "T-NEW")
-                ).scalar_one()
-                == {}
-            )
-    finally:
-        command.downgrade(config, "base")
-
-
-@needs_db
-def test_sql_records_keep_and_clear_extracted_values(db):
+def test_sql_records_keep_extracted_values_in_existing_draft_slots(db):
     from cs_agent.services.records import SqlRecords
 
-    _, Session = db
+    engine, Session = db
+    assert "field_values" not in {c["name"] for c in inspect(engine).get_columns("tickets")}
     records = SqlRecords(Session)
     inquiry = InquiryIn(
         channel="email", body="Quantity corrected", provided_fields={"quantity": "5"}
@@ -142,15 +101,24 @@ def test_sql_records_keep_and_clear_extracted_values(db):
         {
             "inquiry": inquiry,
             "extraction": Extraction(field_values={"quantity": "10", "incoterms": "FOB"}),
+            "draft": Draft(text="Quote for 10 units", slots={"quantity": "10", "incoterms": "FOB"}),
         },
     )
     with Session() as session:
         ticket = session.get(Ticket, "T-FIELDS")
-        assert ticket.field_values == {"quantity": "10", "incoterms": "FOB"}
         assert ticket.provided_fields == {"quantity": "5"}
-    records.save_state("T-FIELDS", {"inquiry": inquiry, "extraction": Extraction()})
+        assert ticket.drafts[0].slots == {"quantity": "10", "incoterms": "FOB"}
+    records.save_state(
+        "T-FIELDS",
+        {
+            "inquiry": inquiry,
+            "extraction": Extraction(),
+            "draft": Draft(text="Quantity needs confirmation", slots={}),
+        },
+    )
     with Session() as session:
-        assert session.get(Ticket, "T-FIELDS").field_values == {}
+        drafts = session.get(Ticket, "T-FIELDS").drafts
+        assert [draft.slots for draft in drafts] == [{"quantity": "10", "incoterms": "FOB"}, {}]
 
 
 @needs_db
@@ -216,7 +184,7 @@ def test_ticket_history_and_vector_search(db):
 # --- 문의 처리 기록 + 그래프 체크포인트 (services/records.py, graph/builder.py) ----------------
 
 
-def _db_service(Session, checkpointer):
+def _db_service(Session, checkpointer, **agents):
     from stubs import ANALYSIS
 
     from cs_agent.graph.builder import GraphDeps, build_ticket_graph
@@ -224,18 +192,27 @@ def _db_service(Session, checkpointer):
     from cs_agent.services.records import SqlRecords
     from cs_agent.services.tickets import TicketService
 
-    deps = GraphDeps(llm=LLMRouter(Settings(_env_file=None)), **ANALYSIS)
+    def extract(inquiry, tables, **kwargs):
+        return ANALYSIS["extract"](inquiry, tables, **kwargs).model_copy(
+            update={"field_values": dict(inquiry.provided_fields)}
+        )
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)), **{**ANALYSIS, "extract": extract, **agents}
+    )
     embed = lambda texts: [[1.0] + [0.0] * (EMBEDDING_DIM - 1) for _ in texts]  # noqa: E731
     return TicketService(build_ticket_graph(deps, checkpointer), SqlRecords(Session, embed))
 
 
 @needs_db
-def test_service_records_rows_and_survives_restart(db):
+@pytest.mark.parametrize("customer_language", ["en", "fr"])
+def test_service_records_rows_and_survives_restart(db, customer_language):
     from cs_agent.graph.builder import postgres_checkpointer
 
     engine, Session = db
     inquiry = InquiryIn(
         channel="email",
+        language=customer_language,
         customer_tier="GOLD",
         subject="Dimensions of TRF-OIL-1000",
         body="What are the dimensions and weight of TRF-OIL-1000?",
@@ -243,18 +220,30 @@ def test_service_records_rows_and_survives_restart(db):
         provided_fields={"application": "substation"},
         thread_ref="mail-7",
     )
+
+    def translate(text, source, target, llm):
+        assert source == "en" and target == customer_language
+        return text if target == "en" else "Réponse validée."
+
     try:
         with postgres_checkpointer(TEST_DATABASE_URL) as saver:
-            service = _db_service(Session, saver)
+            service = _db_service(Session, saver, translate_reply=translate)
             tid = service.submit(inquiry).ticket_id
             service.act(tid, ReviewIn(action=ReviewAction.REWRITE, feedback="짧게"))
 
         # 서버를 다시 켠 것처럼 새 체크포인터·서비스로 이어서 처리한다
         with postgres_checkpointer(TEST_DATABASE_URL) as saver:
-            service = _db_service(Session, saver)
+            service = _db_service(Session, saver, translate_reply=translate)
             assert service.get(tid).status == TicketStatus.READY_FOR_REVIEW
+            restored = service.graph.get_state(service._config(tid)).values
+            assert restored["extraction"].field_values == {"application": "substation"}
+            assert restored["draft"].slots["draft_language"] == "en"
             assert service.work_list()[0]["ticket_id"] == tid
-            service.act(tid, ReviewIn(action=ReviewAction.APPROVE, reviewer="kim"))
+            approved = service.act(tid, ReviewIn(action=ReviewAction.APPROVE, reviewer="kim"))
+            assert approved.approved_reply == restored["draft"].text
+            assert approved.final_reply_language == customer_language
+            if customer_language == "fr":
+                assert approved.final_reply == "Réponse validée."
             assert service.resolve(tid).status == TicketStatus.RESOLVED
 
             with Session() as s:
@@ -269,6 +258,7 @@ def test_service_records_rows_and_survives_restart(db):
                 assert [r.action for r in ticket.reviews] == ["rewrite", "approve"]
                 assert ticket.reviews[0].draft_id == ticket.drafts[0].id
                 case = s.get(ResolutionCase, f"CASE-{tid}")
+                assert case.final_reply == approved.final_reply
                 assert (case.active, case.data_split) == (True, "live")
                 assert case.embedding is not None and case.text_hash
 

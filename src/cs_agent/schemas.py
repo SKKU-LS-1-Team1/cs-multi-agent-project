@@ -130,5 +130,9 @@ class TicketOut(BaseModel):
     sla_due_at: datetime | None = None
     draft: Draft | None = None
     info_request: str | None = None
+    approved_reply: str | None = None
+    final_reply: str | None = None
+    final_reply_language: str | None = None
+    translation_error: str | None = None
     checks: list[CheckResult] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)

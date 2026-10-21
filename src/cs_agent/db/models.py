@@ -85,7 +85,6 @@ class Ticket(Base):
     urgency_flag: Mapped[str | None] = mapped_column(String(16))
     return_defect: Mapped[bool | None] = mapped_column(Boolean)
     provided_info: Mapped[list] = mapped_column(JSONB, default=list)
-    field_values: Mapped[dict[str, str]] = mapped_column(JSONB, default=dict, server_default="{}")
     analysis_error: Mapped[str | None] = mapped_column(String(64))  # 분석 대기 사유
     # ⑤ 규칙 (RuleResult) — rule_id 를 같이 남겨 판단 근거를 추적한다 (N-04)
     priority: Mapped[str | None] = mapped_column(String(4))
@@ -101,6 +100,7 @@ class Ticket(Base):
     route: Mapped[str | None] = mapped_column(String(16))  # domain.Route
     status: Mapped[str] = mapped_column(String(24), default="NEW")  # domain.TicketStatus
     escalated_to: Mapped[str | None] = mapped_column(String(32))
+    assignee: Mapped[str | None] = mapped_column(String(64))  # 담당 상담원 agent_id (CSA-53)
     followups: Mapped[int] = mapped_column(Integer, default=0)  # 재문의 횟수
     customer_wait_hours: Mapped[float] = mapped_column(Float, default=0.0)  # SLA 정지 누적
     waiting_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -121,6 +121,7 @@ class Ticket(Base):
         Index("ix_tickets_status_dept", "status", "assigned_dept"),  # 작업 목록·부서 대시보드
         Index("ix_tickets_received_at", "received_at"),
         Index("ix_tickets_thread_ref", "thread_ref"),
+        Index("ix_tickets_assignee_status", "assignee", "status"),  # 담당자별 열린 건수 (배정)
     )
 
 

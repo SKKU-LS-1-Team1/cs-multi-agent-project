@@ -6,24 +6,8 @@
 #
 # | 자리 | 임시 동작 | 실제 구현 |
 # |---|---|---|
-# | verify | 빈 답변만 실패 | agents/verification.py (CSA-31) |
 # | write_info_request | llm.write("info_request") 한 번 | agents/info_request.py (CSA-27) |
-from cs_agent.domain import Category
 from cs_agent.llm.router import LLMRouter
-from cs_agent.schemas import CheckResult, Draft, Evidence
-
-
-def verify(
-    draft: Draft,
-    category: Category,
-    required_slots: tuple[str, ...],
-    inquiry_text: str,
-    language: str,
-    evidence: list[Evidence],
-    llm: LLMRouter,
-) -> list[CheckResult]:
-    ok = bool(draft.text.strip())
-    return [CheckResult(name="not_empty", passed=ok, reason="" if ok else "답변이 비어 있음")]
 
 
 def write_info_request(missing: list[str], language: str, summary: str, llm: LLMRouter) -> str:
