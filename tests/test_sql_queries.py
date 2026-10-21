@@ -273,7 +273,7 @@ def test_dept_dashboard(conn) -> None:
 
 @needs_db
 def test_eval_join(conn, tmp_path) -> None:
-    from cs_agent.db.queries import load_tickets_gold
+    from cs_agent.db.queries import load_tickets_gold, ticket_results_view
 
     header = (
         "ticket_id,data_split,language,body_language,customer_tier,product_code,category_code,"
@@ -346,7 +346,9 @@ def test_eval_join(conn, tmp_path) -> None:
         sla_resolution_target_h=None,
     )
 
-    rows = {r["gold_ticket_id"]: r for r in run(conn, "eval_join", "ticket_results")}
+    with ticket_results_view(conn):
+        rows = {r["gold_ticket_id"]: r for r in run(conn, "eval_join", "ticket_results")}
+        summary = run(conn, "eval_join", "eval_summary", split="valid")
     g1, g2, g3 = rows["G-1"], rows["G-2"], rows["G-3"]
     assert g1["ticket_id"] == "T-1" and g1["category_match"] and g1["dept_match"]
     assert (g1["missing_found_count"], g1["gold_missing_count"]) == (1, 2)
@@ -361,7 +363,6 @@ def test_eval_join(conn, tmp_path) -> None:
     g5 = rows["G-5"]
     assert g5["category_match"] is None and g5["info_request_sent"] is False
 
-    summary = run(conn, "eval_join", "eval_summary", split="valid")
     total = next(r for r in summary if r["gold_category"] is None)
     assert (total["gold_count"], total["processed"]) == (3, 3)
     # 분석 실패(G-5)는 빈 비교라도 분모에 남아 틀린 것으로 센다
@@ -374,3 +375,31 @@ def test_eval_join(conn, tmp_path) -> None:
     assert total["info_request_accuracy"] == 1.0
     defect = next(r for r in summary if r["gold_category"] == "DEFECT")
     assert (defect["processed"], defect["category_accuracy"]) == (2, 0.5)  # 1.0 이 아니다
+
+
+@needs_db
+def test_eval_leaves_no_view_that_blocks_migrations(conn, tmp_path) -> None:
+    from cs_agent.db.queries import load_tickets_gold, ticket_results_view
+    from cs_agent.db.session import get_engine
+
+    conn.execute(sa.text("CREATE SCHEMA eval"))
+    conn.execute(sa.text("CREATE VIEW eval.ticket_results AS SELECT * FROM tickets"))  # 예전 버전
+    conn.commit()
+    csv_path = tmp_path / "tickets.csv"
+    csv_path.write_text("ticket_id,data_split\n", encoding="utf-8")
+
+    with get_engine(TEST_DATABASE_URL).connect() as evaluation:  # 평가 실행 연결
+        load_tickets_gold(evaluation, csv_path)
+        evaluation.commit()
+        with ticket_results_view(evaluation):
+            evaluation.commit()
+            # 평가 중에도 뷰가 안 쓰는 열은 바꿀 수 있다
+            conn.execute(sa.text("ALTER TABLE tickets DROP COLUMN assignee"))
+            conn.rollback()  # 막히지 않는지만 본다 (마이그레이션 되돌리기를 위해 원상복구)
+        evaluation.commit()
+
+    # 영구 뷰(예전 버전)는 지워졌고, 풀에 돌아간 연결에도 임시 뷰가 남지 않는다
+    views = conn.execute(sa.text("SELECT 1 FROM pg_views WHERE viewname = 'ticket_results'"))
+    assert views.all() == []
+    conn.execute(sa.text("ALTER TABLE tickets DROP COLUMN category"))  # 뷰가 쓰던 열
+    conn.rollback()
