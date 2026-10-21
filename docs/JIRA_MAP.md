@@ -1,6 +1,6 @@
 # Jira 작업 ↔ 코드 위치
 
-Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 45개(CSA-14~51, CSA-53~58, CSA-61)를 저장소 위치에 연결한 표다.
+Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 46개(CSA-14~51, CSA-53~58, CSA-60~61)를 저장소 위치에 연결한 표다.
 코드 안의 `TODO(CSA-n)` 는 그 작업에서 채울 자리다. `grep -rn "TODO(CSA-22)" src frontend` 로 찾는다.
 
 브랜치·PR 제목에는 작업 키를 넣는다. 예: `feature/CSA-26-analysis-agent`, `CSA-26 문의 분석 에이전트 키워드 → Jev 분류`.
