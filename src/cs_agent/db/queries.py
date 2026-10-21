@@ -3,11 +3,13 @@
 # db/sql/*.sql 은 "-- name: 이름" 줄로 쿼리를 나눠 둔다. 이름으로 꺼내 SQLAlchemy text 로 실행한다.
 #   rows = run(conn, "work_list", "work_list", dept="TS_LV")        # → list[dict]
 #   rows = run(conn, "dept_dashboard", "dept_status")               # 빠진 파라미터는 NULL
-# 쓰는 곳: 작업 목록(CSA-40), 부서 대시보드(CSA-43), 평가(CSA-50 — load_tickets_gold 먼저).
+# 쓰는 곳: 작업 목록(CSA-40), 부서 대시보드(CSA-43),
+#   평가(CSA-50 — load_tickets_gold, 결과는 with ticket_results_view(conn) 안에서).
 import csv
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -94,15 +96,30 @@ def gold_rows(tickets: Iterable[dict[str, str]], splits: Iterable[str] = GOLD_SP
 def load_tickets_gold(
     conn: Any, tickets_csv: Path | None = None, splits: Iterable[str] = GOLD_SPLITS
 ) -> int:
-    """eval 스키마·정답 테이블·결과 뷰를 만들고 정답을 넣는다 (다시 돌려도 됨). → 넣은 건수."""
+    """eval 스키마·정답 테이블을 만들고 정답을 넣는다 (다시 돌려도 됨). → 넣은 건수."""
     if tickets_csv is None:
         from cs_agent.config import get_settings
 
         tickets_csv = get_settings().raw_data_dir / "tickets.csv"
     with tickets_csv.open(encoding="utf-8-sig", newline="") as f:
         rows = gold_rows(csv.DictReader(f), splits)
-    for name in ("create_eval_schema", "create_tickets_gold", "create_ticket_results"):
+    for name in ("create_eval_schema", "create_tickets_gold", "drop_old_ticket_results"):
         conn.execute(query("eval_join", name))
     if rows:
         conn.execute(query("eval_join", "upsert_tickets_gold"), rows)
     return len(rows)
+
+
+@contextmanager
+def ticket_results_view(conn: Any) -> Iterator[None]:
+    """이 연결에 결과 임시 뷰(ticket_results)를 만들고, 끝나면 지운다.
+
+    연결 풀은 연결을 닫지 않고 돌려받으므로 임시 뷰도 직접 지워야 남지 않는다.
+        with ticket_results_view(conn):
+            rows = run(conn, "eval_join", "ticket_results", split="valid")
+    """
+    conn.execute(query("eval_join", "create_ticket_results"))
+    try:
+        yield
+    finally:
+        conn.execute(sa.text("DROP VIEW IF EXISTS pg_temp.ticket_results"))

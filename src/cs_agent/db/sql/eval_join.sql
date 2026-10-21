@@ -6,8 +6,12 @@
 -- 3. KPI 정의는 analysis/kpi/KPI_설정안.md (K1~K5).
 --
 -- 정해 둔 것
--- - 평가용 테이블·뷰는 eval 스키마에 둔다. Alembic 은 기본 스키마만 비교하므로 마이그레이션
+-- - 정답 테이블은 eval 스키마에 둔다. Alembic 은 기본 스키마만 비교하므로 마이그레이션
 --   (db/models.py ↔ DB 비교, autogenerate)에 걸리지 않는다.
+-- - 결과 뷰(ticket_results)는 연결이 끝나면 사라지는 임시 뷰다. tickets·drafts·reviews 를 읽는
+--   영구 뷰를 두면 그 열을 지우거나 바꾸는 마이그레이션(서버 시작 때 자동 실행)이 막힌다.
+--   ticket_results·eval_summary 는 db/queries.py `with ticket_results_view(conn):` 안에서 부른다
+--   (뷰를 만들고, 끝나면 지운다 — 연결 풀은 연결을 닫지 않아 임시 뷰가 남기 때문).
 -- - 적재: db/queries.py load_tickets_gold(conn) 가 data/raw/tickets.csv 의 valid·test 를 넣는다
 --   (create_eval_schema → create_tickets_gold → upsert_tickets_gold, 다시 돌려도 됨).
 -- - 시스템 티켓 ↔ 정답 연결: 시스템 ticket_id 는 새로 매겨지므로(T-…), 평가 스크립트가 문의를
@@ -86,9 +90,15 @@ ON CONFLICT (ticket_id) DO UPDATE SET
     loaded_at = now();
 
 
+-- name: drop_old_ticket_results
+-- 예전(영구 뷰) 버전이 남긴 eval.ticket_results 를 지운다 — 마이그레이션을 막는다.
+DROP VIEW IF EXISTS eval.ticket_results;
+
+
 -- name: create_ticket_results
 -- 정답 1건마다 시스템 판단과 일치 여부. 시스템 티켓이 아직 없으면 시스템 열은 NULL.
-CREATE OR REPLACE VIEW eval.ticket_results AS
+-- 임시 뷰라 이 연결 안에서만 보인다 (위 '정해 둔 것').
+CREATE OR REPLACE TEMP VIEW ticket_results AS
 SELECT
     g.ticket_id AS gold_ticket_id,
     g.data_split,
@@ -154,7 +164,10 @@ SELECT
     last_review.action AS review_action
 FROM eval.tickets_gold AS g
 LEFT JOIN LATERAL (
-    SELECT tk.*
+    -- 쓰는 열만 고른다 (tk.* 면 tickets 의 모든 열에 의존해 열 변경을 막는다)
+    SELECT
+        tk.ticket_id, tk.status, tk.category, tk.assigned_dept, tk.routing_rule_id,
+        tk.priority, tk.priority_rule_id, tk.missing_info, tk.missing_blocking, tk.route
     FROM tickets AS tk
     WHERE regexp_replace(tk.thread_ref, '^.*:', '') = g.ticket_id
     ORDER BY tk.received_at DESC
@@ -198,7 +211,7 @@ LEFT JOIN LATERAL (
 -- name: ticket_results
 -- 정답 1건씩 (틀린 건 목록·유형별/언어별 분석용). :split NULL 이면 전체
 SELECT *
-FROM eval.ticket_results
+FROM ticket_results
 WHERE CAST(:split AS text) IS NULL OR data_split = CAST(:split AS text)
 ORDER BY gold_ticket_id;
 
@@ -233,7 +246,28 @@ SELECT
     CAST(avg(CAST(evidence_match AS int)) AS double precision) AS evidence_top3,
     CAST(count(*) FILTER (WHERE info_request_sent = gold_info_request_sent) AS double precision)
         / NULLIF(count(ticket_id), 0) AS info_request_accuracy
-FROM eval.ticket_results
+FROM ticket_results
 WHERE CAST(:split AS text) IS NULL OR data_split = CAST(:split AS text)
 GROUP BY GROUPING SETS ((data_split), (data_split, gold_category))
 ORDER BY data_split, gold_category NULLS FIRST;
+
+
+-- name: live_case_usage
+-- 시연(CSA-15, run_eval --demo): 문의마다 마지막 답변 초안 근거에 운영 중 쌓인 사례
+-- (resolution_cases.data_split = 'live')가 몇 개 들어갔는지. :ticket_ids 는 이번 실행 티켓 목록.
+SELECT
+    d.ticket_id,
+    count(rc.case_id) AS live_cases
+FROM (
+    SELECT DISTINCT ON (ticket_id) ticket_id, evidence
+    FROM drafts
+    WHERE kind = 'draft' AND ticket_id = ANY(CAST(:ticket_ids AS text[]))
+    ORDER BY ticket_id, version DESC
+) AS d
+LEFT JOIN LATERAL jsonb_array_elements(d.evidence) AS ev (value) ON true
+LEFT JOIN resolution_cases AS rc
+    ON ev.value ->> 'source' = 'cases'
+    AND rc.case_id = ev.value ->> 'doc_id'
+    AND rc.data_split = 'live'
+GROUP BY d.ticket_id
+ORDER BY d.ticket_id;
