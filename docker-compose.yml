@@ -1,12 +1,27 @@
-# 로컬·GCP VM 공통 구성 (CSA-44 · 김도연): React+Nginx · FastAPI · PostgreSQL(+pgvector) · Redis
+# 로컬·GCP VM 공통 구성 (CSA-44 · 김도연): Caddy(HTTPS) · React+Nginx · FastAPI · PostgreSQL(+pgvector) · Redis
 # 실행: cp .env.example .env && docker compose up --build
 services:
+  # 바깥 요청은 Caddy가 받아 nginx로 넘긴다 (CSA-46). .env 의 DOMAIN 이 있으면 HTTPS 인증서를 자동 발급한다.
+  caddy:
+    image: caddy:2.10-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - nginx
+    restart: unless-stopped
+
   nginx:
     build:
       context: .
       dockerfile: infra/nginx/Dockerfile
-    ports:
-      - "80:80"
     depends_on:
       - api
 
@@ -47,3 +62,6 @@ services:
 
 volumes:
   pgdata:
+  # 발급받은 인증서. 지우면 다시 발급받아야 한다 (Let's Encrypt 발급 횟수 제한 주의)
+  caddy_data:
+  caddy_config:

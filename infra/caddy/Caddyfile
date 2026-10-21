@@ -1,0 +1,7 @@
+# HTTPS 앞단 (CSA-46 · 김동규). 인증서 발급·갱신과 80→443 이동은 Caddy가 알아서 한다.
+# DOMAIN 이 비어 있으면(로컬) 80 포트 HTTP로만 받는다.
+# GCP: .env 에 DOMAIN=luckystar-global-cs.com www.luckystar-global-cs.com
+{$DOMAIN::80} {
+	encode gzip
+	reverse_proxy nginx:80
+}
