@@ -4,6 +4,7 @@
 #
 # - submit(inquiry): ticket_id 발급 → graph.invoke → 상담원 검토 지점(또는 사람 큐)에서
 #   멈춘 상태로 반환. thread_ref 가 기존 티켓과 같으면 새 티켓이 아니라 고객 회신이다 (reply).
+#   language 가 없으면(웹 문의서) 제목·본문에서 감지한다 (verification.detect_language).
 # - reply(ticket_id, inquiry): 고객 회신 → 원문에 회신을 붙여 같은 thread_id 로 ① 접수부터 다시
 #   돈다. 재문의 횟수(followups) +1, 해결된 문의였으면 그 사례를 검색에서 뺀다.
 # - act(ticket_id, review): 상담원 버튼 → Command(resume=...) 로 그래프 재개 (CSA-25)
@@ -34,6 +35,7 @@ from langgraph.types import Command
 
 from cs_agent.agents.case_memory import SAVE_ON, build_case
 from cs_agent.agents.translation import new_part, source_body
+from cs_agent.agents.verification import detect_language
 from cs_agent.domain import Route, TicketStatus
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
@@ -141,6 +143,10 @@ class TicketService:
     def submit(self, inquiry: InquiryIn) -> TicketOut:
         if inquiry.thread_ref and (existing := self.records.find_thread(inquiry.thread_ref)):
             return self.reply(existing, inquiry)
+        if not inquiry.language:  # 웹 문의서는 언어를 보내지 않는다 → 회신이 영어로 나가지 않게
+            inquiry = inquiry.model_copy(
+                update={"language": detect_language(f"{inquiry.subject}\n{inquiry.body}")}
+            )
         ticket_id = f"T-{uuid.uuid4().hex[:12].upper()}"
         self.records.add_ticket(ticket_id, inquiry)
         self._run(ticket_id, {"ticket_id": ticket_id, "inquiry": inquiry, "followups": 0})
@@ -210,6 +216,7 @@ class TicketService:
         extraction = v.get("extraction")
         return TicketOut(
             ticket_id=ticket_id,
+            inquiry=v.get("inquiry"),
             body_ko=v.get("body_ko"),
             status=v.get("status", TicketStatus.NEW),
             route=Route(v["route"]) if v.get("route") else None,
