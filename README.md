@@ -24,6 +24,7 @@ uv run ruff check . && uv run ruff format --check . && uv run pytest
 ```bash
 uv run uvicorn cs_agent.main:app --reload     # 백엔드 http://localhost:8000/docs
 cd frontend && npm install && npm run dev     # 화면 http://localhost:5173
+# 백엔드는 GCP에 두고 화면만 로컬에서: frontend/.env.example 을 .env.local 로 복사해 VITE_API_TARGET=http://<VM IP>
 cp .env.example .env && docker compose up --build   # 전체 구성 http://localhost
 ```
 
