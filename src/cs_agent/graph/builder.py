@@ -144,24 +144,41 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "approved_reply": None,
             "translation_error": None,
             "escalated_to": None,
+            # 상담원용 원문 번역은 배경에서 시작, 검토·끝 직전에 받는다 (CSA-57, 아래 _translation)
+            "translation_job": _start_translation(state),
         }
 
-    def classify(state: TicketState) -> dict:
-        try:
-            return {"classification": deps.classify(state["inquiry"], deps.llm)}
-        except AnalysisError as e:
-            return {"analysis_error": str(e)}
-
-    def translate(state: TicketState) -> dict:
+    def _start_translation(state: TicketState) -> str:
         inquiry = state["inquiry"]
-        body_ko, parts = translation.translate_parts(
+        return translation.start_job(
             inquiry.body,
             inquiry.language,
             state.get("translation_parts", []),
             deps.translate,
             deps.llm,
         )
-        return {"body_ko": body_ko, "translation_parts": parts}
+
+    def _restart_translation(state: TicketState) -> dict:
+        """번역이 비어 있으면 다시 시작 (상담원 재작성·추가정보 요청 때). 성공한 구간은 재사용."""
+        if state.get("body_ko") or state.get("translation_job"):
+            return {}
+        return {"translation_job": _start_translation(state)}
+
+    def _translation(state: TicketState) -> dict:
+        """배경 번역을 받는다. 남은 시간만 기다리고, 실패·시간 초과면 번역 없이 진행."""
+        if not state.get("translation_job"):
+            return {}
+        result = translation.collect_job(state["translation_job"])
+        if result is None:
+            return {"translation_job": None}
+        body_ko, parts = result
+        return {"body_ko": body_ko, "translation_parts": parts, "translation_job": None}
+
+    def classify(state: TicketState) -> dict:
+        try:
+            return {"classification": deps.classify(state["inquiry"], deps.llm)}
+        except AnalysisError as e:
+            return {"analysis_error": str(e)}
 
     def extract(state: TicketState) -> dict:
         # 분류가 실패해도 추출은 돈다: 안전 신호는 유형 없이도 사람 큐로 보내야 한다
@@ -202,10 +219,10 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         return {"rules": result, "route": route}
 
     def human(state: TicketState) -> dict:
-        return {"status": TicketStatus.HUMAN_QUEUE}
+        return {"status": TicketStatus.HUMAN_QUEUE, **_translation(state)}
 
     def analysis_pending(state: TicketState) -> dict:
-        return {"status": TicketStatus.ANALYSIS_PENDING}
+        return {"status": TicketStatus.ANALYSIS_PENDING, **_translation(state)}
 
     # ⑦ ⑧ ⑨ ⑩ --------------------------------------------------------------------------
     def info_request(state: TicketState) -> dict:
@@ -221,6 +238,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "approved_reply": None,
             "translation_error": None,
             "final_reply": None,
+            **_restart_translation(state),
         }
 
     def evidence(state: TicketState) -> dict:
@@ -313,10 +331,10 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
 
     # 상담원 검토 ----------------------------------------------------------------------
     def ready(state: TicketState) -> dict:
-        return {"status": TicketStatus.READY_FOR_REVIEW}
+        return {"status": TicketStatus.READY_FOR_REVIEW, **_translation(state)}
 
     def hold(state: TicketState) -> dict:
-        return {"status": TicketStatus.ON_HOLD}
+        return {"status": TicketStatus.ON_HOLD, **_translation(state)}
 
     def review(state: TicketState) -> dict:
         value = interrupt(
@@ -354,6 +372,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "approved_reply": None,
             "translation_error": None,
             "final_reply": None,
+            **_restart_translation(state),
         }
 
     def finish(state: TicketState) -> dict:
@@ -405,7 +424,14 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             else drafting.REVIEW_LANGUAGE
         )
         try:
-            final_reply = deps.translate_reply(text, source_language, _language(state), deps.llm)
+            # 상담원이 고객 언어로 직접 고쳐 승인했으면(그 언어로 확인될 때만) 번역하지 않는다.
+            # 영어 초안 기준(en)으로 다시 옮기면 같은 글이 돌아와 번역 실패로 보류됐다
+            if info_request_agent.in_language(text, _language(state)):
+                final_reply = text
+            else:
+                final_reply = deps.translate_reply(
+                    text, source_language, _language(state), deps.llm
+                )
         except TranslationError as error:
             return {
                 "status": TicketStatus.ON_HOLD,
@@ -435,7 +461,6 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     for name, fn in [
         ("intake", intake),
         ("classify", classify),
-        ("translate", translate),
         ("extract", extract),
         ("retrieve", retrieve),
         ("rules", rules),
@@ -456,8 +481,6 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
 
     g.add_edge(START, "intake")
     g.add_edge("intake", "classify")
-    g.add_edge("intake", "translate")  # 원문 분석과 병렬. 번역 대기는 설정된 상한 이내
-    g.add_edge("translate", END)
     g.add_edge("intake", "retrieve")  # ④ 는 ②③ 과 병렬
     g.add_edge("classify", "extract")
     g.add_edge(["extract", "retrieve"], "rules")
