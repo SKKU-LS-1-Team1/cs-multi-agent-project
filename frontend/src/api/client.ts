@@ -26,7 +26,8 @@ export type InquiryForm = {
   category: string | null;
   product_code: string | null;
   fields: Record<string, string>;
-  missing_required: string[];
+  missing_required: string[]; // 비면 제출 불가
+  missing_optional: string[]; // 필수지만 비워도 제출 가능 (사진·로그 …)
   subject: string;
   body: string;
 };
