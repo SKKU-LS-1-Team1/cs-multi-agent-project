@@ -68,7 +68,7 @@ from cs_agent.pipeline.chunking import Chunk, iter_doc_chunks
 from cs_agent.rules.tables import Product, RefTables, load_tables
 from cs_agent.schemas import Draft, Evidence, Extraction
 
-PROMPT_VERSION = "draft-v3-english-review"
+PROMPT_VERSION = "draft-v4-plain-text"
 REVIEW_LANGUAGE = "en"
 
 COMMON_INSTRUCTIONS = """
@@ -107,7 +107,23 @@ COMMON_INSTRUCTIONS = """
     공식 근거의 지원 창구·절차와 해당 조건에 따라 현장 점검·수리 접수 검토를 제안합니다.
     원인 후보의 needs_onsite·needs_rma는 확정 진단이나 접수 승인이 아닙니다.
     근거에 없는 방문·수리 일정과 비용을 확약하거나 접수·방문이 이미 진행 중이라고 쓰지 않습니다.
+15. 이메일·고객 화면에 그대로 나가는 일반 텍스트로 씁니다. 마크다운(**굵게**, # 제목, `코드`, 표)을
+    쓰지 않습니다. 목록은 "1." 번호나 "- " 로 시작하는 줄로 씁니다.
 """.strip()
+
+# 모델이 규칙 15 를 어겨도 고객에게 마크다운 기호가 나가지 않게 걷어 낸다.
+# 인용 [TG-…#3.1] 의 # 은 줄 맨 앞이 아니라 그대로 남는다. "- " · "* " 목록 기호도 남긴다.
+_MD_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+", re.M)
+_MD_STRONG = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", re.S)
+_MD_EMPHASIS = re.compile(r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])")
+
+
+def plain_text(text: str) -> str:
+    """마크다운 강조·제목·코드 표시를 걷어 낸 일반 텍스트 (고객 답변 · 챗봇 답변)."""
+    text = _MD_HEADING.sub("", text)
+    text = _MD_STRONG.sub(r"\2", text)
+    text = _MD_EMPHASIS.sub(r"\1", text)
+    return text.replace("`", "")
 
 
 @dataclass(frozen=True)
@@ -622,7 +638,7 @@ def write_draft(
         "보조 요청이 있으면 이어 쓰세요. 미확정 조건과 필요한 다음 절차를 명확히 하세요."
     )
     try:
-        text = llm.write("draft", prompt).strip()
+        text = plain_text(llm.write("draft", prompt)).strip()
     except Exception as exc:
         raise DraftingError("답변 작성 모델 호출에 실패했습니다.") from exc
     if not text:

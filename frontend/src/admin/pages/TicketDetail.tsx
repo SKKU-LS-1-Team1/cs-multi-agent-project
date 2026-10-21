@@ -173,9 +173,9 @@ const Attachments = ({ files, t }: { files: string[]; t: Ticket }) => (
 
 function Original({ t }: { t: Ticket }) {
   const sample = t.id === SAMPLE;
-  const text = t.translate ? (sample ? "iS7 75kW가 운전 명령 직후 E.OC로 트립합니다. 재시작해도 같은 현상이 발생합니다." : t.title) : sourceInquiry(t);
+  const text = t.translate ? (sample ? "iS7 75kW가 운전 명령 직후 E.OC로 트립합니다. 재시작해도 같은 현상이 발생합니다." : t.bodyKo || t.title) : sourceInquiry(t);
   return (
-    <Message title={sample ? "COMPANY_7979_0029" : t.company} right={<small className="text-muted-foreground">10.06 · 17:43 UTC</small>}>
+    <Message title={sample ? "COMPANY_7979_0029" : t.company} right={<small className="text-muted-foreground">{t.receivedLabel || "10.06 · 17:43 UTC"}</small>}>
       <div className="flex items-center gap-3"><Tag className="rounded-md">원문 · {t.language}</Tag><button className="text-xs text-info hover:underline" onClick={() => toggleTranslate(t)}>{t.translate ? "원문 보기" : "한국어 번역"}</button></div>
       <p className="leading-relaxed">{text}</p>
       {sample && <><p className="text-muted-foreground">FW 4.00 · 부하 69% · 재시작 후 반복</p><Attachments t={t} files={["event_log.csv", "params.bak"]} /></>}

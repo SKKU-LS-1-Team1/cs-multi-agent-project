@@ -11,6 +11,8 @@
 //     고객 언어 번역은 백엔드가 승인 뒤에 한다. 번역 확인이 실패하면 보류(ON_HOLD) → 다시 발송.
 //   · 처리 결과 기록 및 완료 → POST /resolve (해결 사례로 남는다)
 //   · 답변 초안 작성 → 로컬 문구를 만들지 않고 AI 초안(aiDraft)을 다시 넣는다
+// - 화면 표시: 원문 언어(language)·접수 시각(receivedLabel)·한국어 번역(bodyKo, "한국어 번역" 토글)·
+//   근거 문서(apiEvidence → logic.answerContext 의 관련 기술문서)
 // - 담당자 배정·전문부서 요청·자료 확인은 아직 로컬 기록이다 (담당자는 백엔드 자동 배정을 보여 준다).
 import { toast } from "sonner";
 import { api, type Agent, type Ticket as ApiTicket, type WorkItem } from "../../api/client";
@@ -40,6 +42,12 @@ let online = false;
 const workItems = new Map<string, WorkItem>();
 
 export const isApiTicket = (t: Ticket) => t.source === "api";
+
+function receivedLabel(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}.${pad(d.getDate())} · ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function slaText(due: string | null): string {
   if (!due) return "—";
@@ -75,8 +83,10 @@ function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     risk: Boolean(work?.at_risk),
     owner: api.assignee ? agents.get(api.assignee)?.name || api.assignee : "",
     department: api.assigned_dept || "",
-    language: "English", // 초안 언어 (근거 문서·점검 기준이 영어)
+    // 고객 언어 (원문 표시·발송 언어). 초안은 늘 영어다 (logic.composerLanguage)
+    language: LANGUAGE_LABEL[inquiry?.language || "en"] || inquiry?.language || "English",
     replyLanguage: LANGUAGE_LABEL[inquiry?.language || "en"] || inquiry?.language || "English",
+    receivedLabel: inquiry?.received_at ? receivedLabel(inquiry.received_at) : undefined,
     stage: CLOSED.has(api.status) ? 5 : 0,
     sent: ["APPROVED", "RESOLVED"].includes(api.status),
     workflowVersion: 2,
