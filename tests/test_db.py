@@ -358,3 +358,50 @@ def test_service_records_rows_and_survives_restart(db, customer_language):
                     "checkpoint_migrations"
                 )
             )
+
+
+@needs_db
+def test_sql_work_list_pauses_sla_while_waiting_for_customer(db, monkeypatch):
+    """DB 가 있으면 작업 목록은 db/sql/work_list.sql, 대기 시간은 SqlRecords 가 남긴다."""
+    from datetime import UTC, datetime, timedelta
+
+    from cs_agent.graph.builder import postgres_checkpointer
+    from cs_agent.services import records
+
+    _, Session = db
+    t0 = datetime(2026, 10, 21, 0, 0, tzinfo=UTC)
+    clock = {"now": t0}
+    monkeypatch.setattr(records, "_now", lambda: clock["now"])
+    at = lambda hours: t0 + timedelta(hours=hours)  # noqa: E731
+    inquiry = InquiryIn(
+        channel="email",
+        subject="Transformer dimensions",
+        body="What are the dimensions?",
+        category=Category.TECH_SPEC,
+        received_at=t0,
+    )
+
+    with postgres_checkpointer(TEST_DATABASE_URL) as saver:
+        service = _db_service(Session, saver)
+        tid = service.submit(inquiry).ticket_id
+        target_h = (service.get(tid).sla_due_at - t0).total_seconds() / 3600
+        clock["now"] = at(2)
+        assert service.act(tid, ReviewIn(action=ReviewAction.APPROVE)).status == (
+            TicketStatus.WAITING_CUSTOMER
+        )
+        with Session() as s:
+            assert s.get(Ticket, tid).waiting_since == at(2)
+
+        def row(hours):
+            [r] = service.work_list(now=at(hours))
+            return r
+
+        assert row(12)["sla_ratio"] == row(2)["sla_ratio"] == round(2 / target_h, 3)
+        clock["now"] = at(12)
+        service.reply(tid, inquiry.model_copy(update={"body": "Model is TRF-OIL-1000."}))
+        with Session() as s:
+            ticket = s.get(Ticket, tid)
+            assert (ticket.waiting_since, ticket.customer_wait_hours) == (None, 10)
+        assert row(20)["sla_ratio"] == round((20 - 10) / target_h, 3)
+        assert row(20)["sla_due_at"] == at(target_h + 10)
+        assert service.get(tid).sla_due_at == at(target_h + 10)
