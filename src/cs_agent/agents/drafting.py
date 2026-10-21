@@ -642,13 +642,16 @@ class TranslationError(ValueError):
 
 
 # 숫자·제품/문서 코드·URL은 번역 전후 같은 표기를 유지한다.
+# re.ASCII: 경계(\b · \w)를 영문·숫자로만 본다. 한국어·일본어는 조사가 바로 붙어("1,000 V에서",
+# "S100에") 유니코드 경계로는 단위·코드를 못 잘라 맞는 번역도 "수치 변경"으로 보류됐다.
 _TRANSLATION_LITERALS = re.compile(
     r"https?://[^\s<>\]]+|"
     r"\[[^\[\]\n]*#[^\[\]\n]*\]|"
     r"\b(?=[A-Za-z0-9.-]*\d)[A-Z][A-Za-z0-9]*(?:[-.][A-Za-z0-9]+)+\b|"
     r"\b[A-Z]+(?:[-.][A-Z0-9]+)+\b|\b[A-Za-z]{1,10}\d+[A-Za-z0-9]*\b|"
     r"\b(?:USD|EUR|GBP|KRW|JPY|CNY)\b|"
-    r"(?<!\w)[+-]?\d+(?:[.,:/-]\d+)*(?:\s?(?:kVA|kV|kW|kA|MHz|Hz|V|A|W|mm|cm|kg|°C|%)(?!\w))?"
+    r"(?<!\w)[+-]?\d+(?:[.,:/-]\d+)*(?:\s?(?:kVA|kV|kW|kA|MHz|Hz|V|A|W|mm|cm|kg|°C|%)(?!\w))?",
+    re.ASCII,
 )
 _CUSTOMER_LANGUAGES = frozenset(
     {"en", "es", "it", "fr", "zh", "th", "id", "vi", "ru", "tr", "pt", "ar", "pl", "de", "ja", "ko"}

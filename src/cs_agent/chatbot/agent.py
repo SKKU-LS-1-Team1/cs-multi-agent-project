@@ -74,17 +74,6 @@ EXTRACT_WAIT_S = 70.0  # 문의 전환 때 LLM 추출 대기 상한 (analysis.py
 EXTRACT_GRACE_S = 2.0  # 답변을 다 쓴 뒤 LLM 추출을 더 기다리는 시간 (전환이 아닐 때)
 HANDOFF_TRANSLATE_ATTEMPTS = 3
 
-# 고유 문자 → 언어. 가나가 있으면 한자가 섞여도 일본어라 가나를 한자보다 먼저 본다
-_SCRIPT_LANGUAGE = (
-    ("HANGUL", "ko"),
-    ("HIRAGANA", "ja"),
-    ("KATAKANA", "ja"),
-    ("CJK", "zh"),
-    ("THAI", "th"),
-    ("ARABIC", "ar"),
-    ("CYRILLIC", "ru"),
-)
-
 _POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="chat-extract")
 
 RECURRENCE, REQUEST_AGENT, OTHER = "RECURRENCE", "REQUEST_AGENT", "OTHER"
@@ -266,17 +255,9 @@ def _customer_language(chat: ChatIn, customer: list[str]) -> str:
     """ChatIn.language, 없으면 고객 말(지난 말 포함)에서 감지. 감지하지 못하면 영어."""
     if chat.language:
         return chat.language
-    from cs_agent.agents.verification import _detector, _script, strip_copied
+    from cs_agent.agents.verification import detect_language
 
-    text = strip_copied("\n".join([*customer, chat.message]), "")  # 제품 코드·숫자를 뺀 글
-    scripts = {_script(ch) for ch in text if ch.isalpha()}
-    for script, code in _SCRIPT_LANGUAGE:  # 고유 문자가 있으면 그 언어 (짧은 말도 정해진다)
-        if script in scripts:
-            return code
-    if sum(ch.isalpha() for ch in text) < 2:
-        return "en"
-    detected = _detector().detect_language_of(text)
-    return detected.iso_code_639_1.name.lower() if detected is not None else "en"
+    return detect_language("\n".join([*customer, chat.message]))
 
 
 def _classify(

@@ -6,6 +6,7 @@ import {
   waitingReviews,
 } from "./logic";
 import { closeModal, commit, openModal, setUi, tickets } from "./store";
+import { isApiTicket, resolveViaApi, restoreAiDraft, sendViaApi } from "./api-sync";
 import type { Ticket } from "./types";
 
 const scrollToEditor = () => setTimeout(() => document.getElementById("answer-editor")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
@@ -32,6 +33,7 @@ function applyGeneratedAnswer(t: Ticket, c: any, draft: string) {
 }
 
 export function generate(t: Ticket, purpose?: string) {
+  if (isApiTicket(t)) return restoreAiDraft(t); // 백엔드 티켓은 AI 초안 (CSA-61)
   const full = answerContext(t, purpose);
   const c = full.purpose === "request"
     ? { ...full, references: [], availableReferences: [], technical: { documents: [], similarCases: [], possibleCause: null, recommendation: null, causeConfirmed: false }, expertResponse: null }
@@ -93,6 +95,7 @@ export function canSend(t: Ticket) {
   return t.reviewed && (!isNew || t.ignoredContextKey === contextKey(answerContext(t)));
 }
 export function confirmSend(t: Ticket) {
+  if (isApiTicket(t)) { closeModal(); void sendViaApi(t); return; } // 백엔드로 승인·발송 (CSA-61)
   // 백엔드와 같은 순서: 담당자가 승인하면 고객 언어로 자동 변환해 발송한다(프로토타입은 정해진 문구만 옮기는 시뮬레이션).
   const sentText = needsLocalization(t) ? translateText(t.draft, "English", customerLanguage(t)) : t.draft;
   record(t, "sent", sentText, {
@@ -182,6 +185,7 @@ export function completeTicket(t: Ticket, d: Record<string, string>) {
   };
   record(t, "completed", "담당자 확인 · 처리 결과 저장 및 티켓 완료", { resolution: t.resolution, actor: signedIn });
   closeModal(); commit(); toast("처리 결과를 저장했습니다.");
+  if (isApiTicket(t)) void resolveViaApi(t); // 백엔드 해결 확정 → 사례 저장 (CSA-61)
 }
 export function toggleTranslate(t: Ticket) { t.translate = !t.translate; commit(); }
 export function openCompletion(t: Ticket) {
