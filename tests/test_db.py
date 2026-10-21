@@ -233,6 +233,58 @@ def test_sql_records_keep_assignee_and_history(db):
 
 
 @needs_db
+def test_cases_saved_without_vector_are_embedded_later(db):
+    """벡터 없이 저장된 운영 사례(LLM 꺼짐·임베딩 장애)는 embed_missing_cases 가 채운다."""
+    from cs_agent.services.records import SqlRecords
+
+    engine, Session = db
+
+    def case(ticket_id: str) -> dict:
+        return build_case(
+            {
+                "ticket_id": ticket_id,
+                "inquiry": InquiryIn(channel="email", subject=f"q {ticket_id}", body="b"),
+                "classification": Classification(category=Category.TECH_SPEC),
+                "extraction": Extraction(product_code="TRF-OIL-1000"),
+                "draft": Draft(text="reply"),
+                "review": ReviewIn(action=ReviewAction.APPROVE),
+            }
+        )
+
+    offline = SqlRecords(Session)  # embed_fn 없음 = 벡터 없이 저장
+    for tid in ("T-1", "T-2", "T-3"):
+        offline.save_case(case(tid))
+    offline.deactivate_case("T-3")  # 재문의로 다시 열린 사례는 채우지 않는다
+
+    assert [c["case_id"] for c in offline.live_cases()] == ["CASE-T-1", "CASE-T-2"]
+    assert offline.embed_missing_cases() == 0  # 임베딩 함수가 없으면 아무것도 안 한다
+
+    calls = []
+
+    def flaky(texts):
+        calls.append(texts)
+        if len(calls) == 2:
+            raise TimeoutError("embedding down")
+        return [[1.0] + [0.0] * (EMBEDDING_DIM - 1) for _ in texts]
+
+    online = SqlRecords(Session, flaky)
+    assert online.embed_missing_cases() == 1  # 두 번째에서 장애 → 멈춤 (다음 주기에 다시)
+    assert online.embed_missing_cases() == 1
+    assert online.embed_missing_cases() == 0
+
+    with engine.connect() as conn:
+        rows = dict(
+            conn.execute(
+                text(
+                    "SELECT case_id, embedding IS NOT NULL AND text_hash IS NOT NULL "
+                    "FROM resolution_cases"
+                )
+            ).all()
+        )
+    assert rows == {"CASE-T-1": True, "CASE-T-2": True, "CASE-T-3": False}
+
+
+@needs_db
 @pytest.mark.parametrize("customer_language", ["en", "fr"])
 def test_service_records_rows_and_survives_restart(db, customer_language):
     from cs_agent.graph.builder import postgres_checkpointer

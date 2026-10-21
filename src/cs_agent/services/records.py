@@ -13,7 +13,9 @@
 #   여러 번 일어나면 마지막 버전만 남는다 (중간본은 체크포인트 기록에 있다).
 # - add_review(): 상담원 버튼 한 번 = reviews 한 행. 그때 보고 있던 최신 버전(draft_id)에 붙인다.
 # - save_case(): 해결 확정 사례 (agents/case_memory.build_case). 임베딩을 같이 넣어야 사례 검색
-#   (agents/retrieval.py)에 잡힌다. LLM_PROVIDER=live 가 아니면 벡터 없이 남긴다.
+#   (agents/retrieval.py)에 잡힌다. LLM_PROVIDER=live 가 아니거나 임베딩이 실패하면 벡터 없이
+#   남기고, embed_missing_cases() 가 나중에 채운다 (main.py 주기 작업, CSA-15).
+# - live_cases(): 운영 중 해결된 사례 (active 만). 키워드 검색(case_memory.LiveCasesRetriever)용.
 # - deactivate_case(): 재문의로 다시 열린 문의의 사례를 검색에서 뺀다 (active=false).
 # - set_assignee(): 담당자 배정·재배정 (CSA-53). tickets.assignee 를 바꾸고 assignments 에 이력을
 #   한 행 남긴다. assignee 는 그래프 상태에 없어서 save_state() 가 덮어쓰지 않는다.
@@ -44,6 +46,14 @@ class Records(Protocol):
     def add_review(self, ticket_id: str, review: ReviewIn) -> None: ...
 
     def save_case(self, case: dict) -> None: ...
+
+    def live_cases(self) -> list[dict]:
+        """운영 중 해결된 사례 (build_case 모양, active 만)."""
+        ...
+
+    def embed_missing_cases(self, limit: int = 50) -> int:
+        """벡터 없이 저장된 운영 사례를 임베딩한다. 채운 건수."""
+        ...
 
     def deactivate_case(self, ticket_id: str) -> None: ...
 
@@ -186,6 +196,12 @@ class MemoryRecords:
 
     def save_case(self, case: dict) -> None:
         self.cases = [c for c in self.cases if c["case_id"] != case["case_id"]] + [case]
+
+    def live_cases(self) -> list[dict]:
+        return [dict(c) for c in self.cases if c.get("active", True)]
+
+    def embed_missing_cases(self, limit: int = 50) -> int:
+        return 0  # 메모리 모드는 벡터 검색이 없다 (LiveCasesRetriever 가 키워드로 찾는다)
 
     def deactivate_case(self, ticket_id: str) -> None:
         for case in self.cases:
@@ -350,14 +366,71 @@ class SqlRecords:
         with self.sessionmaker.begin() as s:
             s.execute(stmt)
 
+    def live_cases(self) -> list[dict]:
+        import sqlalchemy as sa
+
+        from cs_agent.db.models import ResolutionCase
+
+        columns = (
+            "case_id ticket_id text summary product_code product_family category error_code "
+            "cause action final_reply cited active"
+        ).split()
+        query = (
+            sa.select(*(getattr(ResolutionCase, c) for c in columns))
+            .where(ResolutionCase.data_split == "live", ResolutionCase.active)
+            .order_by(ResolutionCase.case_id)
+        )
+        with self.sessionmaker() as s:
+            return [dict(row) for row in s.execute(query).mappings()]
+
+    def embed_missing_cases(self, limit: int = 50) -> int:
+        """벡터 없는 운영 사례(active)를 limit 건까지 임베딩한다. 한 건이 실패하면 거기서 멈춘다."""
+        import sqlalchemy as sa
+
+        from cs_agent.config import get_settings
+        from cs_agent.db.models import ResolutionCase
+        from cs_agent.pipeline.embed_docs import _embedding_hash
+
+        if self.embed_fn is None:
+            return 0
+        settings = get_settings()
+        query = (
+            sa.select(ResolutionCase.case_id, ResolutionCase.text)
+            .where(
+                ResolutionCase.data_split == "live",
+                ResolutionCase.active,
+                ResolutionCase.embedding.is_(None),
+            )
+            .order_by(ResolutionCase.case_id)
+            .limit(limit)
+        )
+        with self.sessionmaker() as s:
+            pending = list(s.execute(query))
+        filled = 0
+        for case_id, text in pending:
+            vector = self._embed(text)
+            if vector is None:
+                break  # 임베딩 장애 — 다음 주기에 다시
+            with self.sessionmaker.begin() as s:
+                s.execute(
+                    sa.update(ResolutionCase)
+                    .where(ResolutionCase.case_id == case_id)
+                    .values(
+                        embedding=vector,
+                        text_hash=_embedding_hash(
+                            text, settings.embedding_model, settings.embedding_dim
+                        ),
+                    )
+                )
+            filled += 1
+        return filled
+
     def _embed(self, text: str) -> list[float] | None:
         if self.embed_fn is None:
             return None
         try:
             return self.embed_fn([text])[0]
-        except (
-            Exception
-        ):  # 임베딩 장애로 해결 확정을 막지 않는다. 벡터는 embed_docs 재적재로 채운다
+        except Exception:  # 임베딩 장애로 해결 확정을 막지 않는다. embed_missing_cases 가 채운다
             _LOGGER.exception("사례 임베딩 실패 — 벡터 없이 저장")
             return None
 
