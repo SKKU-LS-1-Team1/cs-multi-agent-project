@@ -69,6 +69,7 @@ class GraphDeps:
     write_draft: Callable = defaults.write_draft  # TODO(CSA-29): agents.drafting.write_draft
     verify: Callable = verification.verify
     write_info_request: Callable = info_request_agent.write_info_request
+    localize_info_request: Callable = info_request_agent.localize_request  # 보낼 때 고객 언어로
 
 
 def serializer() -> JsonPlusSerializer:
@@ -272,6 +273,8 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             return {"status": TicketStatus.REJECTED, "final_reply": None}
         if state.get("pending") == "info_request":
             text = review.edited_text or state.get("info_request")
+            # 승인한 요청문이 고객 언어가 아니면(영어 틀 문장 등) 발송 직전에 옮긴다 (CSA-27)
+            text = deps.localize_info_request(text, _language(state), deps.llm)
             return {"status": TicketStatus.WAITING_CUSTOMER, "final_reply": text}
         text = review.edited_text if review.action == ReviewAction.EDIT_APPROVE else None
         return {

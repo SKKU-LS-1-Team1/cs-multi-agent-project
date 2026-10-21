@@ -8,6 +8,7 @@ from cs_agent.agents.info_request import (
     check_request,
     count_items,
     item_labels,
+    localize_request,
     template_request,
     write_info_request,
 )
@@ -202,3 +203,47 @@ def test_valid_tickets_with_missing_info_get_every_item() -> None:
             assert all(LABELS[m] in text for m in missing)
             checked += 1
     assert checked > 0
+
+
+# --- 보낼 때 고객 언어로 -------------------------------------------------------------------------
+
+ENGLISH = template_request(item_labels(["product_model", "serial_no"], LABELS))
+
+
+def test_localize_translates_english_request_into_customer_language() -> None:
+    writer = ScriptedWriter(SPANISH_OK)
+
+    assert localize_request(ENGLISH, "es", live(writer)) == SPANISH_OK
+    assert "into Spanish" in writer.prompts[0] and "exactly 2 items" in writer.prompts[0]
+
+
+def test_localize_skips_when_already_customer_language_or_llm_off() -> None:
+    writer = ScriptedWriter()
+    assert localize_request(SPANISH_OK, "es", live(writer)) == SPANISH_OK
+    assert localize_request(ENGLISH, "en", live(writer)) == ENGLISH
+    assert writer.prompts == []  # 부르지 않았다
+    assert localize_request(ENGLISH, "es", LLMRouter(Settings(_env_file=None))) == ENGLISH
+
+
+def test_localize_retries_then_keeps_approved_text() -> None:
+    dropped = SPANISH_OK.replace("2. Número de serie (placa de características)\n", "")
+    writer = ScriptedWriter(dropped, SPANISH_OK)
+    assert localize_request(ENGLISH, "es", live(writer)) == SPANISH_OK
+    assert "must have 2" in writer.prompts[1]
+
+    still_english = ScriptedWriter(ENGLISH, ENGLISH)
+    assert localize_request(ENGLISH, "es", live(still_english)) == ENGLISH
+    assert len(still_english.prompts) == 2
+
+    down = ScriptedWriter(TimeoutError("gemini down"))
+    assert localize_request(ENGLISH, "es", live(down)) == ENGLISH
+
+
+@pytest.mark.parametrize("language", ["es", "fr", "de", "it", "pt", "id", "tr", "vi", "pl"])
+def test_english_is_rejected_for_latin_languages(language) -> None:
+    """영어로 쓴 글은 라틴 문자 고객 언어에서도 걸린다 (초안 점검·번역 점검 모두)."""
+    items = item_labels(["product_model", "serial_no"], LABELS)
+    assert any("'en'" in p for p in check_request(ENGLISH, items, language))
+    writer = ScriptedWriter(ENGLISH, ENGLISH)
+    assert localize_request(ENGLISH, language, live(writer)) == ENGLISH
+    assert len(writer.prompts) == 2  # 번역 안 된 글은 통과시키지 않고 다시 시도했다

@@ -30,6 +30,11 @@
 #   실패하면 사유를 붙여 한 번 더 쓰고, 그래도 안 되면 영어 틀 문장(template_request)으로 낸다.
 # - LLM 이 꺼져 있거나(LLM_PROVIDER≠live) 호출이 실패해도 영어 틀 문장을 낸다
 #   (상담원이 고쳐 보낸다).
+# - 보낼 때 고객 언어로 (localize_request): 상담원이 승인한 요청문이 고객 언어가 아니면(영어 틀
+#   문장, 상담원이 영어로 고친 글) 발송 직전에 고객 언어로 옮긴다 (graph/builder.py finish).
+#   번역도 번호 목록 개수·언어를 같은 방식으로 보고 한 번 더 시도, 안 되면 승인한 글 그대로
+#   보낸다. 상담원은 승인한 원문(info_request·review.edited_text)을 보고, 고객은 번역본
+#   (final_reply)을 받는다. 번역본은 사람이 다시 보지 않는다 — 항목 수·언어 점검이 그 대신이다.
 # - 프롬프트: 답을 하거나 약속하지 않는다, 목록 밖 질문 금지, 받는 사람·서명 이름은 지어내지 않는다.
 #   문의 원문은 앞 2,000자만 넣는다.
 import logging
@@ -163,3 +168,51 @@ def write_info_request(missing: list[str], language: str, summary: str, llm: LLM
             return text
         _LOGGER.warning("추가정보 요청문 점검 실패: %s", problems)
     return template_request(items)
+
+
+def translate_prompt(text: str, language: str, n_items: int) -> str:
+    return (
+        f"Translate the customer service message below into {language_name(language)}.\n"
+        "Rules:\n"
+        f"- Keep the numbered list with exactly {n_items} items, in the same order.\n"
+        "- Keep product codes, model numbers, abbreviations and numbers exactly as written.\n"
+        "- Do not add, remove or change any request. Output only the translated message.\n\n"
+        f"Message:\n{text}"
+    )
+
+
+def localize_request(text: str, language: str, llm: LLMRouter) -> str:
+    """보낼 요청문이 고객 언어가 아니면 고객 언어로 옮긴다. 이미 그 언어거나 실패하면 그대로."""
+    from cs_agent.agents.verification import detect_mismatch
+
+    if not text or not text.strip() or not llm.enabled:
+        return text
+    if detect_mismatch(text, language) is None:
+        return text  # 이미 고객 언어 (또는 판단할 글이 없다)
+    n_items = count_items(text)
+    prompt = translate_prompt(text, language, n_items)
+    problems: list[str] = []
+    for _ in range(MAX_ATTEMPTS):
+        attempt = prompt
+        if problems:
+            attempt += "\n\nYour last translation was rejected because " + "; ".join(problems) + "."
+        try:
+            translated = llm.write("translate_info_request", attempt).strip()
+        except Exception:
+            _LOGGER.exception("추가정보 요청문 번역 실패 → 승인한 글 그대로 보낸다")
+            return text
+        problems = []
+        if not translated:
+            problems.append("the translation was empty")
+        elif count_items(translated) != n_items:
+            problems.append(
+                f"the numbered list has {count_items(translated)} items but must have {n_items}"
+            )
+        # 원문을 source_text 로 넘기면 번역 안 된 글이 '옮긴 구절'로 빠져 통과한다 → 넘기지 않는다
+        other = translated and detect_mismatch(translated, language)
+        if other:
+            problems.append(f"it is written in '{other}', not {language_name(language)}")
+        if not problems:
+            return translated
+        _LOGGER.warning("추가정보 요청문 번역 점검 실패: %s", problems)
+    return text

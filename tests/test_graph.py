@@ -157,6 +157,39 @@ def test_missing_product_asks_customer_first(run):
     assert done.values["final_reply"] == "please send product_model"
 
 
+def test_info_request_is_localized_when_sent():
+    """승인한 요청문(영어 틀 문장 등)은 보낼 때 고객 언어로 옮긴다. 상담원이 본 원문은 그대로."""
+    calls = Calls()
+    localized = []
+
+    def localize(text, language, llm):
+        localized.append((text, language))
+        return f"[{language}] {text}"
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=calls.classify,
+        extract=calls.extract,
+        write_draft=calls.write_draft,
+        verify=calls.verify,
+        write_info_request=calls.write_info_request,
+        localize_info_request=localize,
+    )
+    graph = build_ticket_graph(deps)
+    config = {"configurable": {"thread_id": "T-ES"}}
+    inquiry = SPEC_QUESTION.model_copy(
+        update={"subject": "Dimensiones", "body": "¿Cuáles son las dimensiones?", "language": "es"}
+    )
+    graph.invoke({"ticket_id": "T-ES", "inquiry": inquiry}, config)
+    review = ReviewIn(action=ReviewAction.EDIT_APPROVE, edited_text="Please send the model.")
+    graph.invoke(Command(resume=review.model_dump(mode="json")), config)
+
+    v = graph.get_state(config).values
+    assert localized == [("Please send the model.", "es")]
+    assert v["final_reply"] == "[es] Please send the model."
+    assert v["info_request"] == "please send product_model"  # 초안(상담원이 본 글)은 그대로
+
+
 def test_reviewer_rewrite_then_edit_approve(run):
     _, resume, calls = run(SPEC_QUESTION)
 
