@@ -13,7 +13,7 @@ export default function InquiryForm({ draft, onDone }: Props) {
 
   const submit = async () => {
     const threadRef = newThreadRef(); // 추가정보 요청에 회신할 때 같은 문의로 이어진다
-    const ticket = await api.submitInquiry({
+    const ticket = await api.createInquiry({
       channel: "WEB_FORM",
       category: draft.category,
       product_code: draft.product_code,

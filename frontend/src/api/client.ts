@@ -148,6 +148,8 @@ export const api = {
   }) =>
     request<ChatReply>("/chat", { method: "POST", body: JSON.stringify(body) }),
   submitInquiry: (body: InquiryIn) => request<Ticket>("/tickets", { method: "POST", body: JSON.stringify(body) }),
+  // 고객 화면은 이것으로 문의·회신을 보낸다 (고객 도메인은 /api/tickets 를 막는다, CSA-46)
+  createInquiry: (body: InquiryIn) => request<CustomerInquiry>("/inquiries", { method: "POST", body: JSON.stringify(body) }),
   customerInquiry: (id: string) => request<CustomerInquiry>(`/inquiries/${id}`),
   resolve: (id: string) => request<Ticket>(`/tickets/${id}/resolve`, { method: "POST" }),
   agents: (dept?: string) => request<Agent[]>(`/agents${dept ? `?dept=${dept}` : ""}`),

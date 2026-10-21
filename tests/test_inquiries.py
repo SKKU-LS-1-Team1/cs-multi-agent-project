@@ -122,3 +122,27 @@ def test_given_language_is_kept(client) -> None:
     ticket = client.post("/api/tickets", json={**INQUIRY, "language": "de"}).json()
 
     assert ticket["inquiry"]["language"] == "de"
+
+
+def test_customer_submits_and_replies_without_seeing_internal_fields(client) -> None:
+    """고객 도메인은 /api/tickets 를 막으므로 문의·회신은 /api/inquiries 로 보낸다 (CSA-46)."""
+    created = client.post("/api/inquiries", json=INQUIRY)
+
+    assert created.status_code == 201
+    body = created.json()
+    assert set(body) == {
+        "ticket_id",
+        "subject",
+        "body",
+        "received_at",
+        "status",
+        "message",
+        "message_language",
+    }  # AI 초안·근거·점검·담당자는 응답에도 없다
+    tid = body["ticket_id"]
+    client.post(f"/api/tickets/{tid}/action", json={"action": "info_request"})
+    client.post(f"/api/tickets/{tid}/action", json={"action": "approve"})
+
+    reply = {"channel": "WEB_FORM", "body": "Serial SN-1.", "thread_ref": INQUIRY["thread_ref"]}
+    again = client.post("/api/inquiries", json=reply).json()
+    assert again["ticket_id"] == tid  # 같은 문의로 이어진다
