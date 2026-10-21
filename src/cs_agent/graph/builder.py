@@ -281,7 +281,13 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         if review.action == ReviewAction.REJECT:
             return {"status": TicketStatus.REJECTED, "final_reply": None}
         if state.get("pending") == "info_request":
-            text = review.edited_text or state.get("info_request")
+            # 번역 실패로 보류된 뒤 다시 승인하면, 직전에 상담원이 수정 승인한 글을 그대로 쓴다
+            if review.action == ReviewAction.EDIT_APPROVE and review.edited_text:
+                text = review.edited_text
+            elif state.get("translation_error") and state.get("approved_reply"):
+                text = state["approved_reply"]
+            else:
+                text = state.get("info_request")
             # 승인한 요청문이 고객 언어가 아니면(영어 틀 문장 등) 발송 직전에 옮긴다 (CSA-27).
             # 3번 다 실패하면 보내지 않고 보류 → 상담원이 다시 승인하면 다시 번역한다
             try:

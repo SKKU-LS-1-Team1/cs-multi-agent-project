@@ -235,6 +235,43 @@ def test_info_request_held_when_translation_fails_then_sent_on_reapproval():
     assert sent["translation_error"] is None
 
 
+def test_held_info_request_keeps_reviewer_edit_on_reapproval():
+    """수정 승인 → 번역 실패 보류 → 그냥 승인: 상담원이 고친 글을 번역한다 (초안으로 안 돌아감)."""
+    from cs_agent.agents.info_request import LocalizationError
+
+    calls = Calls()
+    seen = []
+
+    def localize(text, language, llm):
+        seen.append(text)
+        if len(seen) == 1:
+            raise LocalizationError("번역 3번 실패")
+        return f"[{language}] {text}"
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=calls.classify,
+        extract=calls.extract,
+        write_draft=calls.write_draft,
+        verify=calls.verify,
+        write_info_request=calls.write_info_request,
+        localize_info_request=localize,
+    )
+    graph = build_ticket_graph(deps)
+    config = {"configurable": {"thread_id": "T-EDIT"}}
+    inquiry = SPEC_QUESTION.model_copy(
+        update={"subject": "Dimensiones", "body": "¿Cuáles son las dimensiones?", "language": "es"}
+    )
+    graph.invoke({"ticket_id": "T-EDIT", "inquiry": inquiry}, config)
+    edit = ReviewIn(action=ReviewAction.EDIT_APPROVE, edited_text="Please send model and photos.")
+    graph.invoke(Command(resume=edit.model_dump(mode="json")), config)
+    approve = ReviewIn(action=ReviewAction.APPROVE)
+    graph.invoke(Command(resume=approve.model_dump(mode="json")), config)
+
+    assert seen == ["Please send model and photos."] * 2
+    assert graph.get_state(config).values["final_reply"] == "[es] Please send model and photos."
+
+
 def test_reviewer_rewrite_then_edit_approve(run):
     _, resume, calls = run(SPEC_QUESTION)
 
