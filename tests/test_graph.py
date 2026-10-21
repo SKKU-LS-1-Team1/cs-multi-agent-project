@@ -190,6 +190,51 @@ def test_info_request_is_localized_when_sent():
     assert v["info_request"] == "please send product_model"  # 초안(상담원이 본 글)은 그대로
 
 
+def test_info_request_held_when_translation_fails_then_sent_on_reapproval():
+    """번역이 3번 다 실패하면 보내지 않고 보류, 상담원이 다시 승인하면 다시 번역해 보낸다."""
+    from cs_agent.agents.info_request import LocalizationError
+
+    calls = Calls()
+    outcomes = [LocalizationError("es 번역 3번 실패"), "Por favor envíe el modelo."]
+
+    def localize(text, language, llm):
+        out = outcomes.pop(0)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    deps = GraphDeps(
+        llm=LLMRouter(Settings(_env_file=None)),
+        classify=calls.classify,
+        extract=calls.extract,
+        write_draft=calls.write_draft,
+        verify=calls.verify,
+        write_info_request=calls.write_info_request,
+        localize_info_request=localize,
+    )
+    graph = build_ticket_graph(deps)
+    config = {"configurable": {"thread_id": "T-HOLD"}}
+    inquiry = SPEC_QUESTION.model_copy(
+        update={"subject": "Dimensiones", "body": "¿Cuáles son las dimensiones?", "language": "es"}
+    )
+    graph.invoke({"ticket_id": "T-HOLD", "inquiry": inquiry}, config)
+    approve = Command(resume=ReviewIn(action=ReviewAction.APPROVE).model_dump(mode="json"))
+
+    graph.invoke(approve, config)
+    held = graph.get_state(config)
+    assert held.values["status"] == TicketStatus.ON_HOLD
+    assert held.values["final_reply"] is None  # 영어로 나가지 않았다
+    assert held.values["approved_reply"] == "please send product_model"
+    assert "3번 실패" in held.values["translation_error"]
+    assert held.next == ("review",)  # 상담원 검토로 돌아왔다
+
+    graph.invoke(approve, config)
+    sent = graph.get_state(config).values
+    assert sent["status"] == TicketStatus.WAITING_CUSTOMER
+    assert sent["final_reply"] == "Por favor envíe el modelo."
+    assert sent["translation_error"] is None
+
+
 def test_reviewer_rewrite_then_edit_approve(run):
     _, resume, calls = run(SPEC_QUESTION)
 

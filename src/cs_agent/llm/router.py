@@ -200,6 +200,16 @@ class LLMRouter:
             first_confidence=result.confidence,
         )
 
+    def invalidate_write(self, task: str, prompt: str) -> None:
+        """호출자가 검증에서 거절한 응답을 재시도 때 캐시로 다시 받지 않게 한다."""
+        if self.kv is None:
+            return
+        key = cache_key(task, json.dumps([self.writer.name, prompt]))
+        try:
+            self.kv.expire(key, 0)
+        except Exception as e:
+            _LOGGER.warning("검증 실패 응답의 캐시 만료 실패: %s", type(e).__name__)
+
     def write(self, task: str, prompt: str) -> str:
         key = cache_key(task, json.dumps([self.writer.name, prompt]))
         if (hit := self._cache_get(key)) is not None:

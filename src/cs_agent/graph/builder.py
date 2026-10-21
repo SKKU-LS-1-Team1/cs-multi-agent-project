@@ -11,6 +11,7 @@
 #             ├ 실패 · 재시도 남음 → ⑨ draft (실패 사유를 fix_notes 로)
 #             └ 실패 · 재시도 초과 → hold(ON_HOLD) → review
 #   review (interrupt: 상담원 버튼 대기) ─┬ approve / edit_approve / reject → finish → END
+#                                     │   (추가정보 요청문 번역 실패 → hold → review, CSA-27)
 #                                     ├ rewrite → ⑨ draft (상담원 피드백, 재시도 0으로)
 #                                     ├ info_request → ⑦ → ready → review
 #                                     └ escalate → escalate(상태·부서 변경) → END
@@ -134,6 +135,8 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "evidence": [],
             "review": None,
             "final_reply": None,
+            "approved_reply": None,
+            "translation_error": None,
             "escalated_to": None,
         }
 
@@ -191,7 +194,13 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         else:
             missing = state["rules"].missing_blocking or state["rules"].missing_info
         text = deps.write_info_request(missing, _language(state), _inquiry_text(state), deps.llm)
-        return {"info_request": text, "pending": "info_request"}
+        return {
+            "info_request": text,
+            "pending": "info_request",
+            "approved_reply": None,
+            "translation_error": None,
+            "final_reply": None,
+        }
 
     def evidence(state: TicketState) -> dict:
         return {
@@ -273,9 +282,23 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             return {"status": TicketStatus.REJECTED, "final_reply": None}
         if state.get("pending") == "info_request":
             text = review.edited_text or state.get("info_request")
-            # 승인한 요청문이 고객 언어가 아니면(영어 틀 문장 등) 발송 직전에 옮긴다 (CSA-27)
-            text = deps.localize_info_request(text, _language(state), deps.llm)
-            return {"status": TicketStatus.WAITING_CUSTOMER, "final_reply": text}
+            # 승인한 요청문이 고객 언어가 아니면(영어 틀 문장 등) 발송 직전에 옮긴다 (CSA-27).
+            # 3번 다 실패하면 보내지 않고 보류 → 상담원이 다시 승인하면 다시 번역한다
+            try:
+                final_reply = deps.localize_info_request(text, _language(state), deps.llm)
+            except info_request_agent.LocalizationError as error:
+                return {
+                    "status": TicketStatus.ON_HOLD,
+                    "approved_reply": text,
+                    "final_reply": None,
+                    "translation_error": str(error),
+                }
+            return {
+                "status": TicketStatus.WAITING_CUSTOMER,
+                "final_reply": final_reply,
+                "approved_reply": text,
+                "translation_error": None,
+            }
         text = review.edited_text if review.action == ReviewAction.EDIT_APPROVE else None
         return {
             "status": TicketStatus.APPROVED,
@@ -340,7 +363,9 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         "review", after_review, ["rewrite", "info_request", "escalate", "finish"]
     )
     g.add_edge("rewrite", "draft")
-    g.add_edge("finish", END)
+    g.add_conditional_edges(
+        "finish", lambda s: "hold" if s.get("translation_error") else END, ["hold", END]
+    )
     g.add_edge("escalate", END)
 
     return g.compile(checkpointer=checkpointer or InMemorySaver(serde=serializer()))

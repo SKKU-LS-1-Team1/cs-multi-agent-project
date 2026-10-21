@@ -3,15 +3,19 @@ import csv
 import pytest
 
 from cs_agent.agents.info_request import (
+    ATTEMPTS,
     FALLBACK_ITEM,
+    LocalizationError,
     build_prompt,
     check_request,
     count_items,
+    in_language,
     item_labels,
     localize_request,
     template_request,
     write_info_request,
 )
+from cs_agent.cache.store import MemoryKV
 from cs_agent.config import Settings, get_settings
 from cs_agent.llm.clients import Completion
 from cs_agent.llm.router import LLMRouter
@@ -37,8 +41,8 @@ class ScriptedWriter:
         return Completion(out, self.name)
 
 
-def live(writer) -> LLMRouter:
-    return LLMRouter(Settings(_env_file=None, llm_provider="live"), writer=writer)
+def live(writer, kv=None) -> LLMRouter:
+    return LLMRouter(Settings(_env_file=None, llm_provider="live"), writer=writer, kv=kv)
 
 
 SPANISH_OK = """Estimado cliente:
@@ -174,16 +178,19 @@ def test_retries_once_with_reason_then_accepts() -> None:
     assert "must have exactly 2" in writer.prompts[1]
 
 
-def test_falls_back_to_template_when_still_wrong_or_llm_fails() -> None:
+def test_draft_tries_three_times_then_english_template_for_review() -> None:
+    """초안은 3번까지 다시 쓰고, 그래도 안 되면 상담원 화면용 영어 틀 문장 (보낼 때 번역된다)."""
     items = ["product_model", "serial_no"]
     english = template_request(item_labels(items, LABELS))
 
-    still_wrong = ScriptedWriter("1. solo uno", "1. solo uno")
-    assert write_info_request(items, "es", "q", live(still_wrong)) == english
-    assert len(still_wrong.prompts) == 2
+    third_time = ScriptedWriter("1. solo uno", TimeoutError("busy"), SPANISH_OK)
+    assert write_info_request(items, "es", "q", live(third_time)) == SPANISH_OK
+    assert len(third_time.prompts) == ATTEMPTS == 3
+    assert "the call failed (TimeoutError)" in third_time.prompts[2]  # 호출 오류도 1번으로 센다
 
-    down = ScriptedWriter(TimeoutError("gemini down"))
-    assert write_info_request(items, "es", "q", live(down)) == english
+    never = ScriptedWriter("1. solo uno", "1. solo uno", "1. solo uno")
+    assert write_info_request(items, "es", "q", live(never)) == english
+    assert len(never.prompts) == 3
 
 
 def test_valid_tickets_with_missing_info_get_every_item() -> None:
@@ -217,26 +224,49 @@ def test_localize_translates_english_request_into_customer_language() -> None:
     assert "into Spanish" in writer.prompts[0] and "exactly 2 items" in writer.prompts[0]
 
 
-def test_localize_skips_when_already_customer_language_or_llm_off() -> None:
+def test_localize_skips_only_when_already_customer_language() -> None:
     writer = ScriptedWriter()
     assert localize_request(SPANISH_OK, "es", live(writer)) == SPANISH_OK
     assert localize_request(ENGLISH, "en", live(writer)) == ENGLISH
     assert writer.prompts == []  # 부르지 않았다
-    assert localize_request(ENGLISH, "es", LLMRouter(Settings(_env_file=None))) == ENGLISH
 
 
-def test_localize_retries_then_keeps_approved_text() -> None:
+def test_localize_never_returns_english_for_non_english_customer() -> None:
+    """번역 모델이 꺼져 있거나 3번 다 실패하면 LocalizationError — 영어 원문을 돌려주지 않는다."""
+    with pytest.raises(LocalizationError, match="꺼져"):
+        localize_request(ENGLISH, "es", LLMRouter(Settings(_env_file=None)))
+
+    still_english = ScriptedWriter(ENGLISH, ENGLISH, ENGLISH)
+    with pytest.raises(LocalizationError, match="3번 실패"):
+        localize_request(ENGLISH, "es", live(still_english))
+    assert len(still_english.prompts) == 3
+
+    down = ScriptedWriter(*(TimeoutError("gemini down") for _ in range(3)))
+    with pytest.raises(LocalizationError):
+        localize_request(ENGLISH, "es", live(down))
+
+    with pytest.raises(LocalizationError, match="비어"):
+        localize_request("  ", "es", live(ScriptedWriter()))
+
+
+def test_localize_succeeds_on_third_attempt() -> None:
     dropped = SPANISH_OK.replace("2. Número de serie (placa de características)\n", "")
-    writer = ScriptedWriter(dropped, SPANISH_OK)
+    writer = ScriptedWriter(dropped, TimeoutError("busy"), SPANISH_OK)
+
     assert localize_request(ENGLISH, "es", live(writer)) == SPANISH_OK
     assert "must have 2" in writer.prompts[1]
 
-    still_english = ScriptedWriter(ENGLISH, ENGLISH)
-    assert localize_request(ENGLISH, "es", live(still_english)) == ENGLISH
-    assert len(still_english.prompts) == 2
 
-    down = ScriptedWriter(TimeoutError("gemini down"))
-    assert localize_request(ENGLISH, "es", live(down)) == ENGLISH
+def test_rejected_translation_is_evicted_from_cache() -> None:
+    """거른 번역이 캐시에 남으면 다시 승인해도 같은 나쁜 답만 받는다 → 캐시에서 지운다."""
+    kv = MemoryKV()
+    bad = ScriptedWriter(ENGLISH, ENGLISH, ENGLISH)
+    with pytest.raises(LocalizationError):
+        localize_request(ENGLISH, "es", live(bad, kv))
+
+    good = ScriptedWriter(SPANISH_OK)  # 상담원이 다시 승인 → 같은 프롬프트로 첫 시도
+    assert localize_request(ENGLISH, "es", live(good, kv)) == SPANISH_OK
+    assert len(good.prompts) == 1  # 캐시가 아니라 모델을 다시 불렀다
 
 
 @pytest.mark.parametrize("language", ["es", "fr", "de", "it", "pt", "id", "tr", "vi", "pl"])
@@ -244,6 +274,37 @@ def test_english_is_rejected_for_latin_languages(language) -> None:
     """영어로 쓴 글은 라틴 문자 고객 언어에서도 걸린다 (초안 점검·번역 점검 모두)."""
     items = item_labels(["product_model", "serial_no"], LABELS)
     assert any("'en'" in p for p in check_request(ENGLISH, items, language))
-    writer = ScriptedWriter(ENGLISH, ENGLISH)
-    assert localize_request(ENGLISH, language, live(writer)) == ENGLISH
-    assert len(writer.prompts) == 2  # 번역 안 된 글은 통과시키지 않고 다시 시도했다
+    writer = ScriptedWriter(ENGLISH, ENGLISH, ENGLISH)
+    with pytest.raises(LocalizationError):
+        localize_request(ENGLISH, language, live(writer))
+    assert len(writer.prompts) == 3  # 번역 안 된 글은 통과시키지 않고 다시 시도했다
+
+
+@pytest.mark.parametrize(
+    "text, language, expected",
+    [
+        (SPANISH_OK, "es", True),
+        (ENGLISH, "en", True),
+        (ENGLISH, "es", False),
+        ("Bitte senden Sie uns die Seriennummer und Fotos des Typenschilds.", "de", True),
+        ("Hi, send model pls", "de", False),  # 짧아 판단이 안 됨 → 확인 안 된 것
+        ("OK", "es", False),
+        ("1. TRF-OIL-1000 S/N 12345", "es", False),  # ID·숫자뿐
+        ("Por favor envíe el número de serie y las fotos.", "de", False),
+        ("Please send the nameplate photos and serial number.", "xx", False),  # 모르는 언어
+    ],
+)
+def test_in_language_requires_positive_confirmation(text, language, expected) -> None:
+    assert in_language(text, language) is expected
+
+
+@pytest.mark.parametrize(
+    "language, short_english",
+    [("de", "Hi, send model pls"), ("es", "OK"), ("fr", "Send S/N")],
+)
+def test_short_english_is_never_sent_as_is(language, short_english) -> None:
+    """판단이 안 되는 짧은 영어도 '이미 고객 언어'로 넘기지 않고 번역 → 확인 안 되면 보류."""
+    writer = ScriptedWriter(short_english, short_english, short_english)
+    with pytest.raises(LocalizationError):
+        localize_request(short_english, language, live(writer))
+    assert len(writer.prompts) == 3

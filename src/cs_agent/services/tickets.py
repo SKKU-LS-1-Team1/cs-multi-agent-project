@@ -128,6 +128,9 @@ class TicketService:
             sla_due_at=due_at(v["inquiry"].received_at, rules.sla_resolution_h) if rules else None,
             draft=v.get("draft"),
             info_request=v.get("info_request"),
+            approved_reply=v.get("approved_reply"),
+            final_reply=v.get("final_reply"),
+            translation_error=v.get("translation_error"),
             checks=v.get("checks", []),
             evidence=v.get("evidence", []),
         )
