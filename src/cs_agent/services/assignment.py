@@ -14,8 +14,9 @@
 # 3. 재배정 reassign(): 상담원·관리자가 다른 담당자로 넘긴다. 같은 부서 안만 허용
 #    (다른 부서로 보내는 건 이관 ReviewAction.ESCALATE). 사유(reason)를 남긴다.
 #    75% 경고(work_list at_risk) 건은 화면에서 "넘기기" 후보를 suggest() 로 보여 준다.
-# 4. 저장: tickets.assignee 열 + 배정 이력 테이블 (assignments: ticket_id, from, to, reason, at).
-#    db/models.py·Alembic 마이그레이션 추가 (CSA-24 스키마 확장). 메모리 모드(MemoryRecords)도 지원.
+# 4. 저장: tickets.assignee 열은 들어가 있다 (db/models.py, 마이그레이션 0002 · 인덱스
+#    ix_tickets_assignee_status). 남은 것: services/records.py 가 assignee 를 쓰고 읽게, 배정 이력
+#    테이블 (assignments: ticket_id, from, to, reason, at) + 마이그레이션. 메모리 모드도 지원.
 # 5. API (api/tickets.py 에 추가):
 #    - POST /api/tickets/{ticket_id}/assign  {"assignee": "...", "reason": "..."} → TicketOut
 #      없는 담당자·다른 부서 담당자 409
