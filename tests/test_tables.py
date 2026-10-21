@@ -155,3 +155,17 @@ def test_duplicate_sla_key_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="sla_policy.csv: 키"):
         load_tables(ref)
+
+
+def test_request_labels_cover_required_fields_in_plain_words() -> None:
+    tables = load_tables()
+    required = {f for fields, _ in tables.required.values() for f in fields}
+
+    assert required <= set(tables.request_labels)  # 묻는 항목은 모두 쉬운 이름이 있다
+    assert set(tables.request_labels) <= set(tables.field_labels)
+    assert "nameplate" in tables.request_labels["serial_no"]
+    # 원본 라벨(고객 문의서·분석 CSA-26 이 쓰는 형식)은 그대로
+    assert tables.field_labels["serial_no"] == "Serial number (nameplate)"
+    assert all(
+        "\n" not in label and not label[:1].isdigit() for label in tables.request_labels.values()
+    )  # 번호 목록 세기를 흐트러뜨리지 않는다

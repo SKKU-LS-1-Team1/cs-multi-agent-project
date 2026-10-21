@@ -69,6 +69,6 @@
 
 받은 원본 기준표(`CS_AI_Agent_Training_Data_v1/ref/`)를 그대로 둔다. 파일별 내용과 읽는 방법은
 `src/cs_agent/rules/tables.py` 맨 위 주석에 있다.
-`navigation_rules.csv`(기획서 5.4, CSA-33)와 `family_divisions.csv`(제품군 → 대분류, CSA-19)는
-원본에 없어서 직접 만든 표다. 기준표와 tickets 대조 검수는
+`navigation_rules.csv`(기획서 5.4, CSA-33), `family_divisions.csv`(제품군 → 대분류, CSA-19),
+`info_request_labels.csv`(추가정보 요청문의 쉬운 항목 이름, CSA-27)는 원본에 없어서 직접 만든 표다. 기준표와 tickets 대조 검수는
 `uv run python -m cs_agent.rules.tables` 로 한다.

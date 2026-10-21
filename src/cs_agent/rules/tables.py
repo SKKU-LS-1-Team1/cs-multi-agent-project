@@ -22,6 +22,10 @@
 # - navigation_rules.csv  기획서 5.4 표 (CSA-33). 원본에 없어 직접 만든 표
 # - family_divisions.csv  제품군 → 대분류(전력·자동화·에너지). 원본에 없어 직접 만든 표 (가정,
 #                         기획서 5.2 확정본으로 맞춘다)
+# - info_request_labels.csv 추가정보 요청문에 쓰는 쉬운 항목 이름 (CSA-27). 원본에 없어 직접
+#                         만든 표. info_field_codebook.csv 라벨은 고객 문의서·분석(CSA-26)이 쓰는
+#                         형식이라 그대로 두고, 고객에게 묻는 문장에만 이 표를 쓴다.
+#                         필드는 codebook 에 있는 것만.
 #
 # 할 일
 # 1. load_tables(): 위 CSV를 읽어 RefTables 로 돌려준다. 한 번만 읽도록 캐시(lru_cache).
@@ -80,6 +84,7 @@ class RefTables:
     divisions: dict[str, str] = field(default_factory=dict)  # division -> 표시 이름
     family_divisions: dict[str, str] = field(default_factory=dict)  # family -> division
     field_labels: dict[str, str] = field(default_factory=dict)  # info_field_codebook
+    request_labels: dict[str, str] = field(default_factory=dict)  # info_request_labels (쉬운 말)
     urgency: dict[str, str] = field(default_factory=dict)  # urgency -> 설명
     departments: dict[str, dict[str, str]] = field(default_factory=dict)  # dept_code -> row
     customers: dict[str, dict[str, str]] = field(default_factory=dict)  # customer_id -> row
@@ -206,6 +211,17 @@ def _load(ref_dir: Path) -> RefTables:
         ((r["intent"], r) for r in _read(ref_dir / "navigation_rules.csv")),
         "navigation_rules.csv",
     )
+    field_labels = _unique(
+        ((r["field"], r["label"]) for r in _read(ref_dir / "info_field_codebook.csv")),
+        "info_field_codebook.csv",
+    )
+    request_labels = _unique(
+        ((r["field"], r["label"]) for r in _read(ref_dir / "info_request_labels.csv")),
+        "info_request_labels.csv",
+    )
+    unknown = sorted(set(request_labels) - set(field_labels))
+    if unknown:
+        raise ValueError(f"info_request_labels.csv: codebook 에 없는 항목 {unknown}")
     return RefTables(
         products,
         routing,
@@ -216,10 +232,8 @@ def _load(ref_dir: Path) -> RefTables:
         escalation,
         divisions=divisions,
         family_divisions=family_divisions,
-        field_labels=_unique(
-            ((r["field"], r["label"]) for r in _read(ref_dir / "info_field_codebook.csv")),
-            "info_field_codebook.csv",
-        ),
+        field_labels=field_labels,
+        request_labels=request_labels,
         urgency=_unique(
             ((r["urgency"], r["description"]) for r in _read(ref_dir / "urgency_codebook.csv")),
             "urgency_codebook.csv",
