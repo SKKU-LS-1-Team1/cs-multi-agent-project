@@ -2,12 +2,14 @@
 --
 -- 할 일
 -- 1. 해결·반려되지 않은 티켓을 SLA 경과 비율(경과 시간 − 고객 대기 시간) / 해결 목표 시간이 큰 순으로.
--- 2. 열: ticket_id, category, priority, assigned_dept, status, sla_due_at, sla_ratio, at_risk(≥ 0.75)
--- 3. :dept 파라미터로 부서 필터 (NULL 이면 전체).
+-- 2. 열: ticket_id, category, priority, assigned_dept, assignee, status, sla_due_at, sla_ratio,
+--    at_risk(≥ 0.75)
+-- 3. :dept 파라미터로 부서 필터, :assignee 로 담당자 필터 (NULL 이면 전체, CSA-53).
+--    담당자 필터를 주면 부서 큐(담당자 없음)·사람 큐 안전 건은 빠진다.
 -- 4. 테이블·열 이름은 db/models.py (CSA-24) 확정본을 따른다.
 --
 -- 부르는 법: db/queries.py  run(conn, "work_list", "work_list", dept=None, now=None)
--- 파라미터 (모두 NULL 가능): :dept, :now(NULL 이면 now()), :at_risk_ratio(NULL 이면 0.75)
+-- 파라미터 (모두 NULL 가능): :dept, :assignee, :now(NULL 이면 now()), :at_risk_ratio(NULL 이면 0.75)
 --
 -- 정해 둔 것 (services/tickets.py work_list 를 CSA-40 에서 이 SQL 로 바꾼다. 그 전까지 Python 쪽은
 -- 고객 대기 시간을 빼지 않아 대기했던 티켓의 sla_ratio·sla_due_at 이 여기와 다르다)
@@ -52,6 +54,7 @@ open_tickets AS (
             CAST(:dept AS text) IS NULL
             OR COALESCE(t.escalated_to, t.assigned_dept) = CAST(:dept AS text)
         )
+        AND (CAST(:assignee AS text) IS NULL OR t.assignee = CAST(:assignee AS text))
 ),
 measured AS (
     SELECT
@@ -65,6 +68,7 @@ SELECT
     category,
     priority,
     dept AS assigned_dept,
+    assignee,
     status,
     received_at + make_interval(secs => (sla_resolution_target_h + wait_hours) * 3600)
         AS sla_due_at,

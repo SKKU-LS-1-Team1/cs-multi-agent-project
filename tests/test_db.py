@@ -205,6 +205,34 @@ def _db_service(Session, checkpointer, **agents):
 
 
 @needs_db
+def test_sql_records_keep_assignee_and_history(db):
+    from cs_agent.services.records import SqlRecords
+
+    _, Session = db
+    records = SqlRecords(Session)
+    inquiry = InquiryIn(channel="email", subject="s", body="b")
+    records.add_ticket("T-1", inquiry)
+    records.add_ticket("T-2", inquiry)
+
+    records.set_assignee("T-1", "AG-1", "자동 배정")
+    records.set_assignee("T-1", "AG-2", "SLA 75% 경고", by="lead")
+    records.set_assignee("T-2", "AG-2", "자동 배정")
+    # 그래프 상태로 tickets 행을 덮어써도 담당자는 그대로다 (assignee 는 상태에 없다)
+    records.save_state("T-1", {"inquiry": inquiry, "status": TicketStatus.READY_FOR_REVIEW})
+    records.save_state("T-2", {"inquiry": inquiry, "status": TicketStatus.REJECTED})
+
+    assert records.assignee_of("T-1") == "AG-2"
+    assert records.open_counts(exclude=frozenset({"REJECTED"})) == {"AG-2": 1}
+    assert records.open_counts() == {"AG-2": 2}
+    history = records.assignments("T-1")
+    assert [(h["from_assignee"], h["to_assignee"], h["assigned_by"]) for h in history] == [
+        (None, "AG-1", ""),
+        ("AG-1", "AG-2", "lead"),
+    ]
+    assert history[0]["created_at"] is not None
+
+
+@needs_db
 @pytest.mark.parametrize("customer_language", ["en", "fr"])
 def test_service_records_rows_and_survives_restart(db, customer_language):
     from cs_agent.graph.builder import postgres_checkpointer

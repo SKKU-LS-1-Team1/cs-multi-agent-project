@@ -8,6 +8,10 @@
 # - POST /api/tickets/{ticket_id}/action  ReviewIn → TicketOut  승인·수정 후 승인·AI 재작성·
 #     추가정보 요청·이관·반려 (CSA-25)
 # - POST /api/tickets/{ticket_id}/resolve → TicketOut  해결 확정 → 사례 저장 (기획서 7.1)
+# - POST /api/tickets/{ticket_id}/assign  AssignIn → TicketOut  같은 부서 다른 담당자로 넘기기
+#     (CSA-53·54). 다른 부서·없는·비활성 담당자, 닫힌 문의는 409
+# - GET  /api/tickets/{ticket_id}/assignments → list[dict]  배정 이력 (오래된 순)
+# - GET  /api/tickets?assignee=           → 그 담당자 건만 (부서 필터와 같이 써도 된다)
 # 없는 ticket_id 는 404, 지금 상태에서 못 하는 처리는 409.
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -15,7 +19,7 @@ from contextlib import contextmanager
 from fastapi import APIRouter, HTTPException
 
 from cs_agent.api.deps import Tickets
-from cs_agent.schemas import InquiryIn, ReviewIn, TicketOut
+from cs_agent.schemas import AssignIn, InquiryIn, ReviewIn, TicketOut
 from cs_agent.services.tickets import InvalidAction, TicketNotFound
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -37,8 +41,8 @@ def submit(inquiry: InquiryIn, tickets: Tickets) -> TicketOut:
 
 
 @router.get("")
-def work_list(tickets: Tickets, dept: str | None = None) -> list[dict]:
-    return tickets.work_list(dept)
+def work_list(tickets: Tickets, dept: str | None = None, assignee: str | None = None) -> list[dict]:
+    return tickets.work_list(dept, assignee=assignee)
 
 
 @router.get("/{ticket_id}", response_model=TicketOut)
@@ -57,3 +61,15 @@ def act(ticket_id: str, review: ReviewIn, tickets: Tickets) -> TicketOut:
 def resolve(ticket_id: str, tickets: Tickets) -> TicketOut:
     with _errors():
         return tickets.resolve(ticket_id)
+
+
+@router.post("/{ticket_id}/assign", response_model=TicketOut)
+def assign(ticket_id: str, change: AssignIn, tickets: Tickets) -> TicketOut:
+    with _errors():
+        return tickets.assign(ticket_id, change)
+
+
+@router.get("/{ticket_id}/assignments")
+def assignments(ticket_id: str, tickets: Tickets) -> list[dict]:
+    with _errors():
+        return tickets.assignments(ticket_id)

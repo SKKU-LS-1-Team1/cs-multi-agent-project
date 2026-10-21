@@ -9,6 +9,7 @@
 # | tickets | 문의 1건 + 분석·규칙 결과 + 상태·SLA | 작업 목록·대시보드 (CSA-20·40·43) |
 # | drafts | 추천 답변·추가정보 요청문 한 버전 (재작성마다 새 행) | 검토 화면 (CSA-41·42) |
 # | reviews | 상담원 버튼 한 번 (승인·수정·재작성·이관·반려) | 피드백 루프, KPI (CSA-50) |
+# | assignments | 담당자 배정·재배정 한 번 (누가 → 누구, 사유) | 배정 이력 (CSA-53·54) |
 # | chat_sessions · chat_messages | 챗봇 대화 (문의로 전환되면 ticket_id 연결) | CSA-32·45 |
 # | resolution_cases | 해결 사례 원본 + 벡터 | 사례 검색 (CSA-15·28) |
 # | doc_chunks | 공식 문서·FAQ·정책의 절 단위 조각 + 벡터 | 문서 검색 (CSA-18·28) |
@@ -168,6 +169,21 @@ class ReviewRow(_Timestamps, Base):
     ticket: Mapped[Ticket] = relationship(back_populates="reviews")
 
     __table_args__ = (Index("ix_reviews_ticket_id", "ticket_id"),)
+
+
+class AssignmentRow(_Timestamps, Base):
+    """담당자 배정·재배정 한 번 (services/assignment.py). tickets.assignee 는 마지막 값."""
+
+    __tablename__ = "assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.ticket_id", ondelete="CASCADE"))
+    from_assignee: Mapped[str | None] = mapped_column(String(64))  # 처음 배정이면 NULL
+    to_assignee: Mapped[str | None] = mapped_column(String(64))  # 부서 큐로 되돌리면 NULL
+    reason: Mapped[str] = mapped_column(Text, default="")  # 자동 배정 / 이관 / 상담원 사유
+    assigned_by: Mapped[str] = mapped_column(String(64), default="")  # 비면 시스템(자동)
+
+    __table_args__ = (Index("ix_assignments_ticket_id", "ticket_id"),)
 
 
 class ChatSession(_Timestamps, Base):

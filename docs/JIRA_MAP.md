@@ -28,7 +28,7 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 44개(CSA-14~51, C
 | CSA-23 | mock 데이터 생성 | 김동규 | 1 | `pipeline/mock_data.py` |
 | CSA-24 | PostgreSQL 스키마 | 조수빈 | 1 | `db/models.py`, `db/session.py` |
 | CSA-25 | 상담원 승인·수정·반려 API와 피드백 기록 | 김동규 | 2 | `api/tickets.py` (`/action`, `/resolve`), `graph/builder.py` (`review`) |
-| CSA-53 | 담당 부서·담당자 자동 배정 + 재배정 API | 김동규 | 2 | `services/assignment.py`, `api/tickets.py` (`/assign`), `data/ref/agents.csv` |
+| CSA-53 | 담당 부서·담당자 자동 배정 + 재배정 API | 김동규 | 2 | `services/assignment.py`, `api/tickets.py` (`/assign`, `/assignments`), `api/agents.py`, `data/ref/agents.csv`, `services/records.py` (`set_assignee`) |
 
 ## CSA-8 상담 처리 에이전트
 | 키 | 작업 | 담당 | 스프린트 | 위치 |
