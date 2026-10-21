@@ -13,7 +13,8 @@
 #   - 안 붙으면 APP_ENV=local 은 경고 후 메모리로 돈다 (서버를 다시 켜면 사라짐), prod 는 멈춘다.
 # - GET /api/health → {"status": "ok", "version": ...}
 # - 라우터는 모두 prefix "/api". Nginx(infra/nginx/nginx.conf)가 /api 요청을 이 앱으로 넘긴다.
-# - 시작 시 기준표를 읽는다 (rules/tables.py, 표가 틀리면 여기서 멈춘다).
+# - 시작 시 기준표와 담당자 명단을 읽는다 (rules/tables.py, services/assignment.py — 표가 틀리면
+#   여기서 멈춘다).
 #   종료 시 남은 Langfuse 기록을 보낸다.
 # - 분석 대기(ANALYSIS_PENDING) 문의를 analysis_retry_interval_s 마다 다시 돌린다 (0 이면 끔).
 import asyncio
@@ -26,6 +27,7 @@ from fastapi import FastAPI
 
 from cs_agent import __version__
 from cs_agent.agents.retrieval import default_retrievers
+from cs_agent.api import agents as agents_api
 from cs_agent.api import chat, dashboard, products, tickets
 from cs_agent.cache.store import ChatSessionStore, connect_redis
 from cs_agent.config import Settings, get_settings
@@ -33,6 +35,7 @@ from cs_agent.graph.builder import GraphDeps, build_ticket_graph, postgres_check
 from cs_agent.llm import tracing
 from cs_agent.llm.router import LLMRouter, get_router
 from cs_agent.rules.tables import load_tables
+from cs_agent.services.assignment import load_agents
 from cs_agent.services.records import MemoryRecords, SqlRecords
 from cs_agent.services.tickets import TicketService
 
@@ -94,6 +97,7 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings = get_settings()
         tables = load_tables()
+        roster = load_agents()  # 담당자 명단 (CSA-53). 표가 틀리면 여기서 멈춘다
         app.state.llm = llm or get_router()
         app.state.docs, app.state.cases = retrievers or _retrievers()
 
@@ -128,7 +132,9 @@ def create_app(
                 cases=app.state.cases,
                 **(agents or {}),
             )
-            app.state.tickets = TicketService(build_ticket_graph(deps, checkpointer), records)
+            app.state.tickets = TicketService(
+                build_ticket_graph(deps, checkpointer), records, roster
+            )
             interval = settings.analysis_retry_interval_s
             retry = (
                 asyncio.create_task(_retry_pending_loop(app.state.tickets, interval))
@@ -150,7 +156,7 @@ def create_app(
     def health() -> dict:
         return {"status": "ok", "version": __version__}
 
-    for module in (tickets, chat, products, dashboard):
+    for module in (tickets, chat, products, dashboard, agents_api):
         app.include_router(module.router, prefix="/api")
     return app
 

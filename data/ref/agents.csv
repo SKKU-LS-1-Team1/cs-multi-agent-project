@@ -1,0 +1,27 @@
+﻿agent_id,name,dept_code,active,max_open
+AG-GCS_L1-01,글로벌 C/S 센터 1,GCS_L1,Y,0
+AG-GCS_L1-02,글로벌 C/S 센터 2,GCS_L1,Y,0
+AG-TS_LV-01,저압기기 기술지원 1,TS_LV,Y,0
+AG-TS_LV-02,저압기기 기술지원 2,TS_LV,Y,0
+AG-TS_MV-01,고압·배전반 기술지원 1,TS_MV,Y,0
+AG-TS_MV-02,고압·배전반 기술지원 2,TS_MV,Y,0
+AG-TS_TRF-01,변압기 기술지원 1,TS_TRF,Y,0
+AG-TS_TRF-02,변압기 기술지원 2,TS_TRF,Y,0
+AG-TS_AUTO-01,자동화 기술지원 1,TS_AUTO,Y,0
+AG-TS_AUTO-02,자동화 기술지원 2,TS_AUTO,Y,0
+AG-TS_ENERGY-01,에너지솔루션 기술지원 1,TS_ENERGY,Y,0
+AG-TS_ENERGY-02,에너지솔루션 기술지원 2,TS_ENERGY,Y,0
+AG-RND_FW-01,펌웨어 개발 1,RND_FW,Y,0
+AG-RND_FW-02,펌웨어 개발 2,RND_FW,Y,0
+AG-QA_CLAIM-01,품질보증/클레임 1,QA_CLAIM,Y,0
+AG-QA_CLAIM-02,품질보증/클레임 2,QA_CLAIM,Y,0
+AG-FIELD_SVC-01,현장 서비스 1,FIELD_SVC,Y,0
+AG-FIELD_SVC-02,현장 서비스 2,FIELD_SVC,Y,0
+AG-CERT-01,인증·규격 1,CERT,Y,0
+AG-CERT-02,인증·규격 2,CERT,Y,0
+AG-SALES_OPS-01,해외영업 운영 1,SALES_OPS,Y,0
+AG-SALES_OPS-02,해외영업 운영 2,SALES_OPS,Y,0
+AG-SCM-01,주문·물류 1,SCM,Y,0
+AG-SCM-02,주문·물류 2,SCM,Y,0
+AG-WARRANTY_DESK-01,보증·RMA 데스크 1,WARRANTY_DESK,Y,0
+AG-WARRANTY_DESK-02,보증·RMA 데스크 2,WARRANTY_DESK,Y,0

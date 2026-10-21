@@ -35,7 +35,7 @@ def test_sql_files_split_into_named_queries() -> None:
     assert {"create_tickets_gold", "upsert_tickets_gold", "eval_summary"} <= set(
         load_queries("eval_join")
     )
-    assert params_of("work_list", "work_list") == {"dept", "now", "at_risk_ratio"}
+    assert params_of("work_list", "work_list") == {"dept", "assignee", "now", "at_risk_ratio"}
     assert params_of("dept_dashboard", "review_outcomes_weekly") == {"dept", "since", "tz"}
     assert "-- name" not in load_queries("work_list")["work_list"]
     with pytest.raises(KeyError):
@@ -190,6 +190,9 @@ def test_work_list_orders_by_sla_ratio_and_pauses_while_waiting(conn) -> None:
 
     only_lv = run(conn, "work_list", "work_list", now=NOW, dept="TS_LV")
     assert [r["ticket_id"] for r in only_lv] == ["T-RISK", "T-WAIT", "T-LOW"]
+    conn.execute(sa.text("UPDATE tickets SET assignee = 'AG-TS_LV-01' WHERE ticket_id = 'T-RISK'"))
+    mine = run(conn, "work_list", "work_list", now=NOW, assignee="AG-TS_LV-01")
+    assert [(r["ticket_id"], r["assignee"]) for r in mine] == [("T-RISK", "AG-TS_LV-01")]
     only_field = run(conn, "work_list", "work_list", now=NOW, dept="FIELD_SVC")
     assert [(r["ticket_id"], r["assigned_dept"]) for r in only_field] == [("T-ESC", "FIELD_SVC")]
 
