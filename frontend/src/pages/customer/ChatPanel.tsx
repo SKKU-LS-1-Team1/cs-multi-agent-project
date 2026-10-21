@@ -8,18 +8,19 @@ type Props = {
   onHandoff: (form: InquiryForm) => void;
 };
 type Message = { role: "user" | "assistant"; text: string };
+const UNRESOLVED_TEXT = "해결이 안 됐어요";
 
 export default function ChatPanel({ viewingProduct, onNavigate, onHandoff }: Props) {
   const sessionId = useMemo(() => crypto.randomUUID(), []);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
 
-  const send = async () => {
-    if (!input.trim()) return;
-    const text = input;
+  const send = async (unresolved = false) => {
+    const text = unresolved ? input.trim() || UNRESOLVED_TEXT : input;
+    if (!text.trim()) return;
     setInput("");
     setMessages((m) => [...m, { role: "user", text }]);
-    const reply = await api.chat({ session_id: sessionId, message: text, viewing_product: viewingProduct });
+    const reply = await api.chat({ session_id: sessionId, message: text, viewing_product: viewingProduct, unresolved });
     setMessages((m) => [...m, { role: "assistant", text: reply.answer }]);
     onNavigate(reply.navigation);
     if (reply.handoff && reply.form) onHandoff(reply.form);
@@ -34,7 +35,8 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff }: Pro
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} style={{ flex: 1 }} />
-        <button onClick={send}>보내기</button>
+        <button onClick={() => send()}>보내기</button>
+        {messages.length > 0 && <button onClick={() => send(true)}>해결 안 됐어요</button>}
       </div>
     </aside>
   );
