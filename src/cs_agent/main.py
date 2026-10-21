@@ -17,6 +17,9 @@
 #   여기서 멈춘다).
 #   종료 시 남은 Langfuse 기록을 보낸다.
 # - 분석 대기(ANALYSIS_PENDING) 문의를 analysis_retry_interval_s 마다 다시 돌린다 (0 이면 끔).
+# - 피드백 루프 (CSA-15, agents/case_memory.py): 벡터 없이 저장된 해결 사례를 case_embed_interval_s
+#   마다 임베딩한다 (live·DB 일 때). 사례 검색기가 키워드 검색이면 운영 중 해결 사례도 같이 찾게
+#   감싼다 (with_live_cases).
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -26,6 +29,7 @@ from typing import Any, Literal
 from fastapi import FastAPI
 
 from cs_agent import __version__
+from cs_agent.agents.case_memory import with_live_cases
 from cs_agent.agents.retrieval import default_retrievers
 from cs_agent.api import agents as agents_api
 from cs_agent.api import chat, dashboard, products, tickets
@@ -52,6 +56,19 @@ async def _retry_pending_loop(service: TicketService, interval_s: float) -> None
             continue
         if recovered:
             _LOGGER.info("분석 대기 해소: %s", recovered)
+
+
+async def _embed_cases_loop(records: Any, interval_s: float) -> None:
+    """벡터 없이 저장된 해결 사례를 채운다. 시작하자마자 한 번, 그다음 interval_s 마다."""
+    while True:
+        try:
+            filled = await asyncio.to_thread(records.embed_missing_cases)
+        except Exception:
+            _LOGGER.exception("해결 사례 임베딩 채우기 실패")
+        else:
+            if filled:
+                _LOGGER.info("벡터 없던 해결 사례 %d건 임베딩", filled)
+        await asyncio.sleep(interval_s)
 
 
 def _unavailable(settings: Settings, what: str, error: Exception) -> None:
@@ -128,6 +145,8 @@ def create_app(
             if llm is None and app.state.llm.enabled:
                 app.state.llm.kv = redis_client if redis_client is not None else MemoryKV()
 
+            # 키워드 사례 검색(로컬)도 운영 중 해결 사례를 찾게 (CSA-15 피드백 루프)
+            app.state.cases = with_live_cases(app.state.cases, records)
             deps = GraphDeps(
                 llm=app.state.llm,
                 tables=tables,
@@ -144,11 +163,18 @@ def create_app(
                 if interval > 0
                 else None
             )
+            embed_interval = settings.case_embed_interval_s
+            embed_cases = (
+                asyncio.create_task(_embed_cases_loop(records, embed_interval))
+                if embed_interval > 0 and getattr(records, "embed_fn", None) is not None
+                else None
+            )
             yield
-            if retry:
-                retry.cancel()
-                with suppress(asyncio.CancelledError):
-                    await retry
+            for task in (retry, embed_cases):
+                if task:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
             if redis_client is not None:
                 redis_client.close()
             tracing.flush()

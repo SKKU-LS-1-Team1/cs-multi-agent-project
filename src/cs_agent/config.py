@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     sla_at_risk_ratio: float = 0.75  # SLA 경고 기준 (CSA-40)
     analysis_retry_interval_s: float = 60.0  # 분석 대기 문의 재시도 간격. 0 이면 자동 재시도 끔
     inquiry_translation_timeout_s: float = Field(default=20.0, gt=0, le=60)
+    case_embed_interval_s: float = 300.0  # 벡터 없는 해결 사례 임베딩 간격 (live). 0 이면 끔
 
 
 @lru_cache
