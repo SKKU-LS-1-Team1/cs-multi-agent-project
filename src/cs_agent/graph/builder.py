@@ -41,7 +41,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from cs_agent import domain, schemas
-from cs_agent.agents import analysis, retrieval
+from cs_agent.agents import analysis, retrieval, verification
 from cs_agent.agents.analysis import AnalysisError
 from cs_agent.config import get_settings
 from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
@@ -66,7 +66,7 @@ class GraphDeps:
     first_pass: Callable = retrieval.first_pass
     finalize_evidence: Callable = retrieval.finalize_evidence
     write_draft: Callable = defaults.write_draft  # TODO(CSA-29): agents.drafting.write_draft
-    verify: Callable = defaults.verify  # TODO(CSA-31): agents.verification.verify
+    verify: Callable = verification.verify
     write_info_request: Callable = defaults.write_info_request  # TODO(CSA-27)
 
 
