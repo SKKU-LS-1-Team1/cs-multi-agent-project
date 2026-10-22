@@ -2,6 +2,7 @@
 import { useState } from "react";
 import type { InquiryForm as FormDraft, Navigation } from "../../api/client";
 import ProductTree from "./ProductTree";
+import ProductPicker from "./ProductPicker";
 import ProductDetail from "./ProductDetail";
 import ChatPanel from "./ChatPanel";
 import InquiryForm from "./InquiryForm";
@@ -27,7 +28,7 @@ export default function CustomerHome() {
         ) : productCode ? (
           <ProductDetail code={productCode} tab={tab} anchor={anchor} onTab={setTab} />
         ) : (
-          <p>왼쪽에서 제품을 고르거나 오른쪽 챗봇에 물어보세요.</p>
+          <ProductPicker selected={productCode} onSelect={(c) => { setProductCode(c); setForm(null); }} />
         )}
       </main>
       <ChatPanel viewingProduct={productCode} onNavigate={onNavigate} onHandoff={setForm} />
