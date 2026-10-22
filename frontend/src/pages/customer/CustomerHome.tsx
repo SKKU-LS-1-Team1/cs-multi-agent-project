@@ -31,7 +31,7 @@ export default function CustomerHome() {
           <ProductPicker selected={productCode} onSelect={(c) => { setProductCode(c); setForm(null); }} />
         )}
       </main>
-      <ChatPanel viewingProduct={productCode} onNavigate={onNavigate} onHandoff={setForm} />
+      <ChatPanel viewingProduct={productCode} onNavigate={onNavigate} onHandoff={setForm} onPickProduct={(c) => { setProductCode(c); setTab("info"); setAnchor(null); setForm(null); }} />
     </div>
   );
 }
