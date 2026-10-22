@@ -1,25 +1,30 @@
 # 담당 부서·담당자 자동 배정 + 재배정 (CSA-53 · 담당 김동규 · Sprint 2) — 명세서 S-03
 #
 # 부서는 규칙 처리(⑤, rules/engine.py)가 routing_rules 로 이미 정한다 (RuleResult.assigned_dept,
-# 이관되면 escalated_to). 여기서는 그 부서 안에서 담당 상담원을 고르고, SLA 75% 경고 시 다른
-# 상담원에게 넘길 수 있게 한다. 관리자 화면 쪽은 CSA-54 (김도연).
+# 이관되면 escalated_to). 여기서는 담당 상담원을 고르고, SLA 75% 경고 시 다른 상담원에게 넘길 수
+# 있게 한다. 관리자 화면 쪽은 CSA-54 (김도연).
+#
+# 담당 모델 (2026-10-22 팀장 결정, CSA-59 관리자 화면과 맞춤): 모든 문의의 담당자는 앞단 글로벌
+# C/S 센터(OWNER_DEPT = GCS_L1) 상담원이다. 문의의 부서(assigned_dept · escalated_to)는 전문부서
+# 요청·이관 대상이고, 이관해도 담당자는 그대로다 (앞단이 고객 소통을 끝까지 맡는다).
+# 관리자 화면 로그인 계정(frontend/src/admin/lib/auth.ts) 4명이 GCS_L1 명단이다 (팀장 Doyeon Kim).
 #
 # 정해 둔 것
 # - 담당자 명단: data/ref/agents.csv (agent_id, name, dept_code, active, max_open). 시작할 때 읽고
 #   (main.py), 표가 틀리면(없는 부서 코드·겹치는 agent_id·active 가 Y/N 아님) 시작을 멈춘다.
 #   파일이 없으면 빈 명단 → 배정하지 않는다 (assignee NULL, 부서 큐에 남음).
-# - 시연용 명단 (이름은 지어낸 것): 인원은 tickets 부서별 유입량에 비례 — 많은 부서(TS_AUTO·TS_LV·
-#   SCM·SALES_OPS·CERT·GCS_L1) 3명, 나머지 2명(같은 부서 재배정 시연에 최소 2명).
+# - 시연용 명단 (이름은 지어낸 것): GCS_L1 은 관리자 화면 계정 4명 (담당자). 전문부서는 인원이
+#   tickets 부서별 유입량에 비례 — 많은 부서(TS_AUTO·TS_LV·SCM·SALES_OPS·CERT) 3명, 나머지 2명.
 #   max_open 은 난이도: L1 15, L2 10(적은 부서 TS_MV·TS_TRF 8), L3·현장(QA_CLAIM·RND_FW·
 #   FIELD_SVC) 6. 부서 수용량
 #   (인원 × max_open)이 tickets 로 추정한 동시 열린 건(유입 × 처리 시간 상위 10%, 최대 11건)보다
 #   모두 커서 평소엔 안 걸리고, 시연·평가처럼 한꺼번에 몰릴 때만 부서 큐로 넘친다.
 #   AG-TS_AUTO-04 는 휴직(active=N) 예시.
-# - 자동 배정 assign(): 부서 안 활성 담당자 중 지금 열린 건이 가장 적은 사람. 같으면 agent_id 순.
-#   max_open(0 이면 제한 없음)에 이미 찬 사람은 뺀다. 다 찼으면 None (부서 큐).
-#   services/tickets.py 가 그래프를 돌린 뒤마다 부른다: 아직 담당자가 없거나, 이관으로 부서가 바뀌어
-#   지금 담당자가 그 부서 사람이 아닐 때. 사람 큐 안전 건(부서 없음)·닫힌 건은 배정하지 않는다.
-# - 재배정 reassign(): 같은 부서 활성 담당자만 (다른 부서로 보내는 건 이관 ReviewAction.ESCALATE).
+# - 자동 배정 assign(dept=OWNER_DEPT): 활성 담당자 중 지금 열린 건이 가장 적은 사람. 같으면
+#   agent_id 순. max_open(0 이면 제한 없음)에 이미 찬 사람은 뺀다. 다 찼으면 None (앞단 큐).
+#   services/tickets.py 가 그래프를 돌린 뒤마다 부른다: 아직 담당자가 없거나 담당자가 비활성일 때.
+#   안전 건(사람 큐)도 배정한다. 닫힌 건은 배정하지 않는다.
+# - 재배정 reassign(OWNER_DEPT, …): 앞단 활성 담당자만 (전문부서로 보내는 건 이관 ESCALATE).
 #   상담원·관리자가 직접 넘길 때는 max_open 을 넘어도 허용한다 (사람이 정한 것).
 #   75% 경고 건은 화면에서 suggest() 후보를 보여 준다.
 # - 저장: tickets.assignee + 배정 이력 assignments (from·to·사유·누가). services/records.py.
@@ -38,6 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 COLUMNS = ("agent_id", "name", "dept_code", "active", "max_open")
+OWNER_DEPT = "GCS_L1"  # 문의 담당자를 고르는 부서 (위 담당 모델)
 
 
 @dataclass(frozen=True)
@@ -128,6 +134,6 @@ def reassign(ticket_dept: str, to: str, agents: Sequence[Agent]) -> Agent:
         raise ValueError(f"비활성 담당자: {to}")
     if agent.dept != ticket_dept:
         raise ValueError(
-            f"{to} 는 {agent.dept} 소속이라 {ticket_dept} 문의를 맡을 수 없다 (다른 부서는 이관)"
+            f"{to} 는 {agent.dept} 소속이라 {ticket_dept} 담당자가 될 수 없다 (전문부서는 이관)"
         )
     return agent

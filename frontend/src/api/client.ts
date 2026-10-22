@@ -154,6 +154,7 @@ export const api = {
   resolve: (id: string) => request<Ticket>(`/tickets/${id}/resolve`, { method: "POST" }),
   agents: (dept?: string) => request<Agent[]>(`/agents${dept ? `?dept=${dept}` : ""}`),
   workList: (dept?: string) => request<WorkItem[]>(`/tickets${dept ? `?dept=${dept}` : ""}`),
+  answered: () => request<string[]>("/tickets/answered"), // 발송했고 해결 확정 전 (작업 목록에는 없다)
   ticket: (id: string) => request<Ticket>(`/tickets/${id}`),
   act: (id: string, body: { action: ReviewAction } & Record<string, unknown>) =>
     request<Ticket>(`/tickets/${id}/action`, { method: "POST", body: JSON.stringify(body) }),
