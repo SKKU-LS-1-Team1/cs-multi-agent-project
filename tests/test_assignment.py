@@ -120,74 +120,79 @@ def client():
         yield c
 
 
-def test_new_tickets_are_spread_over_dept_agents(client) -> None:
+def test_new_tickets_are_spread_over_frontline_agents(client) -> None:
+    """담당자는 앞단 글로벌 C/S 센터 상담원이다. 문의 부서(TS_TRF)와 따로다."""
     first = client.post("/api/tickets", json=INQUIRY).json()
     second = client.post("/api/tickets", json=INQUIRY).json()
 
     assert first["assigned_dept"] == "TS_TRF"
-    assert (first["assignee"], second["assignee"]) == ("AG-TS_TRF-01", "AG-TS_TRF-02")
+    assert (first["assignee"], second["assignee"]) == ("AG-GCS_L1-01", "AG-GCS_L1-02")
     history = client.get(f"/api/tickets/{first['ticket_id']}/assignments").json()
     assert [(h["from_assignee"], h["to_assignee"], h["reason"]) for h in history] == [
-        (None, "AG-TS_TRF-01", "자동 배정")
+        (None, "AG-GCS_L1-01", "자동 배정")
     ]
-    agents = {a["agent_id"]: a for a in client.get("/api/agents?dept=TS_TRF").json()}
-    assert {k: a["open_count"] for k, a in agents.items()} == {"AG-TS_TRF-01": 1, "AG-TS_TRF-02": 1}
+    agents = {a["agent_id"]: a for a in client.get("/api/agents?dept=GCS_L1").json()}
+    assert agents["AG-GCS_L1-01"]["name"] == "Doyeon Kim"  # 관리자 화면 로그인 계정 (팀장)
+    assert {k: a["open_count"] for k, a in agents.items()} == {
+        "AG-GCS_L1-01": 1,
+        "AG-GCS_L1-02": 1,
+        "AG-GCS_L1-03": 0,
+        "AG-GCS_L1-04": 0,
+    }
 
 
-def test_reassign_within_dept_and_reject_other_dept(client) -> None:
+def test_reassign_between_frontline_agents_and_reject_specialists(client) -> None:
     tid = client.post("/api/tickets", json=INQUIRY).json()["ticket_id"]
 
     moved = client.post(
         f"/api/tickets/{tid}/assign",
-        json={"assignee": "AG-TS_TRF-02", "reason": "SLA 75% 경고 — 부재", "by": "lead"},
+        json={"assignee": "AG-GCS_L1-02", "reason": "SLA 75% 경고 — 부재", "by": "lead"},
     )
-    assert moved.status_code == 200 and moved.json()["assignee"] == "AG-TS_TRF-02"
-    rows = client.get("/api/tickets?assignee=AG-TS_TRF-02").json()
-    assert [(r["ticket_id"], r["assignee"]) for r in rows] == [(tid, "AG-TS_TRF-02")]
-    assert client.get("/api/tickets?assignee=AG-TS_TRF-01").json() == []
+    assert moved.status_code == 200 and moved.json()["assignee"] == "AG-GCS_L1-02"
+    rows = client.get("/api/tickets?assignee=AG-GCS_L1-02").json()
+    assert [(r["ticket_id"], r["assignee"]) for r in rows] == [(tid, "AG-GCS_L1-02")]
+    assert client.get("/api/tickets?assignee=AG-GCS_L1-01").json() == []
     history = client.get(f"/api/tickets/{tid}/assignments").json()
     assert history[-1] == {
         **history[-1],
-        "from_assignee": "AG-TS_TRF-01",
-        "to_assignee": "AG-TS_TRF-02",
+        "from_assignee": "AG-GCS_L1-01",
+        "to_assignee": "AG-GCS_L1-02",
         "reason": "SLA 75% 경고 — 부재",
         "assigned_by": "lead",
     }
 
     # 같은 사람에게 다시 넘기면 이력을 남기지 않는다
-    client.post(f"/api/tickets/{tid}/assign", json={"assignee": "AG-TS_TRF-02"})
+    client.post(f"/api/tickets/{tid}/assign", json={"assignee": "AG-GCS_L1-02"})
     assert len(client.get(f"/api/tickets/{tid}/assignments").json()) == 2
 
-    other = client.post(f"/api/tickets/{tid}/assign", json={"assignee": "AG-TS_LV-01"})
-    assert other.status_code == 409 and "이관" in other.json()["detail"]
+    # 전문부서(문의 부서 TS_TRF 포함) 담당자는 담당자가 될 수 없다 — 이관으로 보낸다
+    for specialist in ("AG-TS_TRF-01", "AG-TS_LV-01"):
+        other = client.post(f"/api/tickets/{tid}/assign", json={"assignee": specialist})
+        assert other.status_code == 409 and "이관" in other.json()["detail"]
     assert client.post(f"/api/tickets/{tid}/assign", json={"assignee": "X"}).status_code == 409
     assert client.post("/api/tickets/NOPE/assign", json={"assignee": "X"}).status_code == 404
     assert client.get("/api/tickets/NOPE/assignments").status_code == 404
 
 
-def test_escalation_moves_ticket_to_receiving_dept_agent(client) -> None:
+def test_escalation_keeps_the_frontline_owner(client) -> None:
+    """이관하면 부서는 받는 부서로 바뀌지만, 고객 소통은 앞단 담당자가 계속 맡는다."""
     tid = client.post("/api/tickets", json=INQUIRY).json()["ticket_id"]
 
     done = client.post(
         f"/api/tickets/{tid}/action", json={"action": "escalate", "escalate_to": "FIELD_SVC"}
     ).json()
 
-    assert (done["assigned_dept"], done["assignee"]) == ("FIELD_SVC", "AG-FIELD_SVC-01")
-    history = client.get(f"/api/tickets/{tid}/assignments").json()
-    assert (history[-1]["from_assignee"], history[-1]["reason"]) == (
-        "AG-TS_TRF-01",
-        "FIELD_SVC 로 넘어가 자동 재배정",
-    )
-    # 이관 뒤에는 받은 부서 담당자끼리만 넘긴다
-    back = client.post(f"/api/tickets/{tid}/assign", json={"assignee": "AG-TS_TRF-02"})
-    assert back.status_code == 409
+    assert (done["assigned_dept"], done["assignee"]) == ("FIELD_SVC", "AG-GCS_L1-01")
+    assert len(client.get(f"/api/tickets/{tid}/assignments").json()) == 1
+    back = client.post(f"/api/tickets/{tid}/assign", json={"assignee": "AG-GCS_L1-03"})
+    assert back.status_code == 200  # 이관 뒤에도 앞단끼리 넘길 수 있다
 
 
 def test_closed_ticket_cannot_be_reassigned(client) -> None:
     tid = client.post("/api/tickets", json=INQUIRY).json()["ticket_id"]
     client.post(f"/api/tickets/{tid}/action", json={"action": "reject"})
 
-    res = client.post(f"/api/tickets/{tid}/assign", json={"assignee": "AG-TS_TRF-02"})
+    res = client.post(f"/api/tickets/{tid}/assign", json={"assignee": "AG-GCS_L1-02"})
 
     assert res.status_code == 409
-    assert client.get("/api/agents?dept=TS_TRF").json()[0]["open_count"] == 0  # 닫힌 건은 안 센다
+    assert client.get("/api/agents?dept=GCS_L1").json()[0]["open_count"] == 0  # 닫힌 건은 안 센다

@@ -16,7 +16,7 @@
 // - 담당자 배정·전문부서 요청·자료 확인은 아직 로컬 기록이다 (담당자는 백엔드 자동 배정을 보여 준다).
 import { toast } from "sonner";
 import { api, type Agent, type Ticket as ApiTicket, type WorkItem } from "../../api/client";
-import { answerContext, contextKey, record, signedIn } from "./logic";
+import { people, answerContext, contextKey, record, signedIn } from "./logic";
 import { commit, setUi, tickets } from "./store";
 import type { Ticket } from "./types";
 
@@ -114,17 +114,32 @@ function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
   if (!target.events.length) {
     target.events.push({ kind: "registered", text: `${inquiry?.channel || "WEB"} 문의 접수 · AI 분석`, createdAt: inquiry?.received_at, actor: "system" });
   }
+  // 다른 화면에서 발송한 문의는 이 화면 이력에 발송 기록이 없다. 완료 처리 창이 발송 기록으로 칸을
+  // 미리 채우므로, 백엔드가 보낸 글(final_reply)이 있으면 발송 기록을 하나 넣는다.
+  if (api.final_reply && !target.events.some((e) => e.kind === "sent")) {
+    target.events.push({
+      kind: "sent", text: api.final_reply, purpose: api.status === "WAITING_CUSTOMER" ? "request" : "answer",
+      replyLanguage: api.final_reply_language, actor: target.owner || "system", source: "api",
+    });
+  }
   return target;
 }
 
 export async function syncFromApi(): Promise<boolean> {
   try {
-    const [list, roster] = await Promise.all([api.workList(), api.agents()]);
+    const [list, roster, answered] = await Promise.all([api.workList(), api.agents(), api.answered()]);
     agents = new Map(roster.map((a) => [a.agent_id, a]));
+    // 담당자는 앞단 글로벌 C/S 센터 상담원 = 로그인 계정과 같은 이름 (agents.csv GCS_L1, CSA-53).
+    // 팀 현황의 수용량은 명단의 max_open 을 따른다.
+    for (const p of people) {
+      const agent = roster.find((a) => a.name === p.name && a.active);
+      if (agent?.max_open) p.capacity = agent.max_open;
+    }
     workItems.clear();
     list.forEach((w) => workItems.set(w.ticket_id, w));
     const known = tickets.filter(isApiTicket).map((t) => t.id);
-    const ids = [...new Set([...list.map((w) => w.ticket_id), ...known])];
+    // 작업 목록(열린 건) + 발송했고 완료 전인 건(다른 브라우저에서 발송했어도 완료 처리할 수 있게) + 이미 아는 건
+    const ids = [...new Set([...list.map((w) => w.ticket_id), ...answered, ...known])];
     const fetched = await Promise.all(ids.map((id) => api.ticket(id).catch(() => null)));
     if (!online) {
       tickets.splice(0, tickets.length, ...tickets.filter(isApiTicket)); // 예시 티켓은 뺀다

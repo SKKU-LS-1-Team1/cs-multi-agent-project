@@ -251,3 +251,16 @@ def test_reply_edited_in_customer_language_is_sent_without_translation():
     assert done["status"] == "APPROVED"
     assert done["final_reply"] == spanish
     assert calls == []  # 번역을 부르지 않았다
+
+
+def test_answered_lists_sent_but_unresolved_tickets(client):
+    """작업 목록은 APPROVED 를 빼므로 관리자 화면은 완료할 문의를 /answered 로 찾는다 (CSA-61)."""
+    tid = client.post("/api/tickets", json=INQUIRY).json()["ticket_id"]
+    assert client.get("/api/tickets/answered").json() == []
+
+    client.post(f"/api/tickets/{tid}/action", json={"action": "approve"})
+    assert client.get("/api/tickets/answered").json() == [tid]
+    assert tid not in [r["ticket_id"] for r in client.get("/api/tickets").json()]
+
+    client.post(f"/api/tickets/{tid}/resolve")
+    assert client.get("/api/tickets/answered").json() == []

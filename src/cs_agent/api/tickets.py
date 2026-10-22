@@ -4,6 +4,9 @@
 # - POST /api/tickets                     InquiryIn → TicketOut  문의 접수 → 그래프 실행
 #     (고객 문의하기 화면 CSA-39, mock 데이터 CSA-23, 평가 스크립트 CSA-50 이 쓴다)
 # - GET  /api/tickets?dept=               → list[dict]  상담원 작업 목록 (SLA 순, 75% 경고, CSA-40)
+# - GET  /api/tickets/answered            → list[str]  답변은 보냈고 아직 해결 확정 전(APPROVED)인
+#     문의 (CSA-61). 작업 목록은 APPROVED 를 닫힌 건으로 빼므로, 관리자 화면이 '처리 결과 기록 및
+#     완료'를 누를 문의를 여기서 찾는다.
 # - GET  /api/tickets/{ticket_id}         → TicketOut  검토 화면 (초안·근거·점검 결과, CSA-41·42)
 # - POST /api/tickets/{ticket_id}/escalation-request → 요청서 생성/재생성 (CSA-55).
 #   {"to_dept": "CERT"} 또는 생략하면 규칙의 이관 부서. 실패는 503, 상태는 유지.
@@ -48,6 +51,12 @@ def submit(inquiry: InquiryIn, tickets: Tickets) -> TicketOut:
 @router.get("")
 def work_list(tickets: Tickets, dept: str | None = None, assignee: str | None = None) -> list[dict]:
     return tickets.work_list(dept, assignee=assignee)
+
+
+# /{ticket_id} 보다 먼저 둔다 (answered 가 ticket_id 로 잡히지 않게)
+@router.get("/answered")
+def answered(tickets: Tickets) -> list[str]:
+    return tickets.answered()
 
 
 @router.get("/{ticket_id}", response_model=TicketOut)

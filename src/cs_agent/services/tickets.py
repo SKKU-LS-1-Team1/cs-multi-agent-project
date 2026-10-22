@@ -19,10 +19,10 @@
 #   규칙이 없는 사람 큐(분류 실패한 안전 건)는 맨 위에 둔다.
 # - retry_pending(): 분석 대기(ANALYSIS_PENDING, LLM 장애 등) 문의를 처음부터 다시 돌린다.
 #   main.py 가 analysis_retry_interval_s 마다 부른다.
-# - 담당자 (CSA-53, services/assignment.py): 그래프를 돌린 뒤마다 부서 안 담당자를 자동 배정한다
-#   (아직 없거나, 이관으로 부서가 바뀌어 지금 담당자가 그 부서 사람이 아닐 때).
-#   assign(ticket_id, AssignIn): 같은 부서 다른 담당자로 넘기기. agents(dept): 재배정 후보 목록.
-#   명단(roster)이 비면 배정하지 않는다. 부서 = 이관 부서(escalated_to) 또는 assigned_dept.
+# - 담당자 (CSA-53, services/assignment.py): 그래프를 돌린 뒤마다 아직 담당자가 없으면 앞단
+#   글로벌 C/S 센터(assignment.OWNER_DEPT) 상담원을 자동 배정한다. 문의 부서·이관과는 따로다.
+#   assign(ticket_id, AssignIn): 다른 앞단 상담원으로 넘기기. agents(dept): 재배정 후보 목록.
+#   명단(roster)이 비면 배정하지 않는다.
 #
 # 저장소: 그래프 상태는 체크포인터(PostgresSaver, DB 없으면 메모리), 조회·집계용 행은
 #   services/records.py (SqlRecords: tickets·drafts·reviews·resolution_cases, 없으면 MemoryRecords).
@@ -94,34 +94,28 @@ class TicketService:
         self._auto_assign(ticket_id, values)
 
     def _auto_assign(self, ticket_id: str, values: dict) -> None:
-        """부서가 정해졌는데 그 부서 담당자가 없으면 배정한다. 이관으로 부서가 바뀌면 다시."""
-        dept = ticket_dept(values)
-        if not self.roster or not dept or values.get("status") in CLOSED:
+        """앞단 상담원이 아직 없으면 배정한다. 부서가 바뀌어도(이관) 담당자는 그대로다."""
+        owner_dept = assignment.OWNER_DEPT
+        if not self.roster or values.get("status") in CLOSED:
             return
         current = self.records.assignee_of(ticket_id)
-        if any(a.agent_id == current and a.dept == dept and a.active for a in self.roster):
+        if any(a.agent_id == current and a.dept == owner_dept and a.active for a in self.roster):
             return
-        picked = assignment.assign(dept, self.records.open_counts(exclude=CLOSED), self.roster)
-        if picked == current:
-            return
-        if current is None:
-            reason = "자동 배정"
-        elif picked is None:
-            reason = f"{dept} 로 넘어감 — 받을 담당자 없음 (부서 큐)"
-        else:
-            reason = f"{dept} 로 넘어가 자동 재배정"
+        picked = assignment.assign(
+            owner_dept, self.records.open_counts(exclude=CLOSED), self.roster
+        )
+        if picked is None or picked == current:
+            return  # 모두 찼으면 담당자 없이 둔다 (앞단 큐)
+        reason = "자동 배정" if current is None else "담당자 비활성 — 자동 재배정"
         self.records.set_assignee(ticket_id, picked, reason)
 
     def assign(self, ticket_id: str, change: AssignIn) -> TicketOut:
-        """같은 부서 다른 담당자로 넘긴다. 다른 부서·없는 담당자·닫힌 문의는 InvalidAction."""
+        """다른 앞단 상담원으로 넘긴다. 앞단이 아닌 담당자·없는 담당자·닫힌 문의는 InvalidAction."""
         values = self._state(ticket_id).values
         if values.get("status") in CLOSED:
             raise InvalidAction(f"{ticket_id} 는 닫힌 문의라 담당자를 바꿀 수 없다")
-        dept = ticket_dept(values)
-        if not dept:
-            raise InvalidAction(f"{ticket_id} 는 부서가 정해지지 않았다 (유형·부서를 먼저 정한다)")
         try:
-            assignment.reassign(dept, change.assignee, self.roster)
+            assignment.reassign(assignment.OWNER_DEPT, change.assignee, self.roster)
         except ValueError as e:
             raise InvalidAction(str(e)) from e
         if self.records.assignee_of(ticket_id) != change.assignee:
@@ -313,6 +307,11 @@ class TicketService:
             checks=v.get("checks", []),
             evidence=v.get("evidence", []),
         )
+
+    def answered(self) -> list[str]:
+        """답변을 보냈고 아직 해결 확정 전(APPROVED)인 문의, 접수 순 (관리자 화면 완료 처리용)."""
+        others = frozenset(s for s in TicketStatus if s != TicketStatus.APPROVED)
+        return self.records.ticket_ids(exclude=others)
 
     def work_list(
         self,

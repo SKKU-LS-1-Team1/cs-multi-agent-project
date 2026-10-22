@@ -1,7 +1,8 @@
 ﻿agent_id,name,dept_code,active,max_open
-AG-GCS_L1-01,이수진,GCS_L1,Y,15
-AG-GCS_L1-02,Daniel Weber,GCS_L1,Y,15
-AG-GCS_L1-03,Nguyen Thi Lan,GCS_L1,Y,15
+AG-GCS_L1-01,Doyeon Kim,GCS_L1,Y,15
+AG-GCS_L1-02,Minji Park,GCS_L1,Y,15
+AG-GCS_L1-03,Jun Lee,GCS_L1,Y,15
+AG-GCS_L1-04,Hana Choi,GCS_L1,Y,15
 AG-TS_LV-01,김민준,TS_LV,Y,10
 AG-TS_LV-02,박서연,TS_LV,Y,10
 AG-TS_LV-03,정우진,TS_LV,Y,10
