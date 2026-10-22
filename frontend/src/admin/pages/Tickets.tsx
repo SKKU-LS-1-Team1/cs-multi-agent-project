@@ -1,18 +1,22 @@
-// 티켓 관리: 밑줄 탭(범위) + 검색 + 그룹별 한 줄 목록. 세부 필터와 여러 건 선택은 눌러야 보인다.
+// 문의 관리: 밑줄 탭(범위) + 검색 + 그룹별 한 줄 목록. 세부 필터와 여러 건 선택은 눌러야 보인다.
+// 맨 오른쪽 "완료 문의" 탭에서는 처리 결과를 기록해 완료한 문의를 본다.
 import { useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { Checkbox } from "@admin/components/ui/checkbox";
 import { Input } from "@admin/components/ui/input";
 import { NativeSelect, PageHeader, TicketRow, UnderlineTabs, useGo } from "@admin/components/admin/common";
+import { CompletedTickets } from "@admin/pages/Knowledge";
 import { bulkAssign } from "@admin/lib/actions";
-import { departmentNames, departmentRisk, people, scopeTickets, ticketDepartment } from "@admin/lib/logic";
+import { canAssign, completedTickets, departmentRisk, people, scopeTickets } from "@admin/lib/logic";
 import { openModal, setUi, tickets, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
 
-const SCOPES = ["내 담당", "미배정", "전체", "SLA 위험"] as const;
-const scoped = (scope: string) => scopeTickets(scope).filter((t) => (!ui.listDepartment || ticketDepartment(t) === ui.listDepartment) && (!ui.listOwner || t.owner === ui.listOwner));
+const SCOPES = ["내 담당", "전체"] as const;
+const DONE_TAB = "완료 문의";
+const Count = ({ label, n }: { label: string; n: number }) => <>{label}<span className="ml-1.5 text-sm font-normal tabular-nums text-muted-foreground">{n}</span></>;
+const scoped = (scope: string) => scopeTickets(scope).filter((t) => (!ui.listOwner || t.owner === ui.listOwner));
 function filtered() {
   const q = ui.query.toLowerCase();
   return scoped(ui.filter).filter(
@@ -45,9 +49,10 @@ export default function Tickets() {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkOwner, setBulkOwner] = useState(people[0].name);
 
-  const rows = filtered();
+  const doneTab = ui.filter === DONE_TAB;
+  const rows = doneTab ? [] : filtered();
   const picked = [...sel].filter((id) => rows.some((t) => t.id === id));
-  const activeFilters = [ui.status, ui.priority, ui.product, ui.listDepartment].filter(Boolean).length;
+  const activeFilters = [ui.status, ui.priority, ui.product].filter(Boolean).length;
   const toggle = (id: string, on: boolean) => setSel((s) => { const n = new Set(s); on ? n.add(id) : n.delete(id); return n; });
   const opt = (first: string, values: string[]) => [<option key="" value="">{first}</option>, ...values.map((v) => <option key={v}>{v}</option>)];
   const exitSelect = () => { setSelectMode(false); setSel(new Set()); };
@@ -55,17 +60,21 @@ export default function Tickets() {
 
   return (
     <>
-      <PageHeader title="티켓 관리" actions={<Button size="lg" onClick={() => openModal("new-ticket")}>+ 새 티켓 등록</Button>}>
-        <UnderlineTabs tabs={SCOPES.map((v) => [v, `${v}  ${scoped(v).length}`] as const)} value={ui.filter as (typeof SCOPES)[number]} onChange={(v) => { exitSelect(); setUi({ filter: v }); }} />
+      <PageHeader title="문의 관리" actions={<Button size="lg" onClick={() => openModal("new-ticket")}>+ 새 문의 등록</Button>}>
+        <UnderlineTabs
+          tabs={[...SCOPES.map((v) => [v, <Count key={v} label={v} n={scoped(v).filter((t) => v !== "내 담당" || t.stage !== 5).length} />] as const), [DONE_TAB, <Count key={DONE_TAB} label={DONE_TAB} n={completedTickets().length} />] as const]}
+          value={ui.filter as string}
+          onChange={(v) => { exitSelect(); setUi(v === DONE_TAB ? { filter: v, kquery: "" } : { filter: v }); }} />
       </PageHeader>
+      {doneTab ? <CompletedTickets /> : <>
 
       <div className="flex flex-wrap items-center gap-2 px-10 pb-4">
-        <Input className="h-10 w-72 rounded-full bg-card px-4 shadow-card" aria-label="티켓 검색" placeholder="번호·고객·제품 검색" value={ui.query} onChange={(e) => setUi({ query: e.target.value })} />
+        <Input className="h-10 w-72 rounded-full bg-card px-4 shadow-card" aria-label="문의 검색" placeholder="번호·고객·제품 검색" value={ui.query} onChange={(e) => setUi({ query: e.target.value })} />
         <Button variant={showFilters || activeFilters ? "secondary" : "ghost"} aria-expanded={showFilters} onClick={() => setShowFilters((v) => !v)}>
           <SlidersHorizontal />필터{activeFilters > 0 && <span className="tabular-nums text-info"> {activeFilters}</span>}
         </Button>
         {ui.listOwner && <Button variant="secondary" onClick={() => setUi({ listOwner: "" })}>{ui.listOwner} ×</Button>}
-        <Button className="ml-auto" variant={selectMode ? "secondary" : "ghost"} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}>{selectMode ? "선택 끝내기" : "여러 건 선택"}</Button>
+        {canAssign && <Button className="ml-auto" variant={selectMode ? "secondary" : "ghost"} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}>{selectMode ? "선택 끝내기" : "여러 건 선택"}</Button>}
       </div>
 
       {showFilters && (
@@ -73,15 +82,14 @@ export default function Tickets() {
           <NativeSelect className="rounded-full pl-4" aria-label="전체 상태" value={ui.status} onChange={(e) => setUi({ status: e.target.value })}>{opt("전체 상태", [...new Set(tickets.map((t) => t.status))])}</NativeSelect>
           <NativeSelect className="rounded-full pl-4" aria-label="우선순위" value={ui.priority} onChange={(e) => setUi({ priority: e.target.value })}>{opt("우선순위", ["P2", "P3", "P4"])}</NativeSelect>
           <NativeSelect className="rounded-full pl-4" aria-label="전체 제품" value={ui.product} onChange={(e) => setUi({ product: e.target.value })}>{opt("전체 제품", [...new Set(tickets.map((t) => t.product))])}</NativeSelect>
-          <NativeSelect className="rounded-full pl-4" aria-label="전체 부서" value={ui.listDepartment} onChange={(e) => setUi({ listDepartment: e.target.value })}>{opt("전체 부서", departmentNames())}</NativeSelect>
-          {activeFilters > 0 && <Button size="sm" variant="ghost" onClick={() => setUi({ status: "", priority: "", product: "", listDepartment: "" })}>초기화</Button>}
+          {activeFilters > 0 && <Button size="sm" variant="ghost" onClick={() => setUi({ status: "", priority: "", product: "" })}>초기화</Button>}
         </div>
       )}
 
       {selectMode && (
         <div role="region" aria-label="일괄 작업" className="mx-10 mb-4 flex items-center gap-3 rounded-2xl bg-card px-5 py-3 text-sm shadow-card">
           <strong>{picked.length}건 선택</strong>
-          <span className="text-muted-foreground">선택한 티켓을</span>
+          <span className="text-muted-foreground">선택한 문의를</span>
           <NativeSelect className="rounded-full pl-4" aria-label="일괄 배정 담당자" value={bulkOwner} onChange={(e) => setBulkOwner(e.target.value)}>{people.map((p) => <option key={p.name}>{p.name}</option>)}</NativeSelect>
           <Button size="sm" disabled={!picked.length} onClick={() => { bulkAssign(picked, bulkOwner); exitSelect(); }}>에게 배정</Button>
         </div>
@@ -90,11 +98,11 @@ export default function Tickets() {
       <div className="grid gap-6 px-10 pb-12">
         {rows.length === 0 ? (
           <div className="grid justify-items-center gap-3 rounded-2xl bg-card px-6 py-16 text-center shadow-card">
-            <strong className="font-medium">조건에 맞는 티켓이 없습니다.</strong>
-            <p className="max-w-sm text-sm text-muted-foreground">{hasFilter ? "걸어 둔 검색·필터를 풀면 더 많은 티켓이 보입니다." : "이 범위에는 처리할 티켓이 없습니다. 전체 범위를 보거나 새 티켓을 등록하세요."}</p>
+            <strong className="font-medium">조건에 맞는 문의가 없습니다.</strong>
+            <p className="max-w-sm text-sm text-muted-foreground">{hasFilter ? "걸어 둔 검색·필터를 풀면 더 많은 문의가 보입니다." : "이 범위에는 처리할 문의가 없습니다. 전체 범위를 보거나 새 문의를 등록하세요."}</p>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setUi({ query: "", status: "", priority: "", product: "", listDepartment: "", listOwner: "", filter: "전체" })}>검색·필터 초기화</Button>
-              <Button onClick={() => openModal("new-ticket")}>새 티켓 등록</Button>
+              <Button variant="outline" onClick={() => setUi({ query: "", status: "", priority: "", product: "", listOwner: "", filter: "전체" })}>검색·필터 초기화</Button>
+              <Button onClick={() => openModal("new-ticket")}>새 문의 등록</Button>
             </div>
           </div>
         ) : groups(rows).map((g) => (
@@ -110,8 +118,9 @@ export default function Tickets() {
             </div>
           </section>
         ))}
-        {rows.length > 0 && <p className="px-1 text-xs text-muted-foreground">{rows.length}개 티켓{selectMode ? " · 행을 눌러 선택하세요" : ""}</p>}
+        {rows.length > 0 && <p className="px-1 text-xs text-muted-foreground">{rows.filter((t) => t.stage !== 5).length}건 진행 중{rows.some((t) => t.stage === 5) ? ` · 완료 ${rows.filter((t) => t.stage === 5).length}건` : ""}{selectMode ? " · 행을 눌러 선택하세요" : ""}</p>}
       </div>
+      </>}
     </>
   );
 }
