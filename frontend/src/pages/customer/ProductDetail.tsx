@@ -3,6 +3,8 @@
 // 챗봇의 화면 이동 지시(tab · anchor)를 받아 해당 탭을 열고 anchor 항목을 강조한다:
 //   faults[].error_code · info.specs[].attribute · install.sections[].section · docs[].doc_id ·
 //   firmware.latest · lead_time(info.ordering) · policy(faq.policies)
+// 챗봇은 값을 모르는 anchor 를 종류 이름(latest · spec_row · section · doc_id)으로 보낸다. latest 는 최신 릴리스를 강조하고,
+// 나머지 종류 이름은 강조할 항목이 없어 탭만 연다.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type ProductDetail as Detail } from "../../api/client";
 import DocViewer from "./DocViewer";
@@ -159,10 +161,10 @@ export default function ProductDetail({ code, tab, anchor, onTab }: Props) {
 
       {active === "firmware" && product.firmware && (
         <div className="pd-pane">
-          <Row hit={anchor === product.firmware.latest}><h3>🔄 최신 펌웨어 {product.firmware.latest}</h3></Row>
+          <Row hit={anchor === "latest" || anchor === product.firmware.latest}><h3>🔄 최신 펌웨어 {product.firmware.latest}</h3></Row>
           <p className="pd-hint">아래는 변경 이력이에요. 펌웨어 설치 파일은 제공되지 않아요.</p>
           {product.firmware.releases.map((r) => (
-            <Row key={r.version} hit={anchor === r.version}>
+            <Row key={r.version} hit={anchor === r.version || (anchor === "latest" && r.latest)}>
               <div className="pd-rel">
                 <div><b>v{r.version}</b>{r.latest && <em className="pd-new">최신</em>}<small>{r.release_date}</small></div>
                 <ul>{r.changes.map((c) => <li key={c}>{c}</li>)}</ul>
