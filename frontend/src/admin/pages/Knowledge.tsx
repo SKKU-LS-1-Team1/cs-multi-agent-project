@@ -1,4 +1,4 @@
-// 지식·해결 사례: 해결 사례(CSV 800건) / 기술문서. 완료 티켓(담당자가 기록한 처리 결과)은 티켓 관리의 탭에서 보여 준다.
+// 지식·해결 사례: 해결 사례(CSV 800건) / 기술문서. 완료 문의(담당자가 기록한 처리 결과)은 문의 관리의 탭에서 보여 준다.
 import { useRef } from "react";
 import { Button } from "@admin/components/ui/button";
 import { Card } from "@admin/components/ui/card";
@@ -93,7 +93,7 @@ function CaseDetail({ c }: { c: CaseRow }) {
   );
 }
 
-/** 티켓 관리의 "완료 티켓" 탭: 담당자가 처리 결과를 기록해 완료한 티켓. */
+/** 문의 관리의 "완료 문의" 탭: 담당자가 처리 결과를 기록해 완료한 문의. */
 export function CompletedTickets() {
   const go = useGo();
   const q = ui.kquery.toLowerCase(), all = completedTickets();
@@ -104,16 +104,16 @@ export function CompletedTickets() {
     return (
       <div className="px-10 pb-12">
         <div className="grid justify-items-center gap-3 rounded-2xl bg-card px-6 py-16 text-center shadow-card">
-          <strong className="font-medium">아직 완료 처리한 티켓이 없습니다.</strong>
-          <p className="max-w-md text-sm text-muted-foreground">티켓 상세에서 "처리 결과 기록 및 완료"를 하면 원인·조치·결과가 여기에 쌓여, 비슷한 문의의 근거로 쓸 수 있습니다.</p>
-          <Button variant="outline" onClick={() => go.list({ filter: "내 담당" })}>내 티켓 보기</Button>
+          <strong className="font-medium">아직 완료 처리한 문의가 없습니다.</strong>
+          <p className="max-w-md text-sm text-muted-foreground">문의 상세에서 "처리 결과 기록 및 완료"를 하면 원인·조치·결과가 여기에 쌓여, 비슷한 문의의 근거로 쓸 수 있습니다.</p>
+          <Button variant="outline" onClick={() => go.list({ filter: "내 담당" })}>내 문의 보기</Button>
         </div>
       </div>
     );
   return (
     <>
       <div className="flex items-center gap-3 px-10 pb-4">
-        <Input className="h-10 w-80 rounded-full bg-card px-4 shadow-card" aria-label="지식 검색" placeholder="티켓·제품·원인·조치 검색" value={ui.kquery} onChange={(e) => setUi({ kquery: e.target.value })} />
+        <Input className="h-10 w-80 rounded-full bg-card px-4 shadow-card" aria-label="지식 검색" placeholder="문의·제품·원인·조치 검색" value={ui.kquery} onChange={(e) => setUi({ kquery: e.target.value })} />
         {["전체 기록", "검증된 해결"].map((v) => <Button key={v} size="sm" variant={ui.completedFilter === v ? "default" : "outline"} onClick={() => setUi({ completedFilter: v })}>{v}</Button>)}
       </div>
       <div className="grid h-[calc(100dvh-16.5rem)] min-h-96 grid-cols-[340px_minmax(0,1fr)] gap-4 px-10 pb-6">
@@ -136,7 +136,7 @@ export function CompletedTickets() {
               <Facts rows={[["원인·판단", chosen.resolution.cause || "미기록"], ["수행 조치", chosen.resolution.action || "미기록"], ["결과", chosen.resolution.result || "미기록"], ["확인 근거", chosen.resolution.verification || "미기록"]]} /></Section>
             <Section title="참고 근거">{(chosen.resolution.references || []).length ? <ul className="list-disc pl-5 text-sm">{chosen.resolution.references.map((x: any) => <li key={x.id}>{x.label}</li>)}</ul> : <p className="text-sm text-muted-foreground">참고 근거 미기록</p>}</Section>
             <div className="rounded-lg bg-secondary px-4 py-3 text-sm text-muted-foreground">{chosen.superseded ? "후속 문의로 재검토 중인 이전 기록입니다. 현재 해결 근거로 사용하지 않습니다." : chosen.verified ? "담당자가 실제 조치 결과와 확인 근거를 기록한 사례입니다. 현재 문의의 조건과 비교해 활용하세요." : "응대 이력입니다. 실제 고장 해결이 확인된 사례와 구분합니다."}</div>
-            <Button className="w-fit" variant="outline" onClick={() => go.ticket(chosen.ticket.id)}>원본 티켓 열기</Button>
+            <Button className="w-fit" variant="outline" onClick={() => go.ticket(chosen.ticket.id)}>원본 문의 열기</Button>
           </Card>
         ) : <Card className="p-12 text-center text-muted-foreground">완료 처리 결과를 기록하면 여기에서 조회할 수 있습니다.</Card>}
         </div>

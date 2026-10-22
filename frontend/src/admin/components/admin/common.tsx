@@ -22,10 +22,10 @@ export const AiMark = ({ className }: { className?: string }) => (
   <svg aria-hidden viewBox="0 0 24 24" className={cn("size-[22px] shrink-0 text-info", className)} fill="currentColor"><path d="M12 1.5c.9 6.2 4.3 9.6 10.5 10.5-6.2.9-9.6 4.3-10.5 10.5C11.1 16.3 7.7 12.9 1.5 12 7.7 11.1 11.1 7.7 12 1.5Z" /></svg>
 );
 
-/** 티켓·요청·사례·문서 번호(CSV1-000050, REQ-XXXX, RC-0361, DS-TRF-OIL-1000)와 오류 코드(E.OC)는 IBM Plex Mono 로 써서 일반 글자와 구분한다. */
+/** 문의·요청·사례·문서 번호(CSV1-000050, REQ-XXXX, RC-0361, DS-TRF-OIL-1000)와 오류 코드(E.OC)는 IBM Plex Mono 로 써서 일반 글자와 구분한다. */
 export const Mono = ({ children, className }: { children: ReactNode; className?: string }) => <span className={cn("font-mono text-[0.92em] font-medium tracking-tight", className)}>{children}</span>;
 
-/** 글 속에 섞여 있는 티켓·요청·사례·문서 번호만 골라 Mono 로 바꾼다. */
+/** 글 속에 섞여 있는 문의·요청·사례·문서 번호만 골라 Mono 로 바꾼다. */
 export function Ids({ text }: { text: string }) {
   return <>{text.split(/(CSV1-\d{6}|REQ-[A-Z0-9]+|RC-\d{4}|(?:DS|TG)-[A-Za-z0-9-]+)/).map((p, i) => (i % 2 ? <Mono key={i}>{p}</Mono> : p))}</>;
 }
@@ -128,16 +128,16 @@ export function useGo() {
       setUi({ listOwner: "", ...patch });
       nav("/tickets");
     },
-    /** 완료 티켓은 티켓 관리의 탭으로, 해결 사례·기술문서는 지식·해결 사례 화면으로 이동. */
+    /** 완료 문의는 문의 관리의 탭으로, 해결 사례·기술문서는 지식·해결 사례 화면으로 이동. */
     knowledge(tab: string, patch: Record<string, any> = {}) {
-      if (tab === "완료 티켓") { setUi({ listOwner: "", filter: tab, ...patch }); nav("/tickets"); }
+      if (tab === "완료 문의") { setUi({ listOwner: "", filter: tab, ...patch }); nav("/tickets"); }
       else { setUi({ knowledgeTab: tab, ...patch }); nav("/knowledge"); }
     },
     to: nav,
   };
 }
 
-/** 티켓 상태를 원형 아이콘 하나로: 완료(초록) / 위험(빨강) / 미배정(노랑) / 진행(회색). */
+/** 문의 상태를 원형 아이콘 하나로: 완료(초록) / 위험(빨강) / 미배정(노랑) / 진행(회색). */
 export function StatusIcon({ t }: { t: Ticket }) {
   const [Icon, cls] = t.stage === 5 ? [Check, "bg-success/12 text-success"] : departmentRisk(t) ? [AlarmClock, "bg-destructive/12 text-destructive"] : !t.owner ? [UserRound, "bg-[#f2b705]/20 text-[#8a6500]"] : [Clock, "bg-muted text-muted-foreground"];
   return <span className={cn("grid size-10 shrink-0 place-items-center rounded-full", cls)}><Icon className="size-[18px]" aria-hidden /></span>;

@@ -1,4 +1,4 @@
-// ⌘K / Ctrl+K 빠른 이동: 티켓 번호·제목·고객·제품으로 티켓을 찾거나 화면으로 바로 이동한다.
+// ⌘K / Ctrl+K 빠른 이동: 문의 번호·제목·고객·제품으로 문의를 찾거나 화면으로 바로 이동한다.
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CornerDownLeft, Search } from "lucide-react";
@@ -12,7 +12,7 @@ const PAGES = [
   { label: "업무 현황 · C/S 업무", to: "/" },
   { label: "업무 현황 · 전문부서 협업", to: "/collab" },
   { label: "업무 현황 · 리소스 배정", to: "/resources" },
-  { label: "티켓 관리", to: "/tickets" },
+  { label: "문의 관리", to: "/tickets" },
   { label: "고객 관리", to: "/customers" },
   { label: "지식·해결 사례", to: "/knowledge" },
 ];
@@ -54,7 +54,7 @@ export default function CommandPalette({ open, onOpenChange }: { open: boolean; 
         <div className="flex items-center gap-2 border-b px-4">
           <Search className="size-4 text-muted-foreground" />
           <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={onKey} aria-label="빠른 이동 검색"
-            placeholder="티켓 번호·제목·고객·제품, 또는 화면 이름" className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+            placeholder="문의 번호·제목·고객·제품, 또는 화면 이름" className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
           <kbd className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">Esc</kbd>
         </div>
         <ul role="listbox" className="max-h-[50dvh] overflow-y-auto p-2">

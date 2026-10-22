@@ -7,8 +7,11 @@ import Customers from "./pages/Customers";
 import CustomerDetail from "./pages/CustomerDetail";
 import Knowledge from "./pages/Knowledge";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
+import { currentAccount } from "./lib/auth";
 
 export default function App() {
+  if (!currentAccount()) return <Login />; // 로그인하지 않았으면 로그인 화면만 보인다
   return (
     <Routes>
       <Route element={<AdminLayout />}>

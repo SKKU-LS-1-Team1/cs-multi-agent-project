@@ -1,4 +1,4 @@
-// 리소스 배정 보드: 열 = 담당자, 카드 = 미완료 티켓. 카드를 끌어 놓으면 배정이 바뀐다.
+// 리소스 배정 보드: 열 = 담당자, 카드 = 미완료 문의. 카드를 끌어 놓으면 배정이 바뀐다.
 // 모두 동등하게 응대할 수 있다고 보고 수용량(부하)만 본다. 가득 찬 담당자 열에는 놓을 수 없고, 사유를 안내한다.
 import { useState } from "react";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
@@ -7,7 +7,7 @@ import { ChevronDown, GripVertical } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { Progress } from "@admin/components/ui/progress";
 import { Mono, NativeSelect, PersonAvatar, PriorityTag, Tag, useGo } from "@admin/components/admin/common";
-import { checkAssign, departmentRisk, openTickets, ownedTickets, people, recommend, resource } from "@admin/lib/logic";
+import { checkAssign, departmentRisk, openTickets, ownedTickets, canAssign, people, recommend, resource, teamLead } from "@admin/lib/logic";
 import { moveTicket } from "@admin/lib/actions";
 import { openModal, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
@@ -21,7 +21,7 @@ export default function ResourceBoard() {
   const [active, setActive] = useState<Ticket | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const team = people;
+  const team = [...people].sort((a, b) => Number(b.name === teamLead) - Number(a.name === teamLead)); // 팀장이 맨 앞
   const unassigned = openTickets().filter((t) => !t.owner);
   const best = active ? recommend(active.id) : undefined;
 
@@ -47,7 +47,7 @@ export default function ResourceBoard() {
   return (
     <div className="grid gap-4 px-10 pb-12">
       <div className="flex items-center justify-between gap-3 text-sm">
-        <p className="text-muted-foreground">카드를 끌어서 담당자를 바꿉니다.</p>
+        <p className="text-muted-foreground">{canAssign ? "카드를 끌어서 담당자를 바꿉니다." : "현황만 볼 수 있습니다. 담당자 배정은 팀장만 할 수 있습니다."}</p>
       </div>
 
       <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onStart} onDragEnd={onEnd} onDragCancel={() => setActive(null)}>
@@ -79,7 +79,7 @@ function Column({ id, title, tickets, person, sub, dragging, verdict, recommende
         isOver && !verdict.ok && "ring-2 ring-destructive bg-destructive/5")}>
       <header className="grid gap-2">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="flex items-center gap-2 font-semibold">{person && <PersonAvatar name={person.name} size={28} />}{title}</h3>
+          <h3 className="flex items-center gap-2 font-semibold">{person && <PersonAvatar name={person.name} size={28} />}{title}{person?.rank && <span className={cn("text-xs", person.name === teamLead ? "font-medium text-[#003377]" : "font-normal text-muted-foreground")}>{person.rank}</span>}</h3>
           <div className="flex items-center gap-1.5">
             {dragging && recommended && <Tag tone="green">추천</Tag>}
             <span className="rounded bg-card px-1.5 py-0.5 text-xs tabular-nums ring-1 ring-border">{tickets.length}</span>
@@ -95,14 +95,14 @@ function Column({ id, title, tickets, person, sub, dragging, verdict, recommende
       </header>
       <div className="grid content-start gap-2">
         {tickets.map((t) => <DraggableCard key={t.id} t={t} go={go} />)}
-        {!tickets.length && <p className="rounded-xl bg-card/60 py-8 text-center text-xs text-muted-foreground">배정된 티켓 없음</p>}
+        {!tickets.length && <p className="rounded-xl bg-card/60 py-8 text-center text-xs text-muted-foreground">배정된 문의 없음</p>}
       </div>
     </section>
   );
 }
 
 function DraggableCard({ t, go }: { t: Ticket; go: ReturnType<typeof useGo> }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: t.id });
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: t.id, disabled: !canAssign });
   return (
     <div ref={setNodeRef} className={cn(isDragging && "opacity-30")}>
       <Card t={t} handle={{ ...attributes, ...listeners }} onOpen={() => go.ticket(t.id)} />
@@ -114,13 +114,13 @@ function Card({ t, handle, onOpen, overlay }: { t: Ticket; handle?: Record<strin
   return (
     <article className={cn("group/card grid gap-2 rounded-xl bg-card p-3.5 text-sm shadow-card", overlay && "w-[248px] shadow-lg ring-1 ring-ring", departmentRisk(t) && "ring-1 ring-destructive/40")}>
       <div className="flex items-start gap-1.5">
-        <button type="button" aria-label="끌어서 담당자 변경" className="mt-0.5 cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing" {...handle}><GripVertical className="size-4" /></button>
+        {canAssign && <button type="button" aria-label="끌어서 담당자 변경" className="mt-0.5 cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing" {...handle}><GripVertical className="size-4" /></button>}
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left font-semibold leading-snug hover:underline">{t.title}</button>
       </div>
       <div className="grid text-xs text-muted-foreground"><Mono>{t.id}</Mono><span>{t.product}</span></div>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5"><PriorityTag p={t.priority} /><span className={cn("text-xs tabular-nums", departmentRisk(t) ? "font-semibold text-destructive" : "text-muted-foreground")}>{t.sla}</span></div>
-        {!overlay && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs opacity-0 transition-opacity focus-visible:opacity-100 group-hover/card:opacity-100" onClick={() => openModal("assign", { id: t.id })}>배정<ChevronDown /></Button>}
+        {!overlay && canAssign && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs opacity-0 transition-opacity focus-visible:opacity-100 group-hover/card:opacity-100" onClick={() => openModal("assign", { id: t.id })}>배정<ChevronDown /></Button>}
       </div>
     </article>
   );

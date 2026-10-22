@@ -1,4 +1,4 @@
-// 단일 로컬 스토어. 레거시 app.js 처럼 티켓 객체를 직접 수정하고 commit() 으로 저장·재렌더링한다.
+// 단일 로컬 스토어. 레거시 app.js 처럼 문의 객체를 직접 수정하고 commit() 으로 저장·재렌더링한다.
 import { useSyncExternalStore } from "react";
 import type { ModalState, Ticket } from "./types";
 

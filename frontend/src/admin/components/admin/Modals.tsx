@@ -16,7 +16,7 @@ import {
   applyPendingAnswer, assignOwner, completeTicket, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply,
 } from "@admin/lib/actions";
 import {
-  candidates, customerLanguage, FEEDBACK_REASONS, informationAssessment, isEdited, needsLocalization, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, referralRows, resource, resourceReason, waitingReviews,
+  candidates, completionDraft, customerLanguage, FEEDBACK_REASONS, informationAssessment, isEdited, needsLocalization, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, referralRows, resource, resourceReason, waitingReviews,
 } from "@admin/lib/logic";
 import { closeModal, findTicket, openModal, ui, useStore } from "@admin/lib/store";
 import { addCareAction, KIND_LABEL, kindLabel, type CareKind } from "@admin/lib/care";
@@ -25,8 +25,8 @@ import { isLate, lateText, SEGMENT_KO, useCustomers, type Customer } from "@admi
 import type { Ticket } from "@admin/lib/types";
 
 const TITLES: Record<string, string> = {
-  "new-ticket": "새 티켓 등록", assign: "담당자 및 리소스 확인", send: "발송 확인", "answer-comparison": "답변 초안 갱신", "review-customer": "수신 자료 확인",
-  "expert-receive": "전문부서 회신 등록", completion: "티켓 완료 처리", "customer-reply": "고객 회신", "department-review": "전문부서 요청·회신", file: "첨부파일",
+  "new-ticket": "새 문의 등록", assign: "담당자 및 리소스 확인", send: "발송 확인", "answer-comparison": "답변 초안 갱신", "review-customer": "수신 자료 확인",
+  "expert-receive": "전문부서 회신 등록", completion: "문의 완료 처리", "customer-reply": "고객 회신", "department-review": "전문부서 요청·회신", file: "첨부파일",
   document: "기술문서 · iS7 고장 가이드", "knowledge-document": "근거 문서",
 };
 const WIDE = ["care", "new-ticket", "review-customer", "answer-comparison", "department-review", "knowledge-document", "completion"];
@@ -112,7 +112,7 @@ function Assign({ t }: { t: Ticket }) {
           return (
             <div key={p.name} className="grid gap-1 rounded-xl bg-muted p-4">
               <div className="flex items-center justify-between"><strong className="flex items-center gap-2.5"><PersonAvatar name={p.name} size={32} />{p.name}</strong><Tag tone={p === best ? "green" : ""}>{p === best ? "추천" : ok ? "배정 가능" : "수용량 가득"}</Tag></div>
-              <small className="text-muted-foreground">이 티켓 제외 미완료 {r.count}/{r.capacity}건 · 여유 {r.free}건</small>
+              <small className="text-muted-foreground">이 문의 제외 미완료 {r.count}/{r.capacity}건 · 여유 {r.free}건</small>
             </div>
           );
         })}
@@ -211,12 +211,15 @@ function ExpertReceive({ t, requestId }: { t: Ticket; requestId?: string }) {
 }
 
 function Completion({ t }: { t: Ticket }) {
-  const [v, setV] = useState({ outcome: t.customerOutcome === "resolved" || t.customerOutcome === "provided" ? t.customerOutcome : "", cause: t.resolution?.cause || "", action: t.resolution?.action || "", result: t.resolution?.result || "", verification: t.resolution?.verification || "", ...t.resolutionDraft });
+  const ai = completionDraft(t);
+  const previous = t.resolutionSuperseded ? undefined : t.resolution;
+  const [v, setV] = useState({ outcome: previous?.outcome || ai.outcome, cause: previous?.cause || ai.cause, action: previous?.action || ai.action, result: previous?.result || ai.result, verification: previous?.verification || ai.verification, ...t.resolutionDraft });
   const [busy, setBusy] = useState(false);
   const bind = (k: keyof typeof v) => ({ disabled: busy, value: v[k], onChange: (e: any) => setV({ ...v, [k]: e.target.value }) });
   return (
     <form onSubmit={async (e) => { e.preventDefault(); if (busy) return; setBusy(true); try { await completeTicket(t, v); } finally { setBusy(false); } }} className="grid gap-4">
       <div className="flex items-center justify-between rounded-xl bg-muted p-4"><strong><Mono>{t.id}</Mono> · {t.title}</strong><Tag tone="green">답변 발송 완료</Tag></div>
+      {ai.from.length > 0 && <p className="flex items-center gap-2 rounded-xl bg-[#003377]/[0.06] px-4 py-3 text-sm"><AiMark />이력({ai.from.join(" · ")})에 있는 기록으로 미리 채웠습니다. 최종 원인과 실제 수행 조치는 확인 후 입력해 주세요.</p>}
       <Field label="처리 결과 구분">
         <NativeSelect required {...bind("outcome")}><option value="">선택</option><option value="resolved">문제 해결 확인</option><option value="provided">정보 제공 완료</option><option value="unconfirmed">해결 여부 미확인 종결</option></NativeSelect>
       </Field>
@@ -224,7 +227,7 @@ function Completion({ t }: { t: Ticket }) {
       <Field label="수행 조치"><Textarea required placeholder="실제로 수행한 조치를 기록하세요." {...bind("action")} /></Field>
       <Field label="처리 결과"><Textarea required placeholder="해결 여부와 확인 근거를 기록하세요." {...bind("result")} /></Field>
       <Field label="확인 근거"><Input required placeholder="예: 전문부서 회신, 고객 회신, 현장 확인 기록" {...bind("verification")} /></Field>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" required className="size-4 accent-[var(--primary)]" />처리 결과를 확인했으며 티켓을 완료합니다.</label>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" required className="size-4 accent-[var(--primary)]" />처리 결과를 확인했으며 문의를 완료합니다.</label>
       <Footer><Close label="취소" /><Button type="submit" disabled={busy}>{busy ? "완료 처리 중…" : "결과 저장 및 완료"}</Button></Footer>
     </form>
   );
@@ -247,7 +250,7 @@ function CareModal({ customerId, kind }: { customerId: string; kind: CareKind })
   const c = useCustomers()?.find((x) => x.id === customerId);
   return c ? <CareForm c={c} kind={kind} /> : null;
 }
-/** 티켓마다 상태가 다르므로 안내 문구도 티켓의 상태에 맞춰 한 줄씩 쓴다. */
+/** 문의마다 상태가 다르므로 안내 문구도 문의의 상태에 맞춰 한 줄씩 쓴다. */
 const STATUS_EN: Record<string, string> = { IN_PROGRESS: "being handled by our support team", ESCALATED: "under review by our specialist team", NEW: "received and queued for handling" };
 const careDraft = (c: Customer, picked: Customer["urgent"]) => {
   const list = picked.length ? `\n\n${picked.map((u) => `- ${u[1]} (${u[0]}): ${STATUS_EN[u[5]] || "being handled by our team"}`).join("\n")}` : "";
@@ -255,15 +258,15 @@ const careDraft = (c: Customer, picked: Customer["urgent"]) => {
 };
 function CareForm({ c }: { c: Customer; kind: CareKind }) {
   const [text, setText] = useState(""), [busy, setBusy] = useState(false);
-  const [sel, setSel] = useState<string[]>(c.urgent.map((u) => u[0])); // 안내할 티켓(기본: 지연·임박 전부)
+  const [sel, setSel] = useState<string[]>(c.urgent.map((u) => u[0])); // 안내할 문의(기본: 지연·임박 전부)
   const picked = c.urgent.filter((u) => sel.includes(u[0]));
   // BACKEND: 고객 대응 AI 초안 (진행 상황 안내)
   // 필요(제안): POST /customers/{id}/care-draft  { kind: "notice", ticket_ids?: string[], note?: string, language }
-  //            → { draft_en, sources[] }   sources = 초안에 쓴 티켓·상태·전문부서 회신 등 근거 목록
-  // 입력: ticket_ids = 화면에서 담당자가 체크한 티켓(기본은 지연·임박 전부), note = 담당자가 아는 사유·예상 시점(선택, 지금 화면은 받지 않는다).
-  //       진행 상황은 티켓마다 다르므로 초안은 선택한 티켓 한 줄씩 그 티켓의 실제 상태·최근 처리 내용으로 써야 한다.
+  //            → { draft_en, sources[] }   sources = 초안에 쓴 문의·상태·전문부서 회신 등 근거 목록
+  // 입력: ticket_ids = 화면에서 담당자가 체크한 문의(기본은 지연·임박 전부), note = 담당자가 아는 사유·예상 시점(선택, 지금 화면은 받지 않는다).
+  //       진행 상황은 문의마다 다르므로 초안은 선택한 문의 한 줄씩 그 문의의 실제 상태·최근 처리 내용으로 써야 한다.
   // 규칙: 확인되지 않은 사유·일정·약속은 지어내지 않는다(아래 문구 틀도 시한을 약속하지 않는다). 사람이 검토·수정한 뒤 발송한다.
-  // 지금: careDraft() 문구 틀에 고객 이름과 선택한 티켓(번호·제목·티켓 상태별 한 줄)을 채우는 시뮬레이션(버튼을 누르면 약 1초 뒤 채워진다).
+  // 지금: careDraft() 문구 틀에 고객 이름과 선택한 문의(번호·제목·문의 상태별 한 줄)을 채우는 시뮬레이션(버튼을 누르면 약 1초 뒤 채워진다).
   const write = () => { setBusy(true); setTimeout(() => { setText(careDraft(c, picked)); setBusy(false); }, 900); };
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -276,7 +279,7 @@ function CareForm({ c }: { c: Customer; kind: CareKind }) {
       <p className="text-[15px] text-muted-foreground"><b className="font-semibold text-foreground">{c.name}</b> · {c.tier} · {SEGMENT_KO[c.seg] || c.seg}</p>
       {c.urgent.length > 0 && (
         <fieldset className="grid gap-1.5">
-          <legend className="mb-1 text-sm text-muted-foreground">안내할 티켓 <span className="tabular-nums">{picked.length}/{c.urgent.length}</span></legend>
+          <legend className="mb-1 text-sm text-muted-foreground">안내할 문의 <span className="tabular-nums">{picked.length}/{c.urgent.length}</span></legend>
           {c.urgent.map((u) => (
             <label key={u[0]} className="flex cursor-pointer items-center gap-3 rounded-xl bg-muted/60 px-4 py-2.5 text-[15px]">
               <Checkbox disabled={busy} checked={sel.includes(u[0])} onCheckedChange={(v) => { setSel((s) => (v === true ? [...s, u[0]] : s.filter((x) => x !== u[0]))); setText(""); }} />
@@ -357,7 +360,7 @@ function DepartmentReview({ props }: { props: Record<string, any> }) {
 
       <Footer>
         <Close />
-        <Button variant="outline" onClick={() => { closeModal(); nav("/tickets/" + r.ticket.id); }}>원본 티켓 열기</Button>
+        <Button variant="outline" onClick={() => { closeModal(); nav("/tickets/" + r.ticket.id); }}>원본 문의 열기</Button>
         {canReply && <Button onClick={() => openModal("expert-receive", { id: r.ticket.id, requestId: r.requestId })}>회신 등록</Button>}
       </Footer>
     </div>
@@ -367,7 +370,7 @@ function DepartmentReview({ props }: { props: Record<string, any> }) {
 function FileInfo({ file, t }: { file: string; t?: Ticket }) {
   return (
     <>
-      <p className="text-sm text-muted-foreground"><b className="text-foreground">{file}</b><br />{t?.files?.includes(file) ? "등록된 파일명입니다. 로컬 화면에서 파일 원본은 저장하지 않습니다." : "이 티켓에 연결된 첨부파일 항목입니다. 원본 파일은 아직 연결되지 않았습니다."}</p>
+      <p className="text-sm text-muted-foreground"><b className="text-foreground">{file}</b><br />{t?.files?.includes(file) ? "등록된 파일명입니다. 로컬 화면에서 파일 원본은 저장하지 않습니다." : "이 문의에 연결된 첨부파일 항목입니다. 원본 파일은 아직 연결되지 않았습니다."}</p>
       <Footer><Close /></Footer>
     </>
   );

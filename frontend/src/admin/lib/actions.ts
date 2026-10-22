@@ -1,7 +1,7 @@
 // 레거시 click/submit 핸들러의 상태 변경을 함수로 분리했다. 모두 로컬 기록이며 외부 전송은 하지 않는다.
 import { toast } from "sonner";
 import {
-  answerContext, buildExpertRequest, checkAssign, composeAnswer, composerKey, composerLanguage, contextIsNew, contextKey, customerLanguage, FRONTLINE, isEdited, needsLocalization, runChecks, translateText,
+  answerContext, buildExpertRequest, canAssign, checkAssign, composeAnswer, composerKey, composerLanguage, contextIsNew, contextKey, customerLanguage, FRONTLINE, isEdited, needsLocalization, runChecks, translateText,
   informationAssessment, people, recommend, record, requiredInformation, resourceReason, signedIn, storeComposer, ticketProgress,
   waitingReviews,
 } from "./logic";
@@ -120,11 +120,11 @@ function applyInstruction(text: string, ask: string, refs: string[]) {
 
 // BACKEND: 초안 수정 요청(피드백 루프)
 // 필요: 검토 단계의 rewrite 동작 — 담당자의 수정 지시(feedback)를 받아 같은 근거로 초안을 다시 만든다(v+1). 지시 기록은 이력에 남긴다.
-// 지금: applyInstruction() 이 키워드 몇 개(짧게·정중하게·친절하게·사과·근거 명시·단계별·원인 미확정)만 규칙으로 처리한다. 백엔드 티켓에서는 아직 막혀 있다.
+// 지금: applyInstruction() 이 키워드 몇 개(짧게·정중하게·친절하게·사과·근거 명시·단계별·원인 미확정)만 규칙으로 처리한다. 백엔드 문의에서는 아직 막혀 있다.
 export function regenerateDraft(t: Ticket, instruction: string) {
   const ask = instruction.trim();
   if (!t.draft || !ask || t.regenerating) return;
-  if (isApiTicket(t)) { toast("백엔드 티켓의 수정 지시 재생성은 아직 연결되지 않았습니다."); return; }
+  if (isApiTicket(t)) { toast("백엔드 문의의 수정 지시 재생성은 아직 연결되지 않았습니다."); return; }
   const refs = (t.draftContext?.references || []).map((r: any) => r.label);
   const out = applyInstruction(t.draft, ask, refs);
   if (!out.applied.length) { toast("지금은 짧게·정중하게·사과·근거·단계별·원인 미확정 지시만 반영합니다. 자유로운 문장은 백엔드가 연결되면 반영됩니다."); return; }
@@ -189,7 +189,7 @@ export function createTicket(d: Record<string, any>, files: string[]): string {
   };
   tickets.unshift(n);
   record(n, "registered", `${n.channel} 문의 등록${n.owner ? " · " + n.owner + " 자동 배정" : ""}`, { assignmentReason: resourceReason(p, n.id) });
-  closeModal(); commit(); toast("티켓을 등록했습니다.");
+  closeModal(); commit(); toast("문의를 등록했습니다.");
   return id;
 }
 
@@ -223,6 +223,7 @@ export function submitExpertReply(target: Ticket, selected: string, body: string
   closeModal(); commit(); toast("전문부서 회신을 등록했습니다.");
 }
 export function assignOwner(t: Ticket, owner: string) {
+  if (!canAssign) { toast.error("배정은 팀장만 할 수 있습니다."); return; } // BACKEND: 서버도 팀장 역할만 허용해야 한다
   const before = t.owner;
   t.owner = owner;
   t.department = FRONTLINE;
@@ -250,7 +251,7 @@ export async function completeTicket(t: Ticket, d: Record<string, string>) {
       ...input, references, confirmedBy: signedIn, confirmedAt: new Date().toISOString(),
     };
     delete t.resolutionDraft;
-    record(t, "completed", "담당자 확인 · 처리 결과 저장 및 티켓 완료", { resolution: t.resolution, actor: signedIn });
+    record(t, "completed", "담당자 확인 · 처리 결과 저장 및 문의 완료", { resolution: t.resolution, actor: signedIn });
     closeModal(); commit(); toast("처리 결과를 저장했습니다.");
   } finally {
     completing.delete(t);
@@ -264,6 +265,7 @@ export function openCompletion(t: Ticket) {
 
 /** 리소스 보드에서 담당자를 바꾼다. 검증은 호출하는 쪽에서 checkAssign 으로 한다. */
 export function moveTicket(t: Ticket, owner: string, opts: { silent?: boolean } = {}) {
+  if (!canAssign) { toast.error("배정은 팀장만 할 수 있습니다."); return; }
   if (t.owner === owner) return;
   const before = t.owner, beforeDept = t.department, beforeStatus = t.status;
   t.owner = owner;
@@ -284,8 +286,9 @@ export function moveTicket(t: Ticket, owner: string, opts: { silent?: boolean } 
   });
 }
 
-/** 목록에서 고른 여러 티켓을 한 담당자에게 배정한다. 수용량이 가득 찬 경우에는 건너뛰고 사유를 알린다. */
+/** 목록에서 고른 여러 문의를 한 담당자에게 배정한다. 수용량이 가득 찬 경우에는 건너뛰고 사유를 알린다. */
 export function bulkAssign(ids: string[], owner: string) {
+  if (!canAssign) { toast.error("배정은 팀장만 할 수 있습니다."); return; }
   const p = people.find((x) => x.name === owner);
   if (!p) return;
   const failed: string[] = [];
@@ -302,7 +305,7 @@ export function bulkAssign(ids: string[], owner: string) {
   else toast(`${done}건을 ${owner}에게 배정했습니다.`);
 }
 
-/** 티켓 상세를 열면 고객 회신을 읽은 것으로 표시한다. */
+/** 문의 상세를 열면 고객 회신을 읽은 것으로 표시한다. */
 export function markSeen(t: Ticket) {
   t.seenAt = new Date().toISOString();
   commit();

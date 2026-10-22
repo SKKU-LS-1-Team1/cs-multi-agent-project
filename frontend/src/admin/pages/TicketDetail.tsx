@@ -1,4 +1,4 @@
-// 티켓 상세: 대기열 · 티켓 요약 · 처리 상황 · 문의·답변/처리 이력/고객·제품 정보 · AI Copilot.
+// 문의 상세: 대기열 · 문의 요약 · 처리 상황 · 문의·답변/처리 이력/고객·제품 정보 · AI Copilot.
 import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Paperclip, Send, User, type LucideIcon } from "lucide-react";
@@ -10,7 +10,7 @@ import { Textarea } from "@admin/components/ui/textarea";
 import { AiMark, Facts, Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, StatusTag, Tag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import {
   answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, feedbackLabel, informationAssessment, informationSummary, inquirySummary, isEdited,
-  latestCustomerReply, needsLocalization, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
+  canAssign, latestCustomerReply, needsLocalization, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
   canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
@@ -21,7 +21,7 @@ import type { Ticket } from "@admin/lib/types";
 
 type Choice = "answer" | "expert" | "request";
 const SAMPLE = "CSV1-000050";
-/** 샘플 티켓이 접수된 시각. 대화 머리와 처리 이력이 같은 값을 쓴다. */
+/** 샘플 문의가 접수된 시각. 대화 머리와 처리 이력이 같은 값을 쓴다. */
 const INQUIRY_AT = "10.06 · 17:43";
 type Next = { label: string; run?: () => void; waiting?: boolean };
 /** 지금 담당자가 눌러야 할 단 하나의 행동. Copilot 의 '현재 판단'과 같은 규칙을 따른다. */
@@ -29,7 +29,7 @@ function nextAction(t: Ticket): Next | null {
   if (t.stage === 5) return null;
   if (t.sent) return { label: "처리 결과 기록 및 완료", run: () => openCompletion(t) };
   if (t.activeComposer === "expert") return null; // 요청서를 쓰는 중에는 판단 카드가 따로 안내한다
-  if (!t.owner) return { label: "담당자 배정", run: () => openModal("assign", { id: t.id }) };
+  if (!t.owner) return canAssign ? { label: "담당자 배정", run: () => openModal("assign", { id: t.id }) } : { label: "팀장이 배정합니다", waiting: true };
   const reply = latestCustomerReply(t), c = answerContext(t);
   if (t.customerRequestStatus === "waiting") return { label: "고객 회신 대기 중", waiting: true };
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) };
@@ -86,7 +86,7 @@ export default function TicketDetail() {
   if (!t) return <Navigate to="/tickets" replace />;
   return (
     <div data-ticket-id={t.id} className="grid grid-cols-1 items-start min-[1360px]:grid-cols-[minmax(0,1fr)_400px]">
-      <section aria-label="티켓 상세" key={t.id} className="grid min-w-0 content-start gap-8 px-12 pb-16">
+      <section aria-label="문의 상세" key={t.id} className="grid min-w-0 content-start gap-8 px-12 pb-16">
         {/* 제목·진행 단계·탭은 스크롤해도 맨 위에 고정된다 */}
         <div className="sticky top-0 z-20 -mx-12 grid gap-6 bg-background px-12 pb-1 pt-10">
           <Header t={t} />
@@ -110,10 +110,11 @@ function Header({ t }: { t: Ticket }) {
   return (
     <header className="grid gap-5">
       <div className="flex items-center gap-3 text-sm">
-        <button className="text-info hover:underline" onClick={() => { setUi({ filter: "전체" }); go.list({ filter: "전체" }); }}>‹ 티켓 목록</button>
+        <button className="text-info hover:underline" onClick={() => { setUi({ filter: "전체" }); go.list({ filter: "전체" }); }}>‹ 문의 목록</button>
         <span className="text-muted-foreground">/ <Mono>{t.id}</Mono> · {t.channel || "WEB FORM"}</span>
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" title={assignmentSummary(t).join(" · ")} onClick={() => openModal("assign", { id: t.id })}>{t.owner && <PersonAvatar name={t.owner} size={22} />}{t.owner || "담당자 배정"}<ChevronDown /></Button>
+          {canAssign ? <Button variant="outline" title={assignmentSummary(t).join(" · ")} onClick={() => openModal("assign", { id: t.id })}>{t.owner && <PersonAvatar name={t.owner} size={22} />}{t.owner || "담당자 배정"}<ChevronDown /></Button>
+            : <span title="담당자 배정은 팀장만 할 수 있습니다" className="inline-flex h-9 items-center gap-2 rounded-full bg-card px-4 text-sm shadow-card">{t.owner && <PersonAvatar name={t.owner} size={22} />}{t.owner || "미배정"}</span>}
         </div>
       </div>
       <h1 className="text-[30px] font-bold leading-tight tracking-tight">{t.id === SAMPLE ? "운전 직후 E.OC 트립 발생" : t.title}</h1>
@@ -241,7 +242,7 @@ function Completed({ t }: { t: Ticket }) {
       {!Object.values(r).some(Boolean) ? <p className="text-[15px] text-muted-foreground">완료할 때 입력된 처리 결과가 없습니다.</p> : <Facts rows={[["완료 구분", ({ resolved: "문제 해결 확인", provided: "정보 제공 완료", unconfirmed: "해결 여부 미확인" } as any)[r.outcome] || "미기록"], ["최종 원인", r.cause || "미기록"], ["수행 조치", r.action || "미기록"], ["처리 결과", r.result || "미기록"], ["확인 근거", r.verification || "미기록"], ["완료 담당자", r.confirmedBy || t.owner || "미기록"]]} />}
       <div className="flex gap-2">
         {latestCustomerReply(t) && <Button variant="outline" onClick={() => openModal("customer-reply", { id: t.id })}>고객 회신 보기</Button>}
-        <Button variant="ghost" onClick={() => go.knowledge("완료 티켓", { completedTicket: t.id, completedFilter: "전체 기록", kquery: "" })}>축적된 처리 기록</Button>
+        <Button variant="ghost" onClick={() => go.knowledge("완료 문의", { completedTicket: t.id, completedFilter: "전체 기록", kquery: "" })}>축적된 처리 기록</Button>
       </div>
     </Card>
   );
@@ -404,8 +405,8 @@ function Disclosure({ title, count, children, defaultOpen }: { title: ReactNode;
 }
 
 function judgment(t: Ticket) {
-  if (!t.owner && t.stage !== 5 && !t.sent) return { title: "담당자 미배정", task: "담당자를 배정한 뒤 처리를 시작하세요.", note: "", reason: "배정하면 담당자의 오늘 할 일에 올라갑니다.", missing: [] as string[] };
-  if (t.activeComposer === "expert" && t.stage !== 5 && !t.sent) return { title: "전문부서 요청서 작성 중", task: "대상 부서와 요청 내용을 확인하고 요청서를 보내세요.", note: "", reason: "보내면 이 티켓은 회신이 올 때까지 전문부서 회신 대기가 됩니다.", missing: [] as string[] };
+  if (!t.owner && t.stage !== 5 && !t.sent) return { title: "담당자 미배정", task: canAssign ? "담당자를 배정한 뒤 처리를 시작하세요." : "팀장이 담당자를 배정하면 처리를 시작할 수 있습니다.", note: "", reason: "배정하면 담당자의 오늘 할 일에 올라갑니다.", missing: [] as string[] };
+  if (t.activeComposer === "expert" && t.stage !== 5 && !t.sent) return { title: "전문부서 요청서 작성 중", task: "대상 부서와 요청 내용을 확인하고 요청서를 보내세요.", note: "", reason: "보내면 이 문의는 회신이 올 때까지 전문부서 회신 대기가 됩니다.", missing: [] as string[] };
   const reply0 = latestCustomerReply(t);
   // nextAction 과 같은 순서: 고객 회신을 기다리거나 확인할 일이 있으면 초안이 있어도 그 일이 먼저다.
   const customerFirst = t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting" || (t.customerRequestStatus === "received" && !!reply0 && requiredInformation(t).length > 0 && reply0.id !== t.reviewedReplyKey);
@@ -422,12 +423,12 @@ function judgment(t: Ticket) {
   const c = answerContext(t), missing = c.missingInfo.length, expertPending = waitingReviews(t).length || t.legacyReviewPending;
   let title: string, task: string, reason: string;
   const reply = reply0;
-  if (t.stage === 5) { const rec = Object.values(t.resolution || {}).some(Boolean); title = "처리 완료"; task = rec ? "최종 처리 결과가 기록되었습니다." : "티켓은 완료됐지만 처리 결과 기록은 비어 있습니다."; reason = "재문의는 기존 티켓에서 이어서 처리합니다."; }
+  if (t.stage === 5) { const rec = Object.values(t.resolution || {}).some(Boolean); title = "처리 완료"; task = rec ? "최종 처리 결과가 기록되었습니다." : "문의는 완료됐지만 처리 결과 기록은 비어 있습니다."; reason = "재문의는 기존 문의에서 이어서 처리합니다."; }
   else if (t.sent && t.customerOutcome === "resolved") { title = "고객 해결 확인 수신"; task = "회신과 최종 처리 결과를 확인하고 완료하세요."; reason = "해결 확인 근거는 고객 회신 이력에 남아 있습니다."; }
   else if (t.sent && t.customerOutcome === "provided") { title = "고객 정보 확인 완료"; task = "응대 결과를 기록하고 완료하세요."; reason = "정보 확인 회신과 기술적 해결 확인은 구분합니다."; }
   else if (t.sent) { title = "고객 답변 발송 완료"; task = "고객 회신이나 처리 결과를 확인하세요."; reason = "회신이 없으면 해결 여부는 미확인입니다."; }
   else if (t.customerOutcome === "needs-support") { title = "후속 문의 · 재검토 필요"; task = "이전 조치와 고객의 새 증상을 함께 확인하세요."; reason = "이전 완료 결과는 현재 해결 근거로 확정하지 않습니다."; }
-  else if (t.customerRequestStatus === "waiting") { title = "고객 회신 대기"; task = "고객이 요청 자료를 제출하기를 기다리고 있습니다."; reason = "회신이 들어오면 같은 티켓에서 내용을 확인합니다."; }
+  else if (t.customerRequestStatus === "waiting") { title = "고객 회신 대기"; task = "고객이 요청 자료를 제출하기를 기다리고 있습니다."; reason = "회신이 들어오면 같은 문의에서 내용을 확인합니다."; }
   else if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) { title = "고객 자료 수신 · 확인 필요"; task = "수신된 내용과 첨부자료를 확인하세요."; reason = "회신 수신만으로 필요한 자료가 충족된 것은 아닙니다."; }
   else if (missing) { title = t.customerRequestStatus === "received" ? "회신 수신 · 추가정보 미충족" : "추가정보 필요 · 원인 미확정"; task = t.customerRequestStatus === "received" ? "아직 충족되지 않은 자료만 추가로 요청하세요." : "고객에게 아래 자료를 요청하세요."; reason = "이 자료가 있어야 원인 후보를 좁히고 정확한 답변을 쓸 수 있습니다."; }
   else if (t.customerRequestStatus === "received" && reply && !expertPending) { title = "고객 회신 수신"; task = "회신 내용을 확인하고 고객 답변을 작성하세요."; reason = "회신 내용은 고객 소통에서 볼 수 있습니다."; }

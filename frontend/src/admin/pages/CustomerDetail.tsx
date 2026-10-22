@@ -1,4 +1,4 @@
-// 고객 상세: 왼쪽 = 지연·임박 티켓(안내 버튼) + 내부 메모, 오른쪽 = 활동(문의와 대응을 한 흐름으로). 중점 관리 직접 지정·해제.
+// 고객 상세: 왼쪽 = 지연·임박 문의(안내 버튼) + 내부 메모, 오른쪽 = 활동(문의와 대응을 한 흐름으로). 중점 관리 직접 지정·해제.
 import { useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
@@ -34,9 +34,9 @@ export default function CustomerDetail() {
   const c: Customer | undefined = rows.find((x) => x.id === customerId);
   if (!c) return <Navigate to="/customers" replace />;
   const rec = recordOf(c.id), status = careStatus(care[c.id]), f = focusOf(c, care[c.id]);
-  const linked = tickets.filter((t) => t.customerId === c.id); // 이 시스템에서 열 수 있는 티켓
+  const linked = tickets.filter((t) => t.customerId === c.id); // 이 시스템에서 열 수 있는 문의
 
-  // 활동: 문의(이 시스템의 티켓 + 학습 데이터의 최근 문의)와 대응(안내·종결)을 날짜 내림차순으로 한 흐름에 섞는다.
+  // 활동: 문의(이 시스템의 문의 + 학습 데이터의 최근 문의)와 대응(안내·종결)을 날짜 내림차순으로 한 흐름에 섞는다.
   const items: Item[] = [
     ...rec.actions.map((a): Item => ({ key: a.id, at: a.at, type: "대응", title: <Ids text={a.text} />, sub: <>{a.by}</> })),
     ...linked.map((t): Item => ({ key: t.id, at: INQUIRY_ISO, type: "문의", title: t.title, onOpen: () => go.ticket(t.id), sub: <><Mono>{t.id}</Mono> · {t.product}</>, tags: <><Tag tone={t.priority === "P1" ? "red" : t.priority === "P2" ? "amber" : ""}>{t.priority} {PRIORITY_KO[t.priority]}</Tag><span className={cn("text-sm", t.stage !== 5 && "font-medium")}>{t.stage === 5 ? "완료" : t.status}</span></> })),
@@ -62,7 +62,7 @@ export default function CustomerDetail() {
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-start gap-6">
         <div className="grid gap-6">
           {c.urgent.length > 0 && (
-            <Card title="지연·임박 티켓" aside={<ActionButton c={c} kind="notice" />}>
+            <Card title="지연·임박 문의" aside={<ActionButton c={c} kind="notice" />}>
               <ul className="-my-2 divide-y">
                 {c.urgent.map((u) => (
                   <li key={u[0]} className="flex items-center justify-between gap-4 py-3">

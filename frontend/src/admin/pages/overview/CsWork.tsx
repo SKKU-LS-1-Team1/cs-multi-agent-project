@@ -3,7 +3,7 @@ import { ArrowRight, CheckCheck, ChevronRight, FilePenLine, MessageSquareReply, 
 import { Button } from "@admin/components/ui/button";
 import { CustomizeMenu, Ring, useWidgets } from "@admin/components/admin/charts";
 import { Mono, PageHeader, PersonAvatar, SlaTag, Tag, useGo } from "@admin/components/admin/common";
-import { departmentRank, departmentRisk, openTickets, ownedTickets, people, referralRows, resource, signedIn, slaMinutes, stats, todayTasks } from "@admin/lib/logic";
+import { departmentRank, departmentRisk, openTickets, ownedTickets, people, referralRows, canAssign, FRONTLINE, resource, signedIn, teamLead, slaMinutes, stats, todayTasks } from "@admin/lib/logic";
 import { openModal, setUi, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 
@@ -21,13 +21,13 @@ const TASK_ICON: Record<string, [LucideIcon, string]> = {
   "처리 결과 기록하고 완료하기": [CheckCheck, "bg-success/10 text-success"],
   "고객 질의서 작성하기": [FilePenLine, "bg-info/10 text-info"],
   "전문부서 요청서 작성하기": [FilePenLine, "bg-info/10 text-info"],
-  "미배정 티켓 배정하기": [UserPlus, "bg-warning/20 text-warning-ink"],
+  "미배정 문의 배정하기": [UserPlus, "bg-warning/20 text-warning-ink"],
 };
 const TaskIcon = ({ label }: { label: string }) => { const [Icon, tone] = TASK_ICON[label] || [FilePenLine, "bg-muted text-foreground"]; return <span className={cn("grid size-10 place-items-center rounded-full", tone)}><Icon className="size-[18px]" aria-hidden /></span>; };
 
-const Card = ({ title, aside, children, className }: { title: string; aside?: React.ReactNode; children: React.ReactNode; className?: string }) => (
+const Card = ({ title, sub, aside, children, className }: { title: string; sub?: string; aside?: React.ReactNode; children: React.ReactNode; className?: string }) => (
   <section aria-label={title} className={cn("flex flex-col rounded-2xl bg-card p-6 shadow-card", className)}>
-    <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-medium">{title}</h2>{aside}</div>
+    <div className="mb-4 flex items-center justify-between gap-3"><h2 className="flex items-baseline gap-2 text-lg font-medium">{title}{sub && <small className="text-sm font-normal text-muted-foreground">{sub}</small>}</h2>{aside}</div>
     {children}
   </section>
 );
@@ -45,16 +45,16 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
     ["미배정", s.unassigned, s.unassigned ? "text-warning-ink" : "", () => go.to("/resources")],
     ["SLA 위험", s.risk, s.risk ? (tone === "destructive" ? "text-destructive" : "text-warning-ink") : "", () => list("전체")],
     ["답변 검토 대기", s.review, "", () => list("답변 준비")],
-    ["내 티켓", mine.length, "", () => list("내 담당")],
+    ["내 문의", mine.length, "", () => list("내 담당")],
   ];
   const row = "grid w-full grid-cols-[auto_minmax(0,1fr)_auto_16px] items-center gap-4 px-6 py-4 text-left transition-colors hover:bg-muted/70";
 
   return (
     <>
-      <PageHeader title="고객지원 업무 현황" actions={<><CustomizeMenu all={CS_WIDGETS} shown={w.shown} toggle={w.toggle} /><Button onClick={() => openModal("new-ticket")}><Plus aria-hidden />새 티켓 등록</Button></>}>{tabs}</PageHeader>
+      <PageHeader title="고객지원 업무 현황" actions={<><CustomizeMenu all={CS_WIDGETS} shown={w.shown} toggle={w.toggle} /><Button onClick={() => openModal("new-ticket")}><Plus aria-hidden />새 문의 등록</Button></>}>{tabs}</PageHeader>
       <div className="grid grid-cols-[minmax(0,1fr)_340px] items-stretch gap-5 px-10 pb-12">
         {w.shown("today") && (
-          <Card title="오늘 내가 할 일" aside={<button onClick={() => list("내 담당")} className="text-sm text-info hover:underline">내 티켓 전체 ›</button>} className="overflow-hidden p-0 [&>div:first-child]:px-6 [&>div:first-child]:pt-6">
+          <Card title="오늘 내가 할 일" aside={<button onClick={() => list("내 담당")} className="text-sm text-info hover:underline">내 문의 전체 ›</button>} className="overflow-hidden p-0 [&>div:first-child]:px-6 [&>div:first-child]:pt-6">
             <ul className="divide-y">
               {tasks.map(({ ticket: t, label }) => (
                 <li key={t.id}>
@@ -66,11 +66,11 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
                   </button>
                 </li>
               ))}
-              {s.unassigned > 0 && (
-                <li><button onClick={() => go.to("/resources")} className={row}><TaskIcon label="미배정 티켓 배정하기" /><span className="grid gap-0.5"><span className="font-medium">미배정 티켓 배정하기</span><span className="text-sm text-muted-foreground">담당자가 없는 티켓 {s.unassigned}건</span></span><Tag tone="amber">{s.unassigned}건</Tag><ChevronRight className="size-4 text-muted-foreground" aria-hidden /></button></li>
+              {s.unassigned > 0 && canAssign && (
+                <li><button onClick={() => go.to("/resources")} className={row}><TaskIcon label="미배정 문의 배정하기" /><span className="grid gap-0.5"><span className="font-medium">미배정 문의 배정하기</span><span className="text-sm text-muted-foreground">담당자가 없는 문의 {s.unassigned}건</span></span><Tag tone="amber">{s.unassigned}건</Tag><ChevronRight className="size-4 text-muted-foreground" aria-hidden /></button></li>
               )}
             </ul>
-            {!tasks.length && !s.unassigned && <p className="px-6 py-12 text-center text-sm text-muted-foreground">오늘 처리할 일이 없습니다. 고객이나 전문부서 회신을 기다리는 건은 여기에 나오지 않습니다.</p>}
+            {!tasks.length && !(s.unassigned > 0 && canAssign) && <p className="px-6 py-12 text-center text-sm text-muted-foreground">오늘 처리할 일이 없습니다. 고객이나 전문부서 회신을 기다리는 건은 여기에 나오지 않습니다.</p>}
           </Card>
         )}
         {w.shown("sla") && (
@@ -84,15 +84,15 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
           </Card>
         )}
         {w.shown("team") && (
-          <Card title="팀 현황" aside={<button onClick={() => go.to("/resources")} className="text-sm text-info hover:underline">배정하기 ›</button>}>
+          <Card title="팀 현황" sub={FRONTLINE} aside={<button onClick={() => go.to("/resources")} className="text-sm text-info hover:underline">{canAssign ? "배정하기 ›" : "자세히 ›"}</button>}>
             <ul className="grid grid-cols-2 gap-x-4 gap-y-1">
-              {people.map((p) => {
+              {[...people].sort((a, b) => Number(b.name === teamLead) - Number(a.name === teamLead)).map((p) => { // 팀장이 맨 앞
                 const r = resource(p), me = p.name === signedIn;
                 return (
                   <li key={p.name}>
                     <button onClick={() => go.list({ listOwner: p.name, filter: "전체", query: "", status: "", priority: "", product: "" })} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-muted">
                       <PersonAvatar name={p.name} size={40} />
-                      <span className="grid gap-1.5"><span className="truncate text-sm font-medium">{p.name}{me && <span className="ml-1.5 text-xs font-normal text-muted-foreground">나</span>}</span><span className="h-1.5 overflow-hidden rounded-full bg-muted"><span className={cn("block h-full rounded-full", r.free === 0 ? "bg-destructive" : r.ratio >= 0.8 ? "bg-warning" : "bg-info")} style={{ width: `${Math.min(100, r.ratio * 100)}%` }} /></span></span>
+                      <span className="grid gap-1.5"><span className="truncate text-sm font-medium">{p.name}{p.rank && <span className={cn("ml-1.5 text-xs", p.name === teamLead ? "font-medium text-[#003377]" : "font-normal text-muted-foreground")}>{p.rank}</span>}{me && <span className="ml-1.5 text-xs font-normal text-muted-foreground">나</span>}</span><span className="h-1.5 overflow-hidden rounded-full bg-muted"><span className={cn("block h-full rounded-full", r.free === 0 ? "bg-destructive" : r.ratio >= 0.8 ? "bg-warning" : "bg-info")} style={{ width: `${Math.min(100, r.ratio * 100)}%` }} /></span></span>
                       <span className="text-sm tabular-nums"><b className="font-medium">{r.count}</b><span className="text-muted-foreground"> / {r.capacity}</span></span>
                     </button>
                   </li>
