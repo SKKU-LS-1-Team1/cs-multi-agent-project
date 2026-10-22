@@ -6,6 +6,7 @@
 //  - [해결 안 됐어요]는 바로 문의 전환(unresolved)
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api, type Evidence, type InquiryForm, type Navigation } from "../../api/client";
+import { fieldLabel } from "./labels";
 import "./chat-panel.css";
 
 type Props = {
@@ -26,18 +27,9 @@ type Message = {
 };
 
 const UNRESOLVED_TEXT = "해결이 안 됐어요";
-const WELCOME = "안녕하세요! 궁금한 걸 편하게 적어 주세요. 아래에서 골라도 돼요.";
+const WELCOME = "안녕하세요! 궁금한 걸 편한 언어로 적어 주세요. 아래에서 골라도 돼요.";
 const QUICK = ["화면에 E.OC가 떠요", "보증 기간이 남았나요?", "설치 설명서가 필요해요"];
 const STORE = "cs-chat-v1"; // 새로고침해도 같은 대화로 이어가려고 세션 ID와 화면 기록을 브라우저에 둔다
-
-// 챗봇이 더 물어보는 항목 이름 (기준표 info_field_codebook 의 항목 → 쉬운 말)
-const FIELD_KO: Record<string, string> = {
-  product_model: "제품 모델명", serial_no: "시리얼 번호", error_code: "에러 코드·증상", operating_condition: "고장 당시 운전 조건",
-  photos: "제품·명판 사진", site_condition: "설치 환경", wiring_diagram: "배선도", application: "사용 용도", purchase_doc: "PO·송장 번호",
-  install_date: "설치·시운전 날짜", failure_description: "고장 내용", po_number: "PO 번호", quantity: "수량", required_date: "희망 납기일",
-  incoterms: "인도 조건", document_type: "필요한 문서", target_standard: "필요한 규격·인증", target_country: "사용 국가", current_fw: "현재 펌웨어",
-  tool_version: "툴 버전", return_reason: "반품 사유", packaging_condition: "포장 상태", logs: "이벤트·트립 기록",
-};
 
 type Saved = { sessionId: string; messages: Message[] };
 function load(): Saved {
@@ -127,7 +119,7 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPic
                 {m.evidence.map((e, i) => <span key={`${e.doc_id}-${e.section}-${i}`}>{e.doc_id}{e.section ? ` §${e.section}` : ""}</span>)}</div>
             )}
             {m.askFields && m.askFields.length > 0 && (
-              <p className="cp-ask">💡 알려 주시면 더 정확해요: {m.askFields.map((f) => FIELD_KO[f] ?? f).join(", ")}</p>
+              <p className="cp-ask">💡 알려 주시면 더 정확해요: {m.askFields.map(fieldLabel).join(", ")}</p>
             )}
             {m.form && <button type="button" className="cp-go" onClick={() => onHandoff(m.form as InquiryForm)}>📝 문의서 열기</button>}
             {m.retry && <button type="button" className="cp-go" disabled={busy} onClick={() => void send(m.retry?.text ?? "", m.retry?.unresolved, true)}>다시 시도</button>}
@@ -141,7 +133,7 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPic
           <button type="button" className="cp-unres" onClick={() => void send(input, true)} disabled={busy}>해결 안 됐어요</button>
         )}
         <div className="cp-box">
-          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKey} placeholder="메시지를 입력하세요" aria-label="메시지" disabled={busy} />
+          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKey} placeholder="궁금한 점을 적어 주세요" aria-label="메시지" disabled={busy} />
           <button type="button" aria-label="보내기" onClick={() => void send(input)} disabled={busy || !input.trim()}>↑</button>
         </div>
         <p>대화한 내용은 문의서에 자동으로 들어가요.</p>
