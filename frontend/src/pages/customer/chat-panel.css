@@ -1,0 +1,42 @@
+/* 우측 챗봇 창 (CSA-38). 클래스는 cp- 로 시작한다. 색은 LS 디자인 시스템 토큰. */
+.cp {
+  --cp-blue: #0a1e5a; --cp-blue-mid: #183b80; --cp-blue-light: #3562a6; --cp-blue-50: #eff2f8;
+  --cp-g50: #f9fafb; --cp-g100: #f2f4f6; --cp-g200: #e5e8eb; --cp-g400: #b0b8c1; --cp-g500: #8b95a1; --cp-g600: #6b7684; --cp-g800: #333d4b; --cp-g900: #191f28;
+  display: flex; flex-direction: column; min-height: 0; background: var(--cp-g100); border-left: 1px solid var(--cp-g200);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; word-break: keep-all;
+}
+.cp button { font-family: inherit; cursor: pointer; }
+.cp-head { height: 64px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px; background: var(--cp-g50); border-bottom: 1px solid var(--cp-g200); }
+.cp-av { width: 36px; height: 36px; border-radius: 50%; background: var(--cp-blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.cp-head b { display: block; font-size: 15px; line-height: 22px; color: var(--cp-g900); }
+.cp-head small { display: block; font-size: 12px; line-height: 18px; color: var(--cp-g500); }
+.cp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.cp-msg { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
+.cp-msg.user { align-items: flex-end; }
+.cp-msg.assistant { align-items: flex-start; }
+.cp-bub { background: #fff; border-radius: 16px; padding: 12px 16px; font-size: 15px; line-height: 23px; color: var(--cp-g900); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.cp-msg.user .cp-bub { background: var(--cp-blue); color: #fff; }
+.cp-chips, .cp-cands { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.cp-chips button, .cp-cands button { background: #fff; border: 1px solid var(--cp-g200); border-radius: 999px; padding: 8px 16px; font-size: 14px; line-height: 21px; font-weight: 500; color: var(--cp-g800); text-align: left; }
+.cp-chips button:hover, .cp-cands button:hover { background: var(--cp-blue-50); border-color: var(--cp-blue-light); }
+.cp-cands small, .cp-ev small { font-size: 12px; color: var(--cp-g600); font-weight: 600; }
+.cp-ev { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.cp-ev span { font-size: 11px; background: var(--cp-blue-50); color: var(--cp-blue-mid); border-radius: 6px; padding: 2px 8px; }
+.cp-ask { font-size: 13px; color: var(--cp-g600); }
+.cp-go { border: 0; background: var(--cp-blue); color: #fff; border-radius: 12px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
+.cp-go:disabled { opacity: .5; }
+.cp-typing { display: inline-flex; gap: 4px; padding: 14px 16px; }
+.cp-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--cp-g400); animation: cp-dot 1s infinite ease-in-out; }
+.cp-typing i:nth-child(2) { animation-delay: .15s; } .cp-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes cp-dot { 0%, 80%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+.cp-in { flex: none; padding: 12px 16px; border-top: 1px solid var(--cp-g200); background: var(--cp-g100); display: grid; gap: 8px; }
+.cp-unres { justify-self: start; border: 1px solid var(--cp-g200); background: #fff; color: var(--cp-g800); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; }
+.cp-unres:hover { background: var(--cp-blue-50); }
+.cp-box { height: 52px; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--cp-g200); border-radius: 999px; padding: 0 8px 0 18px; }
+.cp-box input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 15px; color: var(--cp-g900); }
+.cp-box input::placeholder { color: var(--cp-g400); }
+.cp-box button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--cp-blue); color: #fff; font-size: 18px; }
+.cp-box button:disabled { background: var(--cp-g200); color: var(--cp-g500); cursor: default; }
+.cp-in p { font-size: 12px; color: var(--cp-g500); padding-left: 4px; }
+.cp button:focus-visible, .cp input:focus-visible { outline: 2px solid var(--cp-blue-light); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .cp-typing i { animation: none; opacity: .6; } }

@@ -30,7 +30,7 @@ export default function CustomerHome() {
           <p>왼쪽에서 제품을 고르거나 오른쪽 챗봇에 물어보세요.</p>
         )}
       </main>
-      <ChatPanel viewingProduct={productCode} onNavigate={onNavigate} onHandoff={setForm} />
+      <ChatPanel viewingProduct={productCode} onNavigate={onNavigate} onHandoff={setForm} onPickProduct={(c) => { setProductCode(c); setTab("info"); setAnchor(null); setForm(null); }} />
     </div>
   );
 }
