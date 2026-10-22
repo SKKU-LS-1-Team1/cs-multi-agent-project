@@ -13,12 +13,13 @@ export default function Overview() {
   const path = useLocation().pathname;
   const view = path === "/collab" ? "collab" : path === "/resources" ? "resources" : "cs";
   const go = useGo();
+  const tabs = <UnderlineTabs tabs={TABS} value={view} onChange={(v) => go.to(PATH[v])} />;
+  if (view === "collab") return <Collab tabs={tabs} />;
+  if (view === "cs") return <CsWork tabs={tabs} />;
   return (
     <>
-      <PageHeader title={TITLES[view]} >
-        <UnderlineTabs tabs={TABS} value={view} onChange={(v) => go.to(PATH[v])} />
-      </PageHeader>
-      {view === "collab" ? <Collab /> : view === "resources" ? <ResourceBoard /> : <CsWork />}
+      <PageHeader title={TITLES[view]}>{tabs}</PageHeader>
+      <ResourceBoard />
     </>
   );
 }

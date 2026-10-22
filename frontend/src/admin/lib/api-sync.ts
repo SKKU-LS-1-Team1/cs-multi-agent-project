@@ -66,6 +66,7 @@ function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     : api.status === "ON_HOLD" && api.translation_error ? api.approved_reply || ""
     : "";
   const target = t ?? ({ id: api.ticket_id, events: [], files: [], reviewed: false, source: "api" } as unknown as Ticket);
+  const reviewChanged = !t || t.apiStatus !== api.status || t.aiDraft !== aiDraft || JSON.stringify(t.apiChecks) !== JSON.stringify(api.checks) || JSON.stringify(t.apiEvidence) !== JSON.stringify(api.evidence);
   const editing = t && t.draft && t.draft !== t.aiDraft && t.apiStatus === api.status;
   Object.assign(target, {
     source: "api",
@@ -106,9 +107,10 @@ function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     target.activeComposer = aiDraft ? "customer" : null;
     target.draftVersion = aiDraft ? 1 : 0;
     target.draftOrigin = aiDraft ? "ai" : null;
-    target.reviewed = false;
+    if (reviewChanged) target.reviewed = false;
     target.draftContextKey = aiDraft ? contextKey(answerContext(target)) : null;
   }
+  if (reviewChanged) target.reviewed = false;
   if (!target.events.length) {
     target.events.push({ kind: "registered", text: `${inquiry?.channel || "WEB"} 문의 접수 · AI 분석`, createdAt: inquiry?.received_at, actor: "system" });
   }
@@ -156,7 +158,7 @@ async function refresh(t: Ticket) {
 }
 
 /** 승인 및 발송: 고친 글이면 edit_approve, 아니면 approve. 번역은 백엔드가 승인 뒤에 한다. */
-export async function sendViaApi(t: Ticket) {
+export async function sendViaApi(t: Ticket): Promise<boolean> {
   const edited = t.draft.trim() !== String(t.aiDraft || "").trim();
   try {
     const row = await api.act(t.id, edited ? { action: "edit_approve", edited_text: t.draft, reviewer: signedIn } : { action: "approve", reviewer: signedIn });
@@ -170,19 +172,23 @@ export async function sendViaApi(t: Ticket) {
       toast(row.status === "WAITING_CUSTOMER" ? "추가정보 요청을 보냈습니다." : "답변을 발송했습니다.");
     }
     commit();
+    return ["APPROVED", "WAITING_CUSTOMER"].includes(row.status);
   } catch (e) {
     toast.error(`발송 실패: ${e}`);
-    await refresh(t).catch(() => undefined);
+    return false; // 실패 시 작성 중인 내용을 유지한다.
   }
 }
 
 /** 처리 결과 기록 및 완료 → 해결 확정 (사례 저장). 로컬 처리 결과 기록은 actions.completeTicket 이 남긴다. */
-export async function resolveViaApi(t: Ticket) {
+export async function resolveViaApi(t: Ticket): Promise<boolean> {
   try {
-    await api.resolve(t.id);
-    await refresh(t);
+    const row = await api.resolve(t.id);
+    apply(t, row);
+    commit();
+    return row.status === "RESOLVED";
   } catch (e) {
     toast.error(`완료 처리 실패: ${e}`);
+    return false;
   }
 }
 
