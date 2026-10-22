@@ -1,0 +1,67 @@
+/* 제품 분류 트리 · 제품 고르기 (CSA-36). 클래스는 모두 ps- 로 시작해 다른 화면과 섞이지 않는다.
+   색은 LS 디자인 시스템 토큰(LS Blue #0A1E5A / #183B80 / #3562A6). */
+.ps {
+  --ps-blue: #0a1e5a; --ps-blue-mid: #183b80; --ps-blue-light: #3562a6; --ps-blue-50: #eff2f8; --ps-blue-100: #dfe6f1;
+  --ps-g50: #f9fafb; --ps-g100: #f2f4f6; --ps-g200: #e5e8eb; --ps-g500: #8b95a1; --ps-g600: #6b7684; --ps-g700: #4e5968; --ps-g900: #191f28;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  color: var(--ps-g700); word-break: keep-all;
+}
+.ps button { font-family: inherit; cursor: pointer; }
+.ps-note { padding: 12px; font-size: 14px; color: var(--ps-g600); }
+.ps-link { margin-left: 8px; border: 0; background: none; color: var(--ps-blue-mid); font-weight: 700; text-decoration: underline; }
+
+/* 좌측 트리 */
+.ps-tree { border-right: 1px solid var(--ps-g200); padding: 12px; overflow: auto; background: #fff; }
+.ps-tree summary { list-style: none; cursor: pointer; }
+.ps-tree summary::-webkit-details-marker { display: none; }
+.ps-div { font-size: 13px; font-weight: 800; color: var(--ps-blue); padding: 12px 6px 6px; letter-spacing: .02em; }
+.ps-fam > summary { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: 12px; font-size: 15px; font-weight: 600; color: var(--ps-g900); }
+.ps-fam > summary:hover { background: var(--ps-g100); }
+.ps-fam img { border-radius: 8px; background: #fff; object-fit: contain; mix-blend-mode: multiply; }
+.ps-fam em { margin-left: auto; font-style: normal; font-size: 12px; color: var(--ps-g500); }
+.ps-item { width: 100%; text-align: left; display: grid; border: 0; background: none; border-radius: 10px; padding: 7px 10px 7px 46px; font-size: 14px; color: var(--ps-g700); }
+.ps-item small { font-size: 11px; color: var(--ps-g500); }
+.ps-item:hover { background: var(--ps-g100); }
+.ps-item.is-sel { background: var(--ps-blue-50); color: var(--ps-blue); font-weight: 700; }
+
+/* 제품 고르기 (본문) */
+.ps-picker, .ps-models { max-width: 920px; margin: 0 auto; }
+.ps h2 { font-size: 30px; line-height: 40px; font-weight: 700; color: var(--ps-g900); letter-spacing: -.01em; }
+.ps-sub { margin-top: 8px; font-size: 16px; color: var(--ps-g600); }
+.ps-car { user-select: none; margin-top: 12px; }
+.ps-stage { position: relative; height: 340px; perspective: 1100px; perspective-origin: 50% 40%; touch-action: pan-y; cursor: grab; overflow: hidden; }
+.ps-stage.is-dragging { cursor: grabbing; }
+.ps-card { position: absolute; left: 50%; top: 0; width: 260px; height: 260px; margin-left: -130px; border: 0; padding: 0; background: none; border-radius: 24px;
+  transition: transform .55s cubic-bezier(.22, .8, .26, 1), opacity .55s ease, filter .55s ease; will-change: transform, opacity, filter; }
+.ps-stage.is-dragging .ps-card { transition: none; }
+.ps-card img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; pointer-events: none;
+  -webkit-mask-image: radial-gradient(closest-side, #000 82%, transparent 100%); mask-image: radial-gradient(closest-side, #000 82%, transparent 100%); }
+.ps-card:not(.is-center) { cursor: pointer; }
+.ps-card.is-center { cursor: default; }
+.ps-card:focus-visible, .ps-arrow:focus-visible, .ps-primary:focus-visible, .ps-jump button:focus-visible, .ps-opt:focus-visible, .ps-back:focus-visible, .ps-item:focus-visible { outline: 2px solid var(--ps-blue-light); outline-offset: -4px; }
+.ps-arrow { position: absolute; top: 108px; z-index: 200; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--ps-g200); background: #fff; color: var(--ps-g700); font-size: 26px; line-height: 1; padding-bottom: 3px; box-shadow: 0 2px 10px rgba(0, 23, 51, .08); }
+.ps-arrow:hover { background: var(--ps-g50); color: var(--ps-blue); }
+.ps-l { left: 4px; } .ps-r { right: 4px; }
+.ps-info { text-align: center; padding: 8px 0; }
+.ps-info small { font-size: 13px; font-weight: 700; color: var(--ps-blue-light); }
+.ps-info h3 { font-size: 26px; line-height: 36px; font-weight: 700; color: var(--ps-g900); }
+.ps-info p { margin-top: 2px; font-size: 14px; color: var(--ps-g500); }
+.ps-primary { margin-top: 16px; height: 52px; padding: 0 32px; border: 0; border-radius: 14px; background: var(--ps-blue); color: #fff; font-size: 17px; font-weight: 600; }
+.ps-primary:hover { background: var(--ps-blue-mid); }
+.ps-jump { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--ps-g100); display: grid; gap: 10px; }
+.ps-jgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ps-jgroup > span { width: 52px; font-size: 12px; font-weight: 800; color: var(--ps-g500); }
+.ps-jump button { height: 38px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--ps-g100); color: var(--ps-g700); font-size: 14px; font-weight: 600; }
+.ps-jump button:hover { background: var(--ps-g200); }
+.ps-jump button.is-sel { background: var(--ps-blue); color: #fff; }
+
+/* 모델 고르기 */
+.ps-back { border: 0; background: var(--ps-g100); color: var(--ps-g700); height: 36px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 600; margin-bottom: 20px; }
+.ps-optlist { margin-top: 22px; display: grid; gap: 10px; }
+.ps-opt { border: 2px solid transparent; background: var(--ps-g100); border-radius: 16px; padding: 18px 20px; text-align: left; display: grid; gap: 4px; color: var(--ps-g900); }
+.ps-opt:hover { background: var(--ps-g200); }
+.ps-opt b { font-size: 17px; font-weight: 600; }
+.ps-opt small { font-size: 14px; color: var(--ps-g600); }
+.ps-opt.is-sel { border-color: var(--ps-blue-light); background: var(--ps-blue-50); }
+@media (prefers-reduced-motion: reduce) { .ps-card { transition-duration: .01s; } }
+@media (max-width: 600px) { .ps-stage { height: 280px; } .ps-card { width: 200px; height: 200px; margin-left: -100px; } .ps-arrow { top: 78px; } .ps h2 { font-size: 24px; line-height: 32px; } }
