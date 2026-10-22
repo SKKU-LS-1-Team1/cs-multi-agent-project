@@ -1,13 +1,13 @@
 // 리소스 배정 보드: 열 = 담당자, 카드 = 미완료 티켓. 카드를 끌어 놓으면 배정이 바뀐다.
-// 조건(부서·제품 역량·응대 언어·수용량)에 맞지 않는 열에는 놓을 수 없고, 사유를 안내한다.
+// 모두 동등하게 응대할 수 있다고 보고 수용량(부하)만 본다. 가득 찬 담당자 열에는 놓을 수 없고, 사유를 안내한다.
 import { useState } from "react";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { toast } from "sonner";
 import { ChevronDown, GripVertical } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { Progress } from "@admin/components/ui/progress";
-import { NativeSelect, PriorityTag, Tag, useGo } from "@admin/components/admin/common";
-import { checkAssign, departmentNames, departmentRisk, openTickets, ownedTickets, people, recommend, resource, ticketDepartment } from "@admin/lib/logic";
+import { Mono, NativeSelect, PersonAvatar, PriorityTag, Tag, useGo } from "@admin/components/admin/common";
+import { checkAssign, departmentRisk, openTickets, ownedTickets, people, recommend, resource } from "@admin/lib/logic";
 import { moveTicket } from "@admin/lib/actions";
 import { openModal, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
@@ -18,13 +18,12 @@ const UNASSIGNED = "__unassigned__";
 export default function ResourceBoard() {
   useStore();
   const go = useGo();
-  const [dept, setDept] = useState("");
   const [active, setActive] = useState<Ticket | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const team = people.filter((p) => !dept || p.department === dept);
-  const unassigned = openTickets().filter((t) => !t.owner && (!dept || ticketDepartment(t) === dept));
-  const best = active ? recommend(active.product, active.language, active.id) : undefined;
+  const team = people;
+  const unassigned = openTickets().filter((t) => !t.owner);
+  const best = active ? recommend(active.id) : undefined;
 
   const verdict = (col: string): { ok: boolean; reason?: string } => {
     if (!active) return { ok: true };
@@ -49,13 +48,6 @@ export default function ResourceBoard() {
     <div className="grid gap-4 px-10 pb-12">
       <div className="flex items-center justify-between gap-3 text-sm">
         <p className="text-muted-foreground">카드를 끌어서 담당자를 바꿉니다.</p>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">부서</span>
-          <NativeSelect className="rounded-full pl-4" aria-label="부서 필터" value={dept} onChange={(e) => setDept(e.target.value)}>
-            <option value="">전체 부서</option>
-            {departmentNames().filter((n) => people.some((p) => p.department === n)).map((n) => <option key={n}>{n}</option>)}
-          </NativeSelect>
-        </div>
       </div>
 
       <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onStart} onDragEnd={onEnd} onDragCancel={() => setActive(null)}>
@@ -87,7 +79,7 @@ function Column({ id, title, tickets, person, sub, dragging, verdict, recommende
         isOver && !verdict.ok && "ring-2 ring-destructive bg-destructive/5")}>
       <header className="grid gap-2">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="font-semibold">{title}</h3>
+          <h3 className="flex items-center gap-2 font-semibold">{person && <PersonAvatar name={person.name} size={28} />}{title}</h3>
           <div className="flex items-center gap-1.5">
             {dragging && recommended && <Tag tone="green">추천</Tag>}
             <span className="rounded bg-card px-1.5 py-0.5 text-xs tabular-nums ring-1 ring-border">{tickets.length}</span>
@@ -95,9 +87,8 @@ function Column({ id, title, tickets, person, sub, dragging, verdict, recommende
         </div>
         {person && r ? (
           <>
-            <div className="flex items-baseline justify-between text-xs text-muted-foreground"><span>{person.department}</span><span className="tabular-nums"><b className="text-foreground">{r.count}</b> / {r.capacity}건</span></div>
+            <div className="flex items-baseline justify-between text-xs text-muted-foreground"><span>미완료</span><span className="tabular-nums"><b className="text-foreground">{r.count}</b> / {r.capacity}건</span></div>
             <Progress value={Math.min(100, r.ratio * 100)} className="h-1.5" />
-            <small className="text-muted-foreground">{person.skills.join(" · ")} / {person.languages.join(" · ")}</small>
           </>
         ) : sub}
         {dragging && !verdict.ok && verdict.reason && <p className="rounded bg-card px-2 py-1 text-xs text-destructive ring-1 ring-destructive/30">{verdict.reason}</p>}
@@ -126,7 +117,7 @@ function Card({ t, handle, onOpen, overlay }: { t: Ticket; handle?: Record<strin
         <button type="button" aria-label="끌어서 담당자 변경" className="mt-0.5 cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing" {...handle}><GripVertical className="size-4" /></button>
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left font-semibold leading-snug hover:underline">{t.title}</button>
       </div>
-      <div className="grid text-xs text-muted-foreground"><span>{t.id}</span><span>{t.product}</span></div>
+      <div className="grid text-xs text-muted-foreground"><Mono>{t.id}</Mono><span>{t.product}</span></div>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5"><PriorityTag p={t.priority} /><span className={cn("text-xs tabular-nums", departmentRisk(t) ? "font-semibold text-destructive" : "text-muted-foreground")}>{t.sla}</span></div>
         {!overlay && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs opacity-0 transition-opacity focus-visible:opacity-100 group-hover/card:opacity-100" onClick={() => openModal("assign", { id: t.id })}>배정<ChevronDown /></Button>}

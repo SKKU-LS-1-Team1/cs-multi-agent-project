@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CornerDownLeft, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@admin/components/ui/dialog";
-import { PriorityTag, SlaTag } from "./common";
+import { PriorityTag, SlaTag, Mono } from "./common";
 import { signedIn } from "@admin/lib/logic";
 import { findTicket, setUi, tickets } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
@@ -13,6 +13,7 @@ const PAGES = [
   { label: "업무 현황 · 전문부서 협업", to: "/collab" },
   { label: "업무 현황 · 리소스 배정", to: "/resources" },
   { label: "티켓 관리", to: "/tickets" },
+  { label: "고객 관리", to: "/customers" },
   { label: "지식·해결 사례", to: "/knowledge" },
 ];
 
@@ -65,7 +66,7 @@ export default function CommandPalette({ open, onOpenChange }: { open: boolean; 
                   {t ? (
                     <>
                       <PriorityTag p={t.priority} />
-                      <span className="min-w-0 flex-1"><span className="block truncate font-medium">{t.title}</span><span className="block truncate text-xs text-muted-foreground">{t.id} · {t.product} · {t.owner || "미배정"}</span></span>
+                      <span className="min-w-0 flex-1"><span className="block truncate font-medium">{t.title}</span><span className="block truncate text-xs text-muted-foreground"><Mono>{t.id}</Mono> · {t.product} · {t.owner || "미배정"}</span></span>
                       <SlaTag t={t} />
                     </>
                   ) : <span className="flex-1">{it.kind === "page" ? it.label : ""}<span className="ml-2 text-xs text-muted-foreground">화면</span></span>}

@@ -26,8 +26,6 @@ export type Person = {
   name: string;
   department: string;
   capacity: number;
-  skills: string[];
-  languages: string[];
   available: boolean;
 };
 

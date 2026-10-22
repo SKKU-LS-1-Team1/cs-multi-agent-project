@@ -31,7 +31,6 @@ export const ui = {
   status: "",
   priority: "",
   product: "",
-  listDepartment: "",
   listOwner: "",
   queueScope: "내 담당",
   tab: "문의·답변",

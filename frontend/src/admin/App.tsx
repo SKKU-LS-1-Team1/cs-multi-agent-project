@@ -3,6 +3,8 @@ import AdminLayout from "./components/admin/AdminLayout";
 import Overview from "./pages/Overview";
 import Tickets from "./pages/Tickets";
 import TicketDetail from "./pages/TicketDetail";
+import Customers from "./pages/Customers";
+import CustomerDetail from "./pages/CustomerDetail";
 import Knowledge from "./pages/Knowledge";
 import NotFound from "./pages/NotFound";
 
@@ -16,6 +18,8 @@ export default function App() {
         <Route path="resources" element={<Overview />} />
         <Route path="tickets" element={<Tickets />} />
         <Route path="tickets/:ticketId" element={<TicketDetail />} />
+        <Route path="customers" element={<Customers />} />
+        <Route path="customers/:customerId" element={<CustomerDetail />} />
         <Route path="knowledge" element={<Knowledge />} />
         <Route path="*" element={<NotFound />} />
       </Route>
