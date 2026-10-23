@@ -520,8 +520,12 @@ export async function rewriteViaApi(t: Ticket, instruction: string): Promise<boo
 /** 추가정보 요청문 초안 (info_request). 승인하면 고객에게 가고 회신 대기가 된다. */
 export async function infoRequestViaApi(t: Ticket): Promise<boolean> {
   if (rewrites.has(t)) return false;
-  if (t.apiStatus !== "READY_FOR_REVIEW") {
-    toast("검토 대기 중인 문의에서만 추가정보 요청문을 만들 수 있습니다.");
+  if (isManualReplyTicket(t)) {
+    toast("사람 검토 답변은 담당자가 직접 작성해 주세요.");
+    return false;
+  }
+  if (!["READY_FOR_REVIEW", "ON_HOLD"].includes(t.apiStatus)) {
+    toast("검토 대기 또는 보류 중인 문의에서만 추가정보 요청문을 만들 수 있습니다.");
     return false;
   }
   rewrites.add(t);
