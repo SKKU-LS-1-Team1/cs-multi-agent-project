@@ -4,9 +4,9 @@ import { familyImage, familyName } from "./productFamilies";
 import { useProductTree } from "./useProductTree";
 import "./product-select.css";
 
-type Props = { id?: string; selected: string | null; onSelect: (code: string) => void };
+type Props = { id?: string; selected: string | null; onSelect: (code: string) => void; onFamily?: (family: string) => void };
 
-export default function ProductTree({ id, selected, onSelect }: Props) {
+export default function ProductTree({ id, selected, onSelect, onFamily }: Props) {
   const { tree, loading, error, reload } = useProductTree();
 
   return (
@@ -25,7 +25,7 @@ export default function ProductTree({ id, selected, onSelect }: Props) {
             const img = familyImage(f.family);
             return (
               <details key={f.family} open={f.products.some((p) => p.code === selected)} className="ps-fam">
-                <summary>
+                <summary onClick={() => onFamily?.(f.family)}>
                   {img && <img src={img} alt="" width={28} height={28} />}
                   <span>{familyName(f.family, f.label)}</span>
                   <em>{f.products.length}</em>
