@@ -55,6 +55,8 @@ class IntentJudge:
             return Judgement("RECURRENCE", 0.95, self.name)
         if "AGENT" in message:
             return Judgement("REQUEST_AGENT", 0.95, self.name)
+        if "궁금" in message:
+            return Judgement("GENERAL", 0.95, self.name)
         return Judgement("OTHER", 0.95, self.name)
 
 
@@ -228,6 +230,83 @@ def test_weak_evidence_hands_off(analysis):
     out = respond(say(), [], FakeDocs([tg(score=0.5)]), live(), TABLES)
 
     assert out.handoff is True
+
+
+# 아직 질문 전인 말 (Jev GENERAL) · 제품군 이름
+
+
+def test_general_opener_asks_back_instead_of_handing_off(analysis):
+    # 실제 사례: "무정전전원장치에 대해 궁금한 점이 있어요" → 바로 상담원으로 넘어갔다
+    analysis["extraction"] = Extraction(language="ko")
+    writer = ScriptedWriter("어떤 점이 궁금하신가요?")
+    out = respond(
+        say("무정전전원장치에 대해 궁금한 점이 있어요"),
+        [],
+        FakeDocs([tg(score=0.55)]),
+        live(writer),
+        TABLES,
+    )
+
+    assert out.handoff is False
+    assert out.answer == "어떤 점이 궁금하신가요?"
+    assert "UPS products: Online UPS 10kVA" in writer.prompts[0]  # 제품군 제품이 답변 맥락
+    assert out.navigation.rule_id is not None and out.navigation.product_code is None
+    assert out.navigation.candidates == ["UPS-LSU-10K"]  # 화면에 "제품 선택" 버튼
+
+
+@pytest.mark.parametrize("docs", [None, FakeDocs([])])
+def test_general_opener_without_any_documents_still_asks_back(analysis, docs):
+    out = respond(say("PLC 궁금한 게 있어요"), [], docs, live(), TABLES)
+
+    assert out.handoff is False
+
+
+def test_general_does_not_cancel_other_handoff_reasons(analysis):
+    analysis["classification"] = Classification(category=Category.QUOTE, confidence=0.9)
+    out = respond(say("견적 궁금"), [], FakeDocs([tg()]), live(), TABLES)
+    assert out.handoff is True and "quotation" in out.handoff_reason
+
+    out = respond(say("궁금", unresolved=True), [], FakeDocs([tg()]), live(), TABLES)
+    assert out.handoff is True
+
+
+def test_family_name_fills_the_family_for_navigation(analysis):
+    analysis["extraction"] = Extraction(language="ko")
+    out = respond(say("태양광 인버터 설치 간격은?"), [], FakeDocs([tg()]), live(), TABLES)
+
+    assert out.navigation.candidates == ["PV-INV-SOLAR-25"]
+
+
+def test_family_from_an_earlier_message_is_kept(analysis):
+    analysis["extraction"] = Extraction(language="ko")
+    history = ["UPS 문의드려요", "어떤 점이 궁금하신가요?"]
+    out = respond(say("배터리 교체 주기는요?"), history, FakeDocs([tg()]), live(), TABLES)
+
+    assert out.navigation.candidates == ["UPS-LSU-10K"]
+
+
+@pytest.mark.parametrize(
+    ("text", "family"),
+    [
+        ("무정전전원장치에 대해 궁금한 점이 있어요", "UPS"),
+        ("태양광 제품 문의드려요", "PV"),
+        ("태양광 인버터 문의", "PV"),  # 긴 낱말이 이긴다 (인버터 → DRIVE 아님)
+        ("인버터 에러", "DRIVE"),
+        ("고압 차단기 정격", "MV_EQUIP"),  # 띄어 써도 찾는다
+        ("누전차단기 문의", "LV_BREAKER"),
+        ("I need help with a solar inverter", "PV"),
+        ("vacuum circuit breaker spec", "MV_EQUIP"),
+        ("変圧器について", "TRANSFORMER"),
+        ("太陽光インバーターについて質問があります", "PV"),  # インバータ(DRIVE)보다 길다
+        ("光伏逆变器故障", "PV"),
+        ("不间断电源问题", "UPS"),
+        ("Need 20 pcs quote", None),  # 수량 pcs 는 ESS PCS 가 아니다
+        ("setup groups", None),  # 낱말 안의 ups 는 아니다
+        ("오늘 날씨 어때", None),
+    ],
+)
+def test_mentioned_family(text, family):
+    assert agent.mentioned_family([text]) == family
 
 
 # 검색 · 점수
