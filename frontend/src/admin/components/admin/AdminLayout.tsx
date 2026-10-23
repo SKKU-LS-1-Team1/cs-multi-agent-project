@@ -58,7 +58,7 @@ export default function AdminLayout() {
           </button>
           <div className="flex items-center gap-1 rounded-full bg-white py-1.5 pl-1.5 pr-1.5 text-[#0e1a2b] shadow-[0_8px_20px_-10px_rgb(0_10_40/0.6)]">
             <PersonAvatar name={signedIn} size={32} />
-            <span className="grid min-w-0 flex-1 leading-tight pl-1"><strong className="truncate text-sm font-medium">{signedIn} <span className={cn("ml-1 text-xs", signedIn === teamLead ? "font-medium text-[#003377]" : "font-normal text-[#5d6b7e]")}>{me?.rank}</span></strong><small className="truncate text-xs text-[#5d6b7e]">{FRONTLINE}</small></span>
+            <span className="grid min-w-0 flex-1 leading-tight pl-1"><strong className="truncate text-sm font-medium">{signedIn}</strong><small className={cn("truncate text-xs", signedIn === teamLead ? "font-medium text-[#003377]" : "text-[#5d6b7e]")}>{me?.rank || FRONTLINE}</small></span>
             <button type="button" aria-label="로그아웃" title="로그아웃" onClick={() => { endSession(); window.location.reload(); }} className="grid size-9 shrink-0 place-items-center rounded-full text-[#5d6b7e] transition-colors hover:bg-[#eef2f8] hover:text-[#0e1a2b]"><LogOut className="size-[18px]" aria-hidden /></button>
           </div>
         </div>

@@ -47,6 +47,26 @@ def live(writer, kv=None) -> LLMRouter:
     return LLMRouter(Settings(_env_file=None, llm_provider="live"), writer=writer, kv=kv)
 
 
+def test_customer_request_removes_internal_markers_but_keeps_attachment_text():
+    clean = template_request(["Please provide photos [attachment: 6 photos]."])
+    writer = ScriptedWriter(clean + " [POL-WARRANTY#4]")
+    assert write_info_request(["photos"], "en", "Damaged package", live(writer)) == clean
+    assert len(writer.prompts) == 1
+
+
+def test_same_language_request_strips_legacy_citations_without_model_call():
+    clean = template_request(["Please provide the serial number of [DS-100]."])
+    writer = ScriptedWriter()
+    assert localize_request(clean + " [POL-WARRANTY#4]", "en", live(writer)) == clean
+    assert writer.prompts == []
+
+
+def test_translated_request_does_not_reintroduce_internal_citations():
+    source = template_request(["Product model", "Serial number"])
+    writer = ScriptedWriter(SPANISH_OK + " [POL-WARRANTY#4]")
+    assert localize_request(source, "es", live(writer)) == SPANISH_OK
+
+
 SPANISH_OK = """Estimado cliente:
 
 Gracias por contactarnos. Para continuar con su consulta, le pedimos que nos envíe en una sola

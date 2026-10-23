@@ -62,10 +62,12 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from cs_agent.agents.drafting import _chunks
+from cs_agent.config import get_settings
 from cs_agent.llm.router import LLMRouter, RateLimited
 from cs_agent.rules.sla import due_at
 from cs_agent.rules.tables import RefTables, load_tables
-from cs_agent.schemas import EscalationRequest
+from cs_agent.schemas import EscalationRequest, Evidence
 
 if TYPE_CHECKING:
     from cs_agent.graph.state import TicketState
@@ -127,7 +129,7 @@ FIELD_LABELS_KO = {
     "string_config": "스트링 구성",
     "battery_age": "배터리 사용 기간",
 }
-PROMPT_VERSION = "escalation-v2-citation-validation"
+PROMPT_VERSION = "escalation-v3-readable-sources"
 INSTRUCTIONS = """
 # ROLE
 당신은 LS ELECTRIC 전문부서에 전달할 사내 검토 요청서를 작성합니다.
@@ -152,7 +154,9 @@ INSTRUCTIONS = """
 7. 현장 출동·방문 일정·보증·반품·RMA·환불을 승인하거나 이미 처리했다고 쓰지 않습니다.
 8. 공식 문서 내용은 documents가 실제 뒷받침하는 범위에서만 요약합니다.
    문서가 질문 또는 요청할 점검 내용을 뒷받침하면 그 내용과 해당 문서 ID를 연결하고,
-   cited에는 실제 참고한 documents의 정확한 id만 넣습니다. 본문 인용도 같은 ID를 씁니다.
+   cited에는 실제 참고한 documents의 정확한 id만 넣습니다.
+   본문에서 문서를 언급할 자리에는 [id]를 사용합니다. 코드는 이를 display_name의 실제
+   문서명·절 제목으로 바꾸어 표시합니다. 문서명을 임의로 만들거나 번역하지 않습니다.
    제품이 같다는 이유만으로 인용하지 않습니다. 질문과 다른 증상/절차를 다루는 문서를
    억지로 연결하거나 고객이 언급하지 않은 고장을 가정하지 않습니다.
    관련 근거가 없으면 cited는 빈 목록이며, evidence_gap에 어떤 근거가 필요한지와
@@ -252,6 +256,45 @@ def _check_narrative(narrative: _Narrative, allowed: set[str], tables: RefTables
     if allowed and not cited and not narrative.evidence_gap.strip():
         raise ValueError("missing evidence explanation")
     return cited
+
+
+def _document_name(evidence: Evidence, number: int) -> str:
+    """원본 문서 제목과 절 제목을 사용한다. 검색 metadata.title은 절 제목이다."""
+    chunks = _chunks(get_settings().raw_data_dir)
+    document = next((c for c in chunks if c.doc_id == evidence.doc_id), None)
+    section = next(
+        (c for c in chunks if c.doc_id == evidence.doc_id and c.section == evidence.section), None
+    )
+    title = (document.metadata.get("title", "") if document else "") or evidence.metadata.get(
+        "document_title", ""
+    )
+    label = f"「{title}」" if title else f"참고 문서 {number} (문서명 미확인)"
+    if evidence.section:
+        heading = (
+            section.section_path if section else evidence.metadata.get("title", "")
+        ) or f"{evidence.section}절 (절 제목 미확인)"
+        label += f"의 ‘{heading}’"
+    return label
+
+
+def _readable_sources(text: str, names: dict[str, str]) -> str:
+    """검증을 통과한 ID만 실제 제목으로 표시하며 일반 대괄호 내용은 유지한다."""
+
+    def bracket(match: re.Match) -> str:
+        parts = [p.strip() for p in re.split(r"[,;、，،؛]", match[1])]
+        if parts and all(p in names for p in parts):
+            return ", ".join(names[p] for p in parts)
+        return match[0]
+
+    text = re.sub(r"\[([^\[\]\n]+)\]", bracket, text)
+    if not names:
+        return text
+    alternatives = "|".join(re.escape(ref) for ref in sorted(names, key=len, reverse=True))
+    return re.sub(
+        rf"(?<![A-Za-z0-9_#.-])(?:{alternatives})(?![A-Za-z0-9_#-]|\.\d)",
+        lambda match: names[match[0]],
+        text,
+    )
 
 
 def _target(state: TicketState, to_dept: str | None, tables: RefTables) -> str:
@@ -374,7 +417,9 @@ def write_escalation_request(
             continue
         ref = f"{e.doc_id}#{e.section}" if e.section else e.doc_id
         if ref not in {d["id"] for d in documents}:
-            documents.append({"id": ref, "text": e.text})
+            documents.append(
+                {"id": ref, "text": e.text, "display_name": _document_name(e, len(documents) + 1)}
+            )
         if len(documents) == 3:
             break
     draft = state.get("draft")
@@ -393,6 +438,14 @@ def write_escalation_request(
     base = INSTRUCTIONS + "\n\n# INPUT DATA\n" + json.dumps(payload, ensure_ascii=False)
     allowed = {d["id"] for d in documents}
     narrative, cited = _write_narrative(base, allowed, llm, tables)
+    names = {d["id"]: d["display_name"] for d in documents}
+    # 먼저 원본 ID로 근거·보호값을 검사한 뒤 표시만 변환한다. cited는 추적용으로 보존한다.
+    narrative = narrative.model_copy(
+        update={
+            key: _readable_sources(getattr(narrative, key), names)
+            for key in ("summary", "request", "evidence_gap")
+        }
+    )
     labels = {
         "product_code": "제품 코드",
         "product_family": "제품군",
@@ -426,7 +479,7 @@ def write_escalation_request(
             narrative.request,
             "",
             "[근거 문서]",
-            "\n".join(f"- {ref}" for ref in cited)
+            "\n".join(f"- {names[ref]}" for ref in cited)
             or "확인 필요 (확보된 인용 근거 없음): "
             + (narrative.evidence_gap.strip() or "관련 문서 필요"),
         ]

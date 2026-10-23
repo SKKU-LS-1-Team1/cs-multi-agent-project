@@ -526,7 +526,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 != (
                     state.get("info_request")
                     if purpose == "request"
-                    else (draft.text if draft else "")
+                    else (drafting.customer_text(draft.text, draft.cited) if draft else "")
                 )
             ),
         )
@@ -598,6 +598,28 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             text = None
         text = text or (state.get("draft") and state["draft"].text) or ""
         draft = state.get("draft")
+        allowed = [drafting._ref(e) for e in state.get("evidence", [])]
+        citation_error = None
+        try:
+            cited = drafting._citations(text, allowed)
+            # New drafts keep references separately; old checkpoints may still have them inline.
+            # Only unchanged wording can retain the original draft's source attribution.
+            if draft and drafting.customer_text(text, allowed) == drafting.customer_text(
+                draft.text, allowed
+            ):
+                cited = list(
+                    dict.fromkeys(
+                        [
+                            *cited,
+                            *drafting._citations(draft.text, allowed),
+                            *(ref for ref in draft.cited if ref in allowed),
+                        ]
+                    )
+                )
+        except DraftingError as error:
+            citation_error = str(error)
+            cited = []
+        text = drafting.customer_text(text, allowed)
         source_language = (
             draft.slots.get("draft_language") or _language(state)
             if draft
@@ -609,22 +631,12 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             if info_request_agent.in_language(text, _language(state))
             else source_language
         )
-        candidate = (draft or schemas.Draft(text="")).model_copy(update={"text": text})
-        if not draft or text != draft.text:
+        candidate = (draft or schemas.Draft(text="")).model_copy(
+            update={"text": text, "cited": cited}
+        )
+        if not draft or text != drafting.customer_text(draft.text, allowed):
             candidate = candidate.model_copy(update={"model": "staff_review"})
         checks = state.get("checks", [])
-        citation_error = None
-        try:
-            candidate = candidate.model_copy(
-                update={
-                    "cited": drafting._citations(
-                        text, [drafting._ref(e) for e in state.get("evidence", [])]
-                    )
-                }
-            )
-        except DraftingError as error:
-            citation_error = str(error)
-            candidate = candidate.model_copy(update={"cited": []})
         key = checked_key(state, candidate, language)
         already_checked = key == state.get("approval_checks_key") and bool(checks)
         acknowledged = bool(review.acknowledged_failures and review.reviewer.strip())

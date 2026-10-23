@@ -38,7 +38,7 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
   const w = useWidgets("ls-admin-widgets-cs-v2", CS_WIDGETS);
   const s = stats(), mine = ownedTickets(), tasks = todayTasks().slice(0, 5), open = openTickets().length;
   const safe = open ? Math.round(((open - s.risk) / open) * 100) : 100, tone = riskTone(s.risk);
-  const waiting = referralRows().filter((r) => !r.response).sort((a, b) => departmentRank(a.ticket) - departmentRank(b.ticket) || (slaMinutes(a.ticket) ?? Infinity) - (slaMinutes(b.ticket) ?? Infinity));
+  const waiting = referralRows().filter((r) => !r.response && r.ticket.stage !== 5).sort((a, b) => departmentRank(a.ticket) - departmentRank(b.ticket) || (slaMinutes(a.ticket) ?? Infinity) - (slaMinutes(b.ticket) ?? Infinity));
   const waitRisk = new Set(waiting.filter((r) => departmentRisk(r.ticket)).map((r) => r.ticket.id)).size;
   const list = (filter: string) => { setUi({ filter }); go.list({ filter }); };
   const quick: [string, number, string, () => void][] = [
@@ -88,12 +88,13 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
             <ul className="grid grid-cols-2 gap-x-4 gap-y-1">
               {[...people].sort((a, b) => Number(b.name === teamLead) - Number(a.name === teamLead)).map((p) => { // 팀장이 맨 앞
                 const r = resource(p), me = p.name === signedIn;
+                const width = (r.count / Math.max(1, ...people.map((x) => resource(x).count))) * 100; // 팀에서 가장 많이 맡은 사람 = 가득 찬 막대
                 return (
                   <li key={p.name}>
                     <button onClick={() => go.list({ listOwner: p.name, filter: "전체", query: "", status: "", priority: "", product: "" })} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-muted">
                       <PersonAvatar name={p.name} size={40} />
-                      <span className="grid gap-1.5"><span className="truncate text-sm font-medium">{p.name}{p.rank && <span className={cn("ml-1.5 text-xs", p.name === teamLead ? "font-medium text-[#003377]" : "font-normal text-muted-foreground")}>{p.rank}</span>}{me && <span className="ml-1.5 text-xs font-normal text-muted-foreground">나</span>}</span><span className="h-1.5 overflow-hidden rounded-full bg-muted"><span className={cn("block h-full rounded-full", r.free === 0 ? "bg-destructive" : r.ratio >= 0.8 ? "bg-warning" : "bg-info")} style={{ width: `${Math.min(100, r.ratio * 100)}%` }} /></span></span>
-                      <span className="text-sm tabular-nums"><b className="font-medium">{r.count}</b><span className="text-muted-foreground"> / {r.capacity}</span></span>
+                      <span className="grid gap-1.5"><span className="truncate text-sm font-medium">{p.name}{p.rank && <span className={cn("ml-1.5 text-xs", p.name === teamLead ? "font-medium text-[#003377]" : "font-normal text-muted-foreground")}>{p.rank}</span>}{me && <span className="ml-1.5 text-xs font-normal text-muted-foreground">나</span>}</span><span className="h-1.5 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full bg-info" style={{ width: `${width}%` }} /></span></span>
+                      <span className="text-sm tabular-nums"><b className="font-medium">{r.count}</b><span className="text-muted-foreground">건</span></span>
                     </button>
                   </li>
                 );

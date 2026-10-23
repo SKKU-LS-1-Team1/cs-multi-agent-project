@@ -236,6 +236,42 @@ def test_final_citations_come_from_edited_body_not_original_ai_draft():
     approved = act(action="edit_approve", edited_text=text, reviewer="Staff")
     assert approved["approval_cited"] == ["DOC#one"]
     assert approved["draft"].cited == []
+    assert approved["final_reply"] == "Please consult this document."
+
+
+def test_clean_unchanged_draft_keeps_reference_metadata_on_approval():
+    graph, config, act, _, _ = setup_graph()
+    original = graph.get_state(config).values["draft"]
+    graph.update_state(
+        config,
+        {
+            "draft": original.model_copy(update={"cited": ["DOC#one"]}),
+            "evidence": [Evidence(source="docs", doc_id="DOC", section="one", text="Guidance.")],
+        },
+    )
+    approved = act(action="approve")
+    assert approved["status"] == TicketStatus.APPROVED
+    assert approved["final_reply"] == ORIGINAL
+    assert approved["approval_cited"] == ["DOC#one"]
+
+
+def test_old_inline_draft_approval_cleans_text_without_losing_sources():
+    graph, config, act, _, _ = setup_graph()
+    original = graph.get_state(config).values["draft"]
+    graph.update_state(
+        config,
+        {
+            "draft": original.model_copy(
+                update={"text": "Please consult this document [DOC#one].", "cited": ["DOC#one"]}
+            ),
+            "evidence": [Evidence(source="docs", doc_id="DOC", section="one", text="Guidance.")],
+        },
+    )
+    approved = act(action="approve")
+    assert approved["status"] == TicketStatus.APPROVED
+    assert approved["approved_reply"] == approved["final_reply"] == "Please consult this document."
+    assert approved["approval_cited"] == ["DOC#one"]
+    assert approved["processing_history"][-1]["edited"] is False
 
 
 def test_transient_final_verification_failure_can_retry_same_text_without_override():

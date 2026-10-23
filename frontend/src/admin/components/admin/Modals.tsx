@@ -39,8 +39,8 @@ export default function ModalHost() {
   return (
     <Dialog open={!!m} onOpenChange={(o) => !o && closeModal()}>
       {m && (
-        <DialogContent className={WIDE.includes(m.type) ? "max-h-[90dvh] overflow-y-auto sm:max-w-2xl" : "max-h-[90dvh] overflow-y-auto sm:max-w-lg"}>
-          <DialogHeader><DialogTitle>{m.type === "send" && t ? (t.purpose === "request" ? "고객 질의서 발송" : "고객 답변 발송") : m.type === "care" ? kindLabel(m.props?.kind) : TITLES[m.type] || "알림"}</DialogTitle></DialogHeader>
+        <DialogContent className={cn(MODAL, WIDE.includes(m.type) ? "sm:max-w-2xl" : "sm:max-w-lg")}>
+          <DialogHeader className="pr-8"><DialogTitle className="text-[22px] font-semibold">{m.type === "send" && t ? (t.purpose === "request" ? "고객 질의서 발송" : "고객 답변 발송") : m.type === "care" ? kindLabel(m.props?.kind) : TITLES[m.type] || "알림"}</DialogTitle></DialogHeader>
           <Body type={m.type} props={m.props || {}} t={t} />
         </DialogContent>
       )}
@@ -66,7 +66,9 @@ function Body({ type, props, t }: { type: string; props: Record<string, any>; t?
     default: return null;
   }
 }
-const Footer = ({ children }: { children: ReactNode }) => <DialogFooter className="mt-2">{children}</DialogFooter>;
+/** 모든 모달의 여백: 안쪽 32px, 구역 사이 24px. 닫기 버튼과 아래 버튼 줄도 같은 여백에 맞춘다. */
+const MODAL = "max-h-[90dvh] gap-6 overflow-y-auto rounded-2xl p-8 text-[15px] leading-relaxed [&>[data-slot=dialog-close]]:top-5 [&>[data-slot=dialog-close]]:right-5";
+const Footer = ({ children }: { children: ReactNode }) => <DialogFooter className="-mx-8 -mb-8 mt-2 px-8 py-5">{children}</DialogFooter>;
 const Close = ({ label = "닫기" }: { label?: string }) => <Button type="button" variant="outline" onClick={closeModal}>{label}</Button>;
 
 function NewTicket() {
@@ -113,7 +115,7 @@ function Assign({ t }: { t: Ticket }) {
           return (
             <div key={p.name} className="grid gap-1 rounded-xl bg-muted p-4">
               <div className="flex items-center justify-between"><strong className="flex items-center gap-2.5"><PersonAvatar name={p.name} size={32} />{p.name}</strong><Tag tone={p === best ? "green" : ""}>{p === best ? "추천" : ok ? "배정 가능" : "수용량 가득"}</Tag></div>
-              <small className="text-muted-foreground">이 문의 제외 미완료 {r.count}/{r.capacity}건 · 여유 {r.free}건</small>
+              <small className="text-muted-foreground">진행 중 {r.count}건</small>
             </div>
           );
         })}
@@ -136,7 +138,7 @@ function Send({ t }: { t: Ticket }) {
   return (
     <>
       <p className="text-sm">{t.company}에 {t.purpose === "request" ? "고객 질의서를" : "답변을"} 발송하고 처리 이력에 기록합니다. 영어 원문과 아래의 고객 언어 문구를 함께 기록합니다.</p>
-      <p dir="auto" className="whitespace-pre-wrap rounded-xl bg-muted p-4">{t.replyPreview?.final_text}</p>
+      <p dir="auto" className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl bg-muted px-5 py-4">{t.replyPreview?.final_text}</p>
       {pending && <p role="status" className="text-sm text-muted-foreground">본문이 변경되어 최종 점검이 필요합니다. 발송 요청 시 현재 내용을 점검하며, 새 오류가 발견되면 발송을 보류합니다.</p>}
       {t.approvalError && <p role="alert" className="text-sm text-destructive">{t.approvalError}</p>}
       {failed.length > 0 && (

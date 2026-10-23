@@ -40,7 +40,7 @@ const phraseMap: Record<string, string> = {
   HARDWARE: "하드웨어",
   WEAR_PART: "소모·마모 부품",
   TS_AUTO: "자동화 기술지원",
-  TS_LV: "저압 기술지원",
+  TS_LV: "저압기기 기술지원",
   FIELD_SVC: "현장 서비스",
   WARRANTY_DESK: "보증·RMA 담당",
   QA_CLAIM: "품질 클레임",
@@ -94,7 +94,7 @@ export const recommend = (excludeId?: string) => candidates(excludeId)[0];
 export function resourceReason(p: Person | undefined, excludeId?: string) {
   if (!p) return "배정할 수 있는 담당자가 없습니다(모두 가득 참) · 미배정으로 등록";
   const r = resource(p, excludeId);
-  return `${p.department} · 미완료 ${r.count}/${r.capacity}건 · 여유 ${r.free}건`;
+  return `${p.department} · 진행 중 ${r.count}건`;
 }
 
 export function assignmentSummary(t: Ticket) {
@@ -390,6 +390,12 @@ linkCustomers();
 for (const t of tickets) {
   t.department = FRONTLINE;
   for (const e of t.events) if (e.kind === "escalation" && ["자동화 기술지원", "저압 기술지원"].includes(e.requestingDepartment)) e.requestingDepartment = FRONTLINE;
+  // 부서 이름을 부서표(departments.csv)에 맞춘다: 예전 "저압 기술지원" → "저압기기 기술지원".
+  if (t.source !== "api") for (const e of t.events) {
+    if (e.department === "저압 기술지원") e.department = "저압기기 기술지원";
+    if (e.actor === "저압 기술지원") e.actor = "저압기기 기술지원";
+    if (e.kind === "escalation" && e.text === "저압 기술지원 검토 요청") e.text = "저압기기 기술지원 검토 요청";
+  }
 }
 
 // 샘플: 전문부서 요청. 대기 2건 + 회신 받음 1건. 이미 만든 적이 있으면(seededCollab) 다시 만들지 않는다.
@@ -403,8 +409,8 @@ for (const t of tickets) {
   if (a && !a.seededCollab) { a.seededCollab = true; a.legacyReviewPending = false; request(a, "REQ-S100OVH1", "현장 서비스", "S100 7.5kW 과열 알람이 반복됩니다. 현장 냉각 팬과 설치 환경 점검 가능 여부를 회신해 주세요.", 5); }
   if (b && !b.seededCollab) { b.seededCollab = true; request(b, "REQ-XGIFW002", "자동화 기술지원", "XGI CPU 펌웨어 업데이트 순서와 주의사항을 확인해 주세요.", 2, "기업 메신저"); }
   if (c && !c.seededCollab) {
-    c.seededCollab = true; request(c, "REQ-MCCB0031", "저압 기술지원", "MCCB 100AF 최신 기술문서 개정 번호를 확인해 주세요.", 20);
-    c.events.push({ kind: "expert", text: "최신 개정은 Rev.4이며, 이전 Rev.3 대비 단락 차단 용량 표기가 바뀌었습니다.", requestId: "REQ-MCCB0031", department: "저압 기술지원", time: "어제", createdAt: ago(8), actor: "저압 기술지원" });
+    c.seededCollab = true; request(c, "REQ-MCCB0031", "저압기기 기술지원", "MCCB 100AF 최신 기술문서 개정 번호를 확인해 주세요.", 20);
+    c.events.push({ kind: "expert", text: "최신 개정은 Rev.4이며, 이전 Rev.3 대비 단락 차단 용량 표기가 바뀌었습니다.", requestId: "REQ-MCCB0031", department: "저압기기 기술지원", time: "어제", createdAt: ago(8), actor: "저압기기 기술지원" });
   }
 }
 
