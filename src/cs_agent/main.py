@@ -33,7 +33,7 @@ from cs_agent import __version__
 from cs_agent.agents.case_memory import with_live_cases
 from cs_agent.agents.retrieval import default_retrievers
 from cs_agent.api import agents as agents_api
-from cs_agent.api import chat, dashboard, inquiries, products, tickets
+from cs_agent.api import chat, dashboard, inquiries, products, progress, tickets
 from cs_agent.cache.store import ChatSessionStore, MemoryKV, connect_redis
 from cs_agent.config import Settings, get_settings
 from cs_agent.graph.builder import GraphDeps, build_ticket_graph, postgres_checkpointer
@@ -41,6 +41,7 @@ from cs_agent.llm import tracing
 from cs_agent.llm.router import LLMRouter, get_router
 from cs_agent.rules.tables import load_tables
 from cs_agent.services.assignment import load_agents
+from cs_agent.services.progress import ProgressService
 from cs_agent.services.records import MemoryRecords, SqlRecords
 from cs_agent.services.tickets import TicketService
 
@@ -161,6 +162,7 @@ def create_app(
                 roster,
                 escalation_writer=partial(deps.write_escalation_request, llm=deps.llm),
             )
+            app.state.progress = ProgressService(app.state.tickets, app.state.llm)
             interval = settings.analysis_retry_interval_s
             retry = (
                 asyncio.create_task(_retry_pending_loop(app.state.tickets, interval))
@@ -189,7 +191,7 @@ def create_app(
     def health() -> dict:
         return {"status": "ok", "version": __version__}
 
-    for module in (tickets, inquiries, chat, products, dashboard, agents_api):
+    for module in (tickets, inquiries, chat, products, dashboard, agents_api, progress):
         app.include_router(module.router, prefix="/api")
     return app
 

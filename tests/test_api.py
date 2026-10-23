@@ -7,6 +7,7 @@ from stubs import ANALYSIS
 from cs_agent.config import Settings
 from cs_agent.llm.router import LLMRouter
 from cs_agent.main import create_app
+from cs_agent.schemas import CheckResult
 
 INQUIRY = {
     "channel": "email",
@@ -67,7 +68,12 @@ def test_api_exposes_english_review_and_approved_customer_reply():
     with TestClient(
         create_app(
             llm=LLMRouter(Settings(_env_file=None)),
-            agents={**ANALYSIS, "translate_reply": translate},
+            agents={
+                **ANALYSIS,
+                "translate_reply": translate,
+                # 이 검사는 번역 실패·재시도와 고객 언어 노출을 검증한다.
+                "verify": lambda *a: [CheckResult(name="translation_test", passed=True)],
+            },
             storage="memory",
             retrievers=(None, None),
         )
@@ -264,3 +270,146 @@ def test_answered_lists_sent_but_unresolved_tickets(client):
 
     client.post(f"/api/tickets/{tid}/resolve")
     assert client.get("/api/tickets/answered").json() == []
+
+
+@pytest.fixture
+def preview_client():
+    from cs_agent.schemas import Draft
+
+    with TestClient(
+        create_app(
+            llm=LLMRouter(Settings(_env_file=None)),
+            storage="memory",
+            retrievers=(None, None),
+            agents={
+                **ANALYSIS,
+                "write_draft": lambda *a, **k: Draft(
+                    text=(
+                        "Please confirm the product specifications "
+                        "before proceeding with installation."
+                    ),
+                    slots={"draft_language": "en"},
+                    model="test",
+                ),
+                "verify": lambda *a, **k: [CheckResult(name="test", passed=True)],
+            },
+        )
+    ) as client:
+        yield client
+
+
+def test_explicit_reply_preview_does_not_send_and_send_reuses_exact_preview(
+    preview_client, monkeypatch
+):
+    client = preview_client
+    from cs_agent.agents import drafting
+
+    calls = []
+
+    def translate(text, source, target, llm):
+        calls.append((text, source, target))
+        return "Exact preview shown to the staff."
+
+    monkeypatch.setattr(drafting, "translate_reply", translate)
+    row = client.post("/api/tickets", json=INQUIRY).json()
+    tid, text = row["ticket_id"], row["draft"]["text"]
+    response = client.post(f"/api/tickets/{tid}/reply-preview", json={"text": text})
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    same = client.post(f"/api/tickets/{tid}/reply-preview", json={"text": text}).json()
+    assert same["preview_id"] == preview["preview_id"]
+    current = client.get(f"/api/tickets/{tid}").json()
+    assert current["status"] == row["status"]
+    assert current["final_reply"] is None
+    sent = client.post(
+        f"/api/tickets/{tid}/action",
+        json={"action": "approve", "reply_preview_id": preview["preview_id"]},
+    )
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["status"] == "APPROVED"
+    assert sent.json()["final_reply"] == preview["final_text"]
+    assert len(calls) == 1
+
+
+def test_preview_rejects_edited_source_and_changed_context(preview_client, monkeypatch):
+    client = preview_client
+    from cs_agent.agents import drafting
+
+    monkeypatch.setattr(drafting, "translate_reply", lambda *args: "Prepared customer text")
+    row = client.post("/api/tickets", json=INQUIRY).json()
+    tid, text = row["ticket_id"], row["draft"]["text"]
+    preview = client.post(f"/api/tickets/{tid}/reply-preview", json={"text": text}).json()
+    edited = client.post(
+        f"/api/tickets/{tid}/action",
+        json={
+            "action": "edit_approve",
+            "edited_text": text + " Changed.",
+            "reply_preview_id": preview["preview_id"],
+        },
+    )
+    assert edited.status_code == 409
+    service = client.app.state.tickets
+    service.graph.update_state(service._config(tid), {"customer_revision": 1}, as_node="ready")
+    stale = client.post(
+        f"/api/tickets/{tid}/action",
+        json={
+            "action": "approve",
+            "reply_preview_id": preview["preview_id"],
+        },
+    )
+    assert stale.status_code == 409
+    assert service.get(tid).final_reply is None
+
+
+def test_preview_translation_failure_keeps_draft_and_review_state(preview_client, monkeypatch):
+    client = preview_client
+    from cs_agent.agents import drafting
+
+    def fail(*args):
+        raise drafting.TranslationError("temporary failure")
+
+    monkeypatch.setattr(drafting, "translate_reply", fail)
+    row = client.post("/api/tickets", json=INQUIRY).json()
+    tid = row["ticket_id"]
+    response = client.post(f"/api/tickets/{tid}/reply-preview", json={"text": row["draft"]["text"]})
+    assert response.status_code == 503
+    current = client.get(f"/api/tickets/{tid}").json()
+    assert current["status"] == row["status"]
+    assert current["draft"] == row["draft"]
+    assert current["final_reply"] is None
+
+
+def test_info_request_preview_is_reused_without_second_translation(preview_client, monkeypatch):
+    client = preview_client
+    from cs_agent.agents import info_request
+
+    calls = []
+
+    def localize(text, language, llm):
+        calls.append(text)
+        return "Please send the requested information."
+
+    monkeypatch.setattr(info_request, "localize_request", localize)
+    row = client.post("/api/tickets", json=INQUIRY).json()
+    tid = row["ticket_id"]
+    request = client.post(
+        f"/api/tickets/{tid}/action",
+        json={
+            "action": "info_request",
+            "info_items": ["serial_no"],
+        },
+    ).json()
+    text = request["info_request"]
+    preview_response = client.post(f"/api/tickets/{tid}/reply-preview", json={"text": text})
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()
+    sent = client.post(
+        f"/api/tickets/{tid}/action",
+        json={
+            "action": "approve",
+            "reply_preview_id": preview["preview_id"],
+        },
+    ).json()
+    assert sent["status"] == "WAITING_CUSTOMER"
+    assert sent["final_reply"] == preview["final_text"]
+    assert len(calls) == 1

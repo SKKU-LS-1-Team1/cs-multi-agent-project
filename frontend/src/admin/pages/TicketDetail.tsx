@@ -10,12 +10,12 @@ import { Textarea } from "@admin/components/ui/textarea";
 import { AiMark, Facts, Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, StatusTag, Tag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import {
   answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, feedbackLabel, informationAssessment, informationSummary, inquirySummary, isEdited,
-  canAssign, latestCustomerReply, needsLocalization, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
+  canAssign, latestCustomerReply, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
-  canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
+  prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
-import { escalationDraftViaApi } from "@admin/lib/api-sync";
+import { isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
@@ -28,6 +28,7 @@ type Next = { label: string; run?: () => void; waiting?: boolean };
 /** 지금 담당자가 눌러야 할 단 하나의 행동. Copilot 의 '현재 판단'과 같은 규칙을 따른다. */
 function nextAction(t: Ticket): Next | null {
   if (t.stage === 5) return null;
+  if (t.source === "api" && !t.analysisReady && !isManualReplyTicket(t) && !t.sent) return { label: "문의 분석 확인 대기", waiting: true };
   if (t.sent) return { label: "처리 결과 기록 및 완료", run: () => openCompletion(t) };
   if (t.activeComposer === "expert") return null; // 요청서를 쓰는 중에는 판단 카드가 따로 안내한다
   if (!t.owner) return canAssign ? { label: "담당자 배정", run: () => openModal("assign", { id: t.id }) } : { label: "팀장이 배정합니다", waiting: true };
@@ -35,9 +36,22 @@ function nextAction(t: Ticket): Next | null {
   if (t.customerRequestStatus === "waiting") return { label: "고객 회신 대기 중", waiting: true };
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) };
   if (t.draft && t.purpose !== "request" && (waitingReviews(t).length || t.legacyReviewPending)) return { label: "전문부서 회신 등록", run: () => openModal("expert-receive", { id: t.id }) };
+  if (isManualReplyTicket(t) && (!t.draft || (t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0)
+    || (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)
+    || (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null))) {
+    return { label: "담당자 답변 작성·검토", run: () => composeFromCopilot(t, "answer") };
+  }
   if (t.draft) {
-    if (canSend(t)) return { label: "승인 및 발송", run: () => openModal("send", { id: t.id }) };
-    return { label: "영어 초안 검토하기", run: () => { document.getElementById("answer-editor")?.scrollIntoView({ behavior: "smooth", block: "center" }); document.querySelector<HTMLTextAreaElement>("#answer-editor textarea")?.focus({ preventScroll: true }); } };
+    if (t.source === "api" && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return {
+      label: "확인된 자료 반영해 재작성", run: () => regenerateDraft(t, "Reflect the latest staff-confirmed information and remove withdrawn facts.") };
+    if (t.source === "api" && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return {
+      label: "최신 고객 회신 반영해 재작성", run: () => regenerateDraft(t, "Reflect the latest customer reply and confirmed information in the answer.") };
+    if (t.source === "api" && t.purpose !== "request" && (t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0)) {
+      return { label: "전문부서 회신 반영해 재작성", run: () => regenerateDraft(t, "Incorporate all registered specialist replies as evidence, distinguishing confirmed findings from hypotheses.") };
+    }
+    if (!hasCurrentReplyPreview(t)) return { label: t.translatingReply ? "변환 중…" : "고객 언어로 변환", run: () => { void prepareCustomerReply(t); } };
+    if (canSend(t)) return { label: "발송하기", run: () => openModal("send", { id: t.id }) };
+    return { label: "발송 문구 검토하기", run: () => { document.getElementById("answer-editor")?.scrollIntoView({ behavior: "smooth", block: "center" }); } };
   }
   if (c.missingInfo.length) return { label: "고객 질의서 작성", run: () => composeFromCopilot(t, "request") };
   if (waitingReviews(t).length || t.legacyReviewPending) return { label: "전문부서 회신 등록", run: () => openModal("expert-receive", { id: t.id }) };
@@ -49,12 +63,12 @@ type Step = { key: string; label: string; sub: string; state: StepState; action?
 function flowSteps(t: Ticket): Step[] {
   const items = informationAssessment(t), req = requiredInformation(t).length, reply = latestCustomerReply(t);
   const pending = waitingReviews(t).length + (t.legacyReviewPending ? 1 : 0), gotExpert = t.events.some((e) => e.kind === "expert");
-  const missing = items.filter((x) => x.status !== "confirmed").length, needsCheck = t.customerRequestStatus === "received" && reply && req > 0 && reply.id !== t.reviewedReplyKey;
+  const missing = items.filter((x) => !["provided", "confirmed"].includes(x.status)).length, needsCheck = t.customerRequestStatus === "received" && reply && req > 0 && reply.id !== t.reviewedReplyKey;
   const writing = !!t.draft && t.purpose === "answer";
-  const done = t.stage === 5;
+  const done = t.stage === 5, analysisReady = t.source !== "api" || t.analysisReady;
   const steps: Step[] = [
-    { key: "intake", label: "접수·분석", sub: "완료", state: "done" },
-    { key: "info", label: "고객 정보", sub: !req ? "추가 자료 불필요" : t.customerRequestStatus === "none" && missing ? `자료 필요 ${missing}건` : informationSummary(t), state: !req || !missing ? "done" : t.customerRequestStatus === "waiting" ? "waiting" : "current",
+    { key: "intake", label: "접수·분석", sub: analysisReady ? "완료" : t.status, state: analysisReady ? "done" : "current" },
+    { key: "info", label: "고객 정보", sub: !analysisReady ? "필수정보 확인 대기" : !req ? "추가 자료 불필요" : t.customerRequestStatus === "none" && missing ? `자료 필요 ${missing}건` : informationSummary(t), state: !analysisReady ? "todo" : !req || !missing ? "done" : t.customerRequestStatus === "waiting" ? "waiting" : "current",
       action: needsCheck && !done ? { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) } : undefined },
     { key: "expert", label: "전문부서", sub: pending ? `회신 대기 ${pending}건` : gotExpert ? "회신 수신" : "요청 없음 (선택)", state: pending ? "current" : gotExpert ? "done" : "optional",
       action: pending && !done ? { label: "회신 등록", run: () => openModal("expert-receive", { id: t.id }) } : undefined },
@@ -103,7 +117,7 @@ export default function TicketDetail() {
 
 function evidenceCount(t: Ticket) {
   const c = answerContext(t);
-  return c.technical.documents.length + c.technical.similarCases.length + (c.expertResponse ? 1 : 0);
+  return c.technical.documents.length + c.technical.similarCases.length + (c.expertReferences?.length || 0);
 }
 
 function Header({ t }: { t: Ticket }) {
@@ -114,11 +128,12 @@ function Header({ t }: { t: Ticket }) {
         <button className="text-info hover:underline" onClick={() => { setUi({ filter: "전체" }); go.list({ filter: "전체" }); }}>‹ 문의 목록</button>
         <span className="text-muted-foreground">/ <Mono>{t.id}</Mono> · {t.channel || "WEB FORM"}</span>
         <div className="ml-auto flex items-center gap-2">
+          {t.source === "api" && t.apiCustomerId && <Button size="sm" variant="outline" onClick={() => openModal("care", { customerId: t.apiCustomerId, ticketId: t.id, kind: "notice" })}>진행 상황 안내</Button>}
           {canAssign ? <Button variant="outline" title={assignmentSummary(t).join(" · ")} onClick={() => openModal("assign", { id: t.id })}>{t.owner && <PersonAvatar name={t.owner} size={22} />}{t.owner || "담당자 배정"}<ChevronDown /></Button>
             : <span title="담당자 배정은 팀장만 할 수 있습니다" className="inline-flex h-9 items-center gap-2 rounded-full bg-card px-4 text-sm shadow-card">{t.owner && <PersonAvatar name={t.owner} size={22} />}{t.owner || "미배정"}</span>}
         </div>
       </div>
-      <h1 className="text-[30px] font-bold leading-tight tracking-tight">{t.id === SAMPLE ? "운전 직후 E.OC 트립 발생" : t.title}</h1>
+      <h1 className="text-[30px] font-bold leading-tight tracking-tight">{t.source !== "api" && t.id === SAMPLE ? "운전 직후 E.OC 트립 발생" : t.title}</h1>
       <div className="flex flex-wrap items-center gap-2.5 text-sm text-muted-foreground">
         <StatusTag t={t} /><PriorityTag p={t.priority} />{t.stage !== 5 && <SlaTag t={t} />}
         <span>· {t.product} · {t.country} · 고객 언어 {customerLanguage(t)}</span>
@@ -183,10 +198,10 @@ const Attachments = ({ files, t }: { files: string[]; t: Ticket }) => (
 );
 
 function Original({ t }: { t: Ticket }) {
-  const sample = t.id === SAMPLE;
-  const text = t.translate ? (sample ? "iS7 75kW가 운전 명령 직후 E.OC로 트립합니다. 재시작해도 같은 현상이 발생합니다." : t.bodyKo || t.title) : sourceInquiry(t);
+  const sample = t.source !== "api" && t.id === SAMPLE;
+  const text = t.translate ? (sample ? "iS7 75kW가 운전 명령 직후 E.OC로 트립합니다. 재시작해도 같은 현상이 발생합니다." : t.bodyKo || "한국어 번역이 아직 준비되지 않았습니다. 원문을 확인해 주세요.") : sourceInquiry(t);
   return (
-    <Message role="customer" label="고객 문의" title={t.company} right={<small className="text-muted-foreground">{t.receivedLabel || `${INQUIRY_AT} UTC`}</small>}>
+    <Message role="customer" label="고객 문의" title={t.company} right={<small className="text-muted-foreground">{t.receivedLabel || (t.source === "api" ? "접수 시각 미기록" : `${INQUIRY_AT} UTC`)}</small>}>
       <div className="flex items-center gap-3"><Tag className="rounded-md">원문 · {t.language}</Tag><button className="text-xs text-info hover:underline" onClick={() => toggleTranslate(t)}>{t.translate ? "원문 보기" : "한국어 번역"}</button></div>
       <p className="leading-relaxed">{text}</p>
       {sample && <><p className="text-muted-foreground">FW 4.00 · 부하 69% · 재시작 후 반복</p><Attachments t={t} files={["event_log.csv", "params.bak"]} /></>}
@@ -254,6 +269,7 @@ function Editor({ t }: { t: Ticket }) {
   const [folded, setFolded] = useState(false);
   if (t.activeComposer === "expert") return <ExpertEditor t={t} />;
   if (!t.draft && !t.composerOpen) return null;
+  const manual = isManualReplyTicket(t);
   const isRequestDraft = t.purpose === "request", expertWaiting = waitingReviews(t).length > 0 || !!t.legacyReviewPending;
   // 전문부서 회신을 기다리는 동안은 고객 답변 작성칸을 열지 않는다(회신을 보고 써야 하므로). 고객에게 보내는 질의서는 해당 없음.
   if (!isRequestDraft && expertWaiting && !t.sent && t.stage !== 5) {
@@ -264,28 +280,32 @@ function Editor({ t }: { t: Ticket }) {
       </Card>
     );
   }
-  const live = answerContext(t), used = t.draftContext || answerContext(t, t.purpose);
+  const live = answerContext(t), used = t.source === "api" ? answerContext(t, t.purpose) : t.draftContext || answerContext(t, t.purpose);
   const isNew = contextIsNew(t), isRequest = (t.purpose || live.purpose) === "request";
-  const lang = customerLanguage(t), needs = needsLocalization(t), busy = !!t.regenerating;
+  const lang = customerLanguage(t), busy = !!t.regenerating || !!t.sending;
   return (
     <Card id="answer-editor" className="scroll-mt-6 gap-0 p-0 shadow-float ring-1 ring-black/5">
       <div className="flex items-center justify-between gap-4 px-8 pb-3 pt-7">
         <h2 className="flex items-center gap-3 text-xl font-bold">{isRequest ? "고객 질의서 작성" : "고객 답변 작성"}
           {t.draft && <button type="button" aria-expanded={!folded} onClick={() => setFolded((v) => !v)} className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"><ChevronDown className={cn("size-3.5 transition-transform", folded && "-rotate-90")} aria-hidden />{folded ? "펼치기" : "접기"}</button>}
         </h2>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground"><span>작성 English</span>{needs ? <><span aria-hidden>→</span><span>발송 시 <b className="font-medium text-foreground">{lang}</b>로 자동 변환</span></> : <span>· 고객 언어 English</span>}</div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground"><span>작성 English</span><span>→ 고객 언어 <b className="font-medium text-foreground">{lang}</b></span></div>
       </div>
       {!folded && (
         <div className="grid gap-6 px-8 pb-7 pt-2">
           {t.draft ? <Sources c={used} /> : live.purpose === "request" ? <Sources c={live} /> : null}
-          {isNew && <div className="rounded-2xl bg-warning/15 px-5 py-3 text-sm text-warning-ink">새 자료가 도착했습니다. 작성 중인 내용과 함께 확인해 주세요.</div>}
-          {t.draft ? (
+          {isNew && <div className="rounded-2xl bg-warning/15 px-5 py-3 text-sm text-warning-ink">{t.source === "api" && (t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0) ? "새 전문부서 회신을 반영해 AI에게 답변 재작성을 요청한 뒤 검토하세요. 기존 초안은 보존됩니다." : "새 자료가 도착했습니다. 작성 중인 내용과 함께 확인해 주세요."}</div>}
+          {t.draft || manual ? (
             <>
               <div className="grid gap-3">
-                <div className="flex items-center gap-2.5 text-sm font-medium"><AiMark />{`미발송 초안 · v${t.draftVersion || 1}`}{isEdited(t) && <Tag tone="amber">AI 초안에서 수정됨</Tag>}{busy && <small className="font-normal text-info">AI가 다시 만드는 중…</small>}</div>
+                <div className="flex items-center gap-2.5 text-sm font-medium">{!manual && <AiMark />}{manual ? "담당자 작성 · 영어 답변" : `미발송 초안 · v${t.draftVersion || 1}`}{!manual && isEdited(t) && <Tag tone="amber">AI 초안에서 수정됨</Tag>}{busy && <small className="font-normal text-info">AI가 다시 만드는 중…</small>}</div>
                 <Textarea aria-label="영어 초안" disabled={busy} className="min-h-36 max-h-56 rounded-2xl border-0 bg-muted/60 px-5 py-4 text-base leading-[1.8]" value={t.draft} onChange={(e) => editDraft(t, e.target.value)} />
               </div>
-              <RewriteBox t={t} busy={busy} />
+              {!manual && <RewriteBox t={t} busy={busy} />}
+              {hasCurrentReplyPreview(t) && <section className="grid gap-2 rounded-2xl bg-muted/60 p-5">
+                <strong className="text-sm">{lang} · 발송용 문구{t.source !== "api" ? " (예시 시뮬레이션)" : ""}</strong>
+                <p dir="auto" className="whitespace-pre-wrap text-base leading-[1.8]">{t.replyPreview.final_text}</p>
+              </section>}
             </>
           ) : (
             <div className="grid gap-2 rounded-2xl bg-muted/60 p-8 text-center">
@@ -295,14 +315,20 @@ function Editor({ t }: { t: Ticket }) {
           )}
         </div>
       )}
-      <div className="flex items-center justify-between gap-4 border-t px-8 py-5">
-        {t.draft ? (
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t px-8 py-5">
+        {t.draft && hasCurrentReplyPreview(t) ? (
           <div className="grid gap-1">
             <label className="flex items-center gap-2.5 text-[15px]"><Checkbox checked={!!t.reviewed} onCheckedChange={(v) => setReviewed(t, v === true)} />{live.purpose === "request" ? "요청 항목과 내용을 확인했습니다." : "내용과 근거를 검토했습니다."}</label>
-            <small className="pl-[26px] text-muted-foreground">{!isRequestDraft && expertWaiting ? "전문부서 회신을 등록한 뒤 발송할 수 있습니다" : t.reviewed ? (needs ? `승인하면 ${lang}로 변환해 발송합니다` : "승인하면 발송합니다") : "먼저 영어 내용을 확인해 주세요"}</small>
+            <small className="pl-[26px] text-muted-foreground">{!isRequestDraft && expertWaiting ? "전문부서 회신을 등록한 뒤 발송할 수 있습니다" : t.reviewed ? "검토가 끝났습니다. 발송하기를 눌러 주세요" : "영어 초안과 변환된 발송용 문구를 확인한 뒤 체크해 주세요"}</small>
           </div>
         ) : <small className="text-muted-foreground">담당자 검토 후 발송</small>}
-        {t.draft && <Button size="lg" className="px-6" disabled={!canSend(t) || busy} onClick={() => canSend(t) && openModal("send", { id: t.id })}>승인 및 발송</Button>}
+        {t.draft && <div className="ml-auto flex shrink-0 items-center gap-2">
+          {hasCurrentReplyPreview(t) ? (
+            <Button size="lg" className="px-6" disabled={!canSend(t) || busy} onClick={() => canSend(t) && openModal("send", { id: t.id })}>발송하기</Button>
+          ) : (
+            <Button variant="outline" size="lg" disabled={busy || t.translatingReply} onClick={() => void prepareCustomerReply(t)}>{t.translatingReply ? "변환 중…" : "고객 언어로 변환"}</Button>
+          )}
+        </div>}
       </div>
     </Card>
   );
@@ -334,7 +360,7 @@ function Sources({ c }: { c: any }) {
 }
 
 function ExpertEditor({ t }: { t: Ticket }) {
-  const files = [...new Set([...(t.files || []), ...(t.id === SAMPLE ? ["event_log.csv", "params.bak"] : [])])];
+  const files = [...new Set([...(t.files || []), ...(t.source !== "api" && t.id === SAMPLE ? ["event_log.csv", "params.bak"] : [])])];
   const checked: string[] = t.expertDraftFiles || [];
   return (
     <Card id="answer-editor" className="scroll-mt-6 p-6 shadow-float ring-1 ring-black/5">
@@ -343,21 +369,21 @@ function ExpertEditor({ t }: { t: Ticket }) {
         const d = new FormData(e.currentTarget);
         submitExpertRequest(t, { department: String(d.get("department")), channel: String(d.get("channel")), body: t.expertDraft || "", files: checked });
       }}>
-        <div className="flex items-center justify-between"><h2 className="text-lg font-bold">전문부서 요청서 작성</h2><Button type="button" size="sm" variant="ghost" onClick={() => closeComposer(t)}>닫기</Button></div>
+        <div className="flex items-center justify-between"><h2 className="text-lg font-bold">전문부서 요청서 작성 · 한국어</h2><Button type="button" size="sm" variant="ghost" onClick={() => closeComposer(t)}>닫기</Button></div>
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">대상 부서</span>
-            <NativeSelect name="department" value={t.expertDraftDepartment || expertDepartments[0]} onChange={(e) => { t.expertDraftDepartment = e.target.value; commit(); if (t.source === "api") void escalationDraftViaApi(t, e.target.value); }}>{expertDepartments.map((n) => <option key={n}>{n}</option>)}</NativeSelect></label>
-          <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">전달 방식</span><NativeSelect name="channel" defaultValue="이메일"><option>이메일</option><option>기업 메신저</option></NativeSelect></label>
+            <NativeSelect disabled={t.specialistSaving} name="department" value={t.expertDraftDepartment || expertDepartments[0]} onChange={(e) => { t.expertDraftDepartment = e.target.value; commit(); if (t.source === "api") void escalationDraftViaApi(t, e.target.value); }}>{expertDepartments.map((n) => <option key={n}>{n}</option>)}</NativeSelect></label>
+          <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">전달 방식</span><NativeSelect disabled={t.specialistSaving} name="channel" defaultValue="이메일"><option>이메일</option><option>기업 메신저</option></NativeSelect></label>
         </div>
         {t.expertDraftLoading && <small className="text-muted-foreground">AI가 요청서 초안을 쓰는 중이에요…</small>}
-        <Textarea aria-label="전문부서 요청서" required className="min-h-32 max-h-44 leading-relaxed" value={t.expertDraft || ""} onChange={(e) => { t.expertDraft = e.target.value; commit(); }} />
+        <Textarea disabled={t.specialistSaving} aria-label="전문부서 요청서" required className="min-h-32 max-h-44 leading-relaxed" value={t.expertDraft || ""} onChange={(e) => { t.expertDraft = e.target.value; commit(); }} />
         <fieldset className="grid gap-2 rounded-xl bg-background p-4"><legend className="px-1 text-sm text-muted-foreground">전달한 자료</legend>
           {files.length ? files.map((f) => (
             <label key={f} className="flex items-center gap-2 text-sm"><Checkbox checked={checked.includes(f)} onCheckedChange={(v) => { t.expertDraftFiles = v === true ? [...checked, f] : checked.filter((x) => x !== f); commit(); }} />{f}</label>
           )) : <small className="text-muted-foreground">등록된 첨부자료 없음</small>}
         </fieldset>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" required className="size-4 accent-[var(--primary)]" />요청 내용과 전달 자료를 확인했습니다.</label>
-        <div className="flex items-center justify-between"><small className="text-muted-foreground">외부 전달 후 요청을 기록합니다.</small><Button type="submit">검토 요청 기록</Button></div>
+        <div className="flex items-center justify-between"><small className="text-muted-foreground">외부 전달 후 요청을 기록합니다.</small><Button type="submit" disabled={t.specialistSaving || t.expertDraftLoading}>{t.specialistSaving ? "저장 중…" : "검토 요청 기록"}</Button></div>
       </form>
     </Card>
   );
@@ -369,11 +395,13 @@ const stamp = (e: { createdAt?: string; time?: string }) => (e.createdAt ? new D
 const ACTOR: Record<string, string> = { customer: "고객", system: "시스템" };
 function History({ t }: { t: Ticket }) {
   const rows = [
-    { time: `${INQUIRY_AT}`, title: "문의 접수", sub: `웹폼 · ${t.company}` },
-    { time: `${INQUIRY_AT}`, title: "AI 분석 완료", sub: `${t.type} · ${t.product} · 근거 검색` },
+    ...(t.source === "api" ? [] : [
+      { time: `${INQUIRY_AT}`, title: "문의 접수", sub: `웹폼 · ${t.company}` },
+      { time: `${INQUIRY_AT}`, title: "AI 분석 완료", sub: `${t.type} · ${t.product} · 근거 검색` },
+    ]),
     ...t.events.filter((e) => !["feedback", "feedback_decision"].includes(e.kind)).map((e) => ({
       time: stamp(e),
-      title: e.kind === "sent" ? (e.purpose === "request" ? "고객 질의서 발송" : "답변 승인 및 발송") : e.kind === "customer" ? "고객 추가정보 등록" : e.kind === "expert" ? "전문부서 회신 등록" : e.text || "",
+      title: e.kind === "sent" ? (e.purpose === "request" ? "고객 질의서 발송" : "답변 발송하기") : e.kind === "customer" ? "고객 추가정보 등록" : e.kind === "expert" ? "전문부서 회신 등록" : e.text || "",
       sub: `${ACTOR[e.actor || ""] || e.actor || t.owner || "접수 담당자"}${e.kind === "sent" ? " · 발송 결과 기록" : ""}${e.kind === "sent" && e.edited === true ? ` · 수정 후 승인${e.feedbackReason ? ` · 사유 ${feedbackLabel(e.feedbackReason)}` : ""}` : e.kind === "sent" && e.edited === false ? " · 그대로 승인" : ""}${e.feedbackNote ? ` · “${e.feedbackNote}”` : ""}`,
     })),
   ];
@@ -386,10 +414,14 @@ function History({ t }: { t: Ticket }) {
   );
 }
 function Customer({ t }: { t: Ticket }) {
+  const additionalFields: [string, ReactNode][] = Object.entries(t.apiExtraction?.field_values || {})
+    .filter(([id]) => !["product_model", "current_fw", "error_code", "serial_no"].includes(id))
+    .map(([id, value]) => [t.fieldLabels?.[id] || id, String(value)]);
+  if (t.secondaryType) additionalFields.unshift(["보조 유형", t.secondaryType]);
   return (
     <Card className="gap-5 p-6">
       <h2 className="text-lg font-bold">고객·제품 정보</h2>
-      <Facts rows={[["회사", t.company], ["국가", t.country], ["답변 언어", customerLanguage(t)], ["제품", t.product], ["문의 유형", t.type], ["오류 코드", answerContext(t).analysis.errorCode || "—"], ["담당자", t.owner || "미배정"]]} />
+      <Facts rows={[["회사", t.company], ["국가", t.country], ["답변 언어", customerLanguage(t)], ["제품", t.product], ["문의 유형", t.type], ["오류 코드", answerContext(t).analysis.errorCode || "—"], ["펌웨어", t.apiExtraction?.fw_version || "—"], ["시리얼", t.apiExtraction?.serial_no || "—"], ["긴급도 판단", t.apiExtraction?.assessed_urgency || t.apiExtraction?.urgency || "미확인"], ["담당자", t.owner || "미배정"], ...additionalFields]} />
     </Card>
   );
 }
@@ -407,8 +439,14 @@ function Disclosure({ title, count, children, defaultOpen }: { title: ReactNode;
 }
 
 function judgment(t: Ticket) {
+  if (t.source === "api" && !t.analysisReady && !isManualReplyTicket(t) && !t.sent && t.stage !== 5) return { title: t.status || "분석 확인 대기",
+    task: "문의 분석과 필수정보 결과를 확인한 뒤 다음 작업을 진행하세요.", note: "", reason: "아직 조회되지 않은 값을 충족으로 판단하지 않습니다.", missing: [] as string[] };
   if (!t.owner && t.stage !== 5 && !t.sent) return { title: "담당자 미배정", task: canAssign ? "담당자를 배정한 뒤 처리를 시작하세요." : "팀장이 담당자를 배정하면 처리를 시작할 수 있습니다.", note: "", reason: "배정하면 담당자의 오늘 할 일에 올라갑니다.", missing: [] as string[] };
   if (t.activeComposer === "expert" && t.stage !== 5 && !t.sent) return { title: "전문부서 요청서 작성 중", task: "대상 부서와 요청 내용을 확인하고 요청서를 보내세요.", note: "", reason: "보내면 이 문의는 회신이 올 때까지 전문부서 회신 대기가 됩니다.", missing: [] as string[] };
+  if (isManualReplyTicket(t) && !t.draft && !t.sent && t.stage !== 5) return {
+    title: "담당자 검토 필요", task: "문의와 근거를 확인하고 영어 답변을 직접 작성하세요.",
+    note: "", reason: "작성한 답변은 고객 언어 변환과 최종 점검을 거칩니다.", missing: [] as string[],
+  };
   const reply0 = latestCustomerReply(t);
   // nextAction 과 같은 순서: 고객 회신을 기다리거나 확인할 일이 있으면 초안이 있어도 그 일이 먼저다.
   const customerFirst = t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting" || (t.customerRequestStatus === "received" && !!reply0 && requiredInformation(t).length > 0 && reply0.id !== t.reviewedReplyKey);
@@ -416,16 +454,17 @@ function judgment(t: Ticket) {
     const lang = customerLanguage(t), isRequest = t.purpose === "request", pending = waitingReviews(t).length || (t.legacyReviewPending ? 1 : 0);
     if (!isRequest && pending) return { title: "전문부서 회신 대기", task: "회신을 등록하면 고객 답변을 작성할 수 있습니다.", note: `전문부서 회신 ${pending}건 대기 중`, reason: "답변은 전문부서 회신을 확인한 뒤 작성합니다.", missing: [] as string[] };
     const what = isRequest ? "고객 질의서" : "고객 답변";
-    const [task, why] = !t.reviewed
-      ? ["영어 초안을 검토하고, 필요하면 고쳐 주세요.", "초안은 영어로 작성됩니다. 승인하면 고객 언어로 자동 변환해 발송합니다."]
-      : [needsLocalization(t) ? `검토가 끝났습니다. 승인하면 ${lang}로 자동 변환해 발송합니다.` : "검토가 끝났습니다. 승인하고 발송하세요.", "발송하면 영어 원본과 발송본이 함께 이력에 남습니다."];
+    const [task, why] = !hasCurrentReplyPreview(t)
+      ? ["영어 초안을 검토하고, 필요하면 고쳐 주세요.", "초안은 영어로 작성됩니다. 검토 후 고객 언어로 변환 버튼을 눌러 주세요."]
+      : [t.reviewed ? `${lang} 발송용 문구를 확인한 뒤 발송하세요.` : "영어 초안과 변환된 문구를 확인하고 검토 완료에 체크해 주세요.", "발송하면 영어 원본과 발송본이 함께 이력에 남습니다."];
     const lacking = !isRequest ? answerContext(t).missingInfo.length : 0;
     return { title: `${what} 작성 중`, task, note: lacking ? `아직 받지 못한 자료 ${lacking}건` : "", reason: why, missing: [] as string[] };
   }
   const c = answerContext(t), missing = c.missingInfo.length, expertPending = waitingReviews(t).length || t.legacyReviewPending;
   let title: string, task: string, reason: string;
   const reply = reply0;
-  if (t.stage === 5) { const rec = Object.values(t.resolution || {}).some(Boolean); title = "처리 완료"; task = rec ? "최종 처리 결과가 기록되었습니다." : "문의는 완료됐지만 처리 결과 기록은 비어 있습니다."; reason = "재문의는 기존 문의에서 이어서 처리합니다."; }
+  if (t.apiStatus === "REJECTED") { title = "반려된 문의"; task = "문의가 반려 처리되었습니다."; reason = "처리 이력에서 반려 기록을 확인하세요."; }
+  else if (t.stage === 5) { const rec = Object.values(t.resolution || {}).some(Boolean); title = "처리 완료"; task = rec ? "최종 처리 결과가 기록되었습니다." : "문의는 완료됐지만 처리 결과 기록은 비어 있습니다."; reason = "재문의는 기존 문의에서 이어서 처리합니다."; }
   else if (t.sent && t.customerOutcome === "resolved") { title = "고객 해결 확인 수신"; task = "회신과 최종 처리 결과를 확인하고 완료하세요."; reason = "해결 확인 근거는 고객 회신 이력에 남아 있습니다."; }
   else if (t.sent && t.customerOutcome === "provided") { title = "고객 정보 확인 완료"; task = "응대 결과를 기록하고 완료하세요."; reason = "정보 확인 회신과 기술적 해결 확인은 구분합니다."; }
   else if (t.sent) { title = "고객 답변 발송 완료"; task = "고객 회신이나 처리 결과를 확인하세요."; reason = "회신이 없으면 해결 여부는 미확인입니다."; }
@@ -469,9 +508,16 @@ function Copilot({ t }: { t: Ticket }) {
   const requests = referralRows().filter((r) => r.ticket.id === t.id);
   // 근거: 눌러서 이동하지 않고, 이름 아래에 핵심만 한두 줄로 보여 준다.
   const evidence: { key: string; label: React.ReactNode; hint: string; summary: string }[] = [
-    ...(c.expertResponse ? [{ key: "expert", label: "전문부서 회신", hint: "회신", summary: String(c.expertResponse.text || "") }] : []),
+    ...Object.entries(c.analysis.fieldEvidence).map(([field, text]) => ({ key: `field:${field}`,
+      label: t.fieldLabels?.[field] || field,
+      hint: ["customer", "customer_form"].includes(c.analysis.fieldSources[field]) ? "고객 입력값" : c.analysis.fieldSources[field] === "staff" ? "담당자 확인" : "추출 근거",
+      summary: String(text) })),
+    ...Object.entries(c.analysis.unconfirmed).map(([field, reason]) => ({ key: `unconfirmed:${field}`,
+      label: t.fieldLabels?.[field] || field, hint: "미확인",
+      summary: [reason, t.apiExtraction?.unconfirmed_evidence?.[field]].filter(Boolean).join(" · ") })),
+    ...c.expertReferences.map((r: any) => ({ key: r.id, label: r.label, hint: "회신", summary: String(r.text || "") })),
     ...c.technical.documents.map((d: any) => ({ key: d.id, label: d.label, hint: "기술문서", summary: String(d.text || "") })),
-    ...c.technical.similarCases.map((r: any) => ({ key: r.id, label: <>유사 사례 <Mono>{r.id}</Mono></>, hint: r.matches ? "조건 유사" : "조건 차이", summary: `원인: ${r.cause} → 조치: ${r.action}` })),
+    ...c.technical.similarCases.map((r: any) => ({ key: r.id, label: <>유사 사례 <Mono>{r.id}</Mono></>, hint: r.matches ? "조건 유사" : "조건 차이", summary: r.text || `원인: ${r.cause} → 조치: ${r.action}` })),
   ];
   const open = t.stage !== 5 && !t.sent;
   const choice = branchChoice(t);
@@ -488,6 +534,8 @@ function Copilot({ t }: { t: Ticket }) {
       <div className="divide-y">
         <PanelBlock icon={FileText} tone="info" title="문의 요약">
           <div className="grid gap-2.5 text-[15px] leading-[1.7]">{sum.lines.map((l, i) => <p key={i}>{l}</p>)}</div>
+          {t.apiExtraction?.safety_review_required && <p className="mt-2 text-sm text-warning-ink">안전 관련 담당자 검토가 필요합니다.</p>}
+          {!!c.analysis.issues.length && <p className="mt-2 break-words text-xs text-muted-foreground">분석 검토 항목: {c.analysis.issues.join(" · ")}</p>}
         </PanelBlock>
         <PanelBlock icon={Compass} tone="navy" title="현재 판단">
           <div className="rounded-2xl bg-[#003377]/[0.06] p-5">

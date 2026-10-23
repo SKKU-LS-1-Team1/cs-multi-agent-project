@@ -48,7 +48,17 @@ def test_customer_sees_status_and_reply_but_not_the_ai_draft(client) -> None:
         "message_language",
     }  # 초안·근거·점검·담당자는 내보내지 않는다
 
-    client.post(f"/api/tickets/{tid}/action", json={"action": "edit_approve", "edited_text": "OK."})
+    held = client.post(
+        f"/api/tickets/{tid}/action", json={"action": "edit_approve", "edited_text": "OK."}
+    ).json()
+    assert held["status"] == "ON_HOLD"  # 수정문은 필수 내용 점검을 통과하지 못한다.
+    assert held["approval_text"] == "OK."
+    assert client.get(f"/api/inquiries/{tid}").json()["message"] is None
+    approved = client.post(
+        f"/api/tickets/{tid}/action",
+        json={"action": "approve", "acknowledged_failures": True, "reviewer": "reviewer"},
+    )
+    assert approved.json()["status"] == "APPROVED"
     answered = client.get(f"/api/inquiries/{tid}").json()
     assert (answered["status"], answered["message"], answered["message_language"]) == (
         "ANSWERED",

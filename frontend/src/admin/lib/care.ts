@@ -1,9 +1,10 @@
 // 고객 조치 기록: 누구에게 무슨 조치를 했는지, 다음 확인 일정, 해소 여부. 이 브라우저에만 저장하는 모의 저장소다.
 import { useSyncExternalStore } from "react";
 import { signedIn } from "./logic";
+import type { ProgressNotice } from "../../api/client";
 
 export type CareKind = "notice" | "notice_draft" | "close"; // close = 결과 확인 후 종결(시스템이 남기는 기록)
-export type CareAction = { id: string; kind: CareKind; text: string; at: string; by: string; ticketIds?: string[]; language?: string };
+export type CareAction = { id: string; kind: CareKind; text: string; at: string; by: string; ticketIds?: string[]; language?: string; noticeId?: string; originalText?: string; finalText?: string };
 export type CareNote = { id: string; text: string; at: string; by: string };
 export type CareRecord = { actions: CareAction[]; followUp?: string; resolved?: boolean; pinned?: boolean; notes?: CareNote[] };
 export type CareStatus = "none" | "acted" | "due" | "resolved";
@@ -42,6 +43,16 @@ export function addCareAction(customerId: string, kind: CareKind, text: string, 
     ...cur, resolved: kind === "notice_draft" ? cur.resolved : false, followUp: kind === "notice_draft" ? cur.followUp : followUp ?? cur.followUp ?? addDays(7),
     actions: [{ id: crypto.randomUUID(), kind, text, at: new Date().toISOString(), by: signedIn, ...details }, ...cur.actions],
   };
+  emit();
+}
+/** Server-prepared copy is a saved draft, never a sent message or completed customer action. */
+export function rememberProgressNotice(notice: ProgressNotice) {
+  if (notice.status !== "prepared" || !notice.approved_text || !notice.final_text) return;
+  const cur = state[notice.customer_id] || { actions: [] }, id = `notice:${notice.notice_id}`;
+  const action: CareAction = { id, kind: "notice_draft", text: `발송용 문구 준비 · 실제 발송 안 함\n${notice.final_text}`,
+    at: notice.approved_at || notice.created_at, by: notice.reviewer || signedIn, ticketIds: notice.ticket_ids,
+    noticeId: notice.notice_id, language: notice.target_language, originalText: notice.approved_text, finalText: notice.final_text };
+  state[notice.customer_id] = { ...cur, actions: [action, ...cur.actions.filter((a) => a.id !== id)] };
   emit();
 }
 /** 중점 관리 수동 지정/해제(영업 요청이나 상담원 판단). */

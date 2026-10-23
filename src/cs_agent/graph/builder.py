@@ -33,10 +33,14 @@
 #   (services/tickets.py reply). 검토 대기 중이었으면 그 검토는 버린다. ① 이 지난 판단·답변·상담원
 #   입력을 지워야 이전 상담원 피드백이 새 답변에 섞이지 않는다.
 # 참고: 에이전트_구조_제안.md 2장, 관리자_대시보드_AI기능_구조검토.md 4장
+import hashlib
+import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -56,6 +60,7 @@ from cs_agent.llm.router import LLMRouter
 from cs_agent.rules.engine import apply_rules
 from cs_agent.rules.tables import RefTables, load_tables
 from cs_agent.schemas import CheckResult, ReviewIn
+from cs_agent.services.reply_preview import review_text, valid_preview
 
 
 @dataclass
@@ -114,6 +119,19 @@ def _inquiry_text(state: TicketState) -> str:
     return f"{inquiry.subject}\n{inquiry.body}".strip()
 
 
+def _analysis_context(state: TicketState) -> tuple[schemas.InquiryIn, list[analysis.ChatMessage]]:
+    """표시용 합친 본문과 분리해 분석에는 최신 발언과 과거 발언을 각각 전달한다."""
+    inquiry = state["inquiry"]
+    messages = state.get("customer_messages", [])
+    if not messages:
+        return inquiry, []
+    latest = messages[-1]
+    return (
+        inquiry.model_copy(update={"body": latest["body"]}),
+        [analysis.ChatMessage(role="user", content=message["body"]) for message in messages[:-1]],
+    )
+
+
 def _language(state: TicketState) -> str:
     extraction = state.get("extraction")
     return state["inquiry"].language or (extraction and extraction.language) or "en"
@@ -129,6 +147,8 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         # 고객 회신·분석 대기 재시도로 다시 돌 때 지난 판단·답변·상담원 입력을 지운다
         return {
             "status": TicketStatus.NEW,
+            "manual_reply": False,
+            "reply_preview": None,
             "retries": 0,
             "review_rounds": 0,
             "fix_notes": [],
@@ -136,6 +156,9 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "extraction": None,
             "analysis_error": None,
             "draft": None,
+            "draft_customer_revision": state.get("customer_revision", 0),
+            "draft_information_reviewed_at": None,
+            "information_review_refresh": False,
             "drafting_error": None,
             "info_request": None,
             "escalation_request": None,
@@ -144,6 +167,11 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "review": None,
             "final_reply": None,
             "approved_reply": None,
+            "approval_text": None,
+            "approval_error": None,
+            "approval_checks_key": None,
+            "approval_review": None,
+            "approval_cited": None,
             "translation_error": None,
             "escalated_to": None,
             # 상담원용 원문 번역은 배경에서 시작, 검토·끝 직전에 받는다 (CSA-57, 아래 _translation)
@@ -177,20 +205,34 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         return {"body_ko": body_ko, "translation_parts": parts, "translation_job": None}
 
     def classify(state: TicketState) -> dict:
+        inquiry = state["inquiry"]
+        options = {}
+        if deps.classify is analysis.classify:
+            inquiry, transcript = _analysis_context(state)
+            options["transcript"] = transcript
+            if messages := state.get("customer_messages"):
+                options["category_is_current"] = messages[-1].get("category") is not None
         try:
-            return {"classification": deps.classify(state["inquiry"], deps.llm)}
+            return {"classification": deps.classify(inquiry, deps.llm, **options)}
         except AnalysisError as e:
             return {"analysis_error": str(e)}
 
     def extract(state: TicketState) -> dict:
         # 분류가 실패해도 추출은 돈다: 안전 신호는 유형 없이도 사람 큐로 보내야 한다
         classification = state.get("classification")
+        inquiry = state["inquiry"]
         options = {}
-        if deps.extract is analysis.extract and classification:
-            options["secondary_category"] = classification.secondary_category
+        if deps.extract is analysis.extract:
+            inquiry, transcript = _analysis_context(state)
+            options["transcript"] = transcript
+            if classification:
+                options["secondary_category"] = classification.secondary_category
+            if len(messages := state.get("customer_messages", [])) > 1:
+                options["current_provided_fields"] = messages[-1].get("provided_fields", {})
+                options["current_product_code"] = messages[-1].get("product_code")
         try:
             result = deps.extract(
-                state["inquiry"],
+                inquiry,
                 deps.tables,
                 llm=deps.llm,
                 category=classification.category if classification else None,
@@ -233,23 +275,43 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             missing = review.info_items
         else:
             missing = state["rules"].missing_blocking or state["rules"].missing_info
-        text = deps.write_info_request(missing, _language(state), _inquiry_text(state), deps.llm)
+        # 고객 답변과 같이 영어로 검토하고, 승인한 문장만 finish에서 고객 언어로 바꾼다.
+        text = deps.write_info_request(missing, "en", _inquiry_text(state), deps.llm)
         return {
             "info_request": text,
+            "draft": None,
+            "draft_customer_revision": state.get("customer_revision", 0),
+            "draft_information_reviewed_at": (state.get("information_review") or {}).get(
+                "checked_at"
+            ),
             "pending": "info_request",
             "approved_reply": None,
+            "approval_text": None,
+            "approval_error": None,
+            "approval_checks_key": None,
+            "approval_review": None,
+            "approval_cited": None,
             "translation_error": None,
             "final_reply": None,
             **_restart_translation(state),
         }
 
     def evidence(state: TicketState) -> dict:
+        candidates = state.get("candidates", [])
+        if state.get("information_review_refresh"):
+            # 담당자가 확정한 값으로 검색도 갱신해 이전 제품의 검색 결과를 재사용하지 않는다.
+            fields = state["extraction"].field_values
+            confirmed = "\n".join(f"{name}: {value}" for name, value in sorted(fields.items()))
+            query = f"{_inquiry_text(state)}\nConfirmed fields:\n{confirmed}"
+            candidates = deps.first_pass(deps.docs, deps.cases, query)
         return {
+            "candidates": candidates,
+            "information_review_refresh": False,
             "evidence": deps.finalize_evidence(
-                state.get("candidates", []),
+                candidates,
                 state["extraction"],
                 category=state["classification"].category,
-            )
+            ),
         }
 
     def draft(state: TicketState) -> dict:
@@ -260,8 +322,13 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         if deps.write_draft is drafting.write_draft:
             # 주입한 기존 호출 대역의 규격은 유지하고 실제 작성기에 조회 문맥을 전달한다.
             options.update(
-                tables=deps.tables, secondary_category=state["classification"].secondary_category
+                tables=deps.tables,
+                secondary_category=state["classification"].secondary_category,
+                specialist_replies=state.get("specialist_replies", []),
             )
+            # 재작성 때 이전 회신 근거를 누적하지 않고 최신 저장값으로 다시 구성한다.
+            evidence = [e for e in evidence if e.source != "specialist"]
+            evidence += drafting.specialist_evidence(state.get("specialist_replies", []))
             evidence = drafting.prepare_evidence(
                 state["classification"].category,
                 state["extraction"],
@@ -282,6 +349,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         except DraftingError as error:
             return {
                 "draft": None,
+                "info_request": None,
                 "pending": "draft",
                 "drafting_error": str(error),
                 "evidence": evidence,
@@ -290,39 +358,87 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         retries = state.get("retries", 0) + (1 if state.get("fix_notes") else 0)
         return {
             "draft": result,
+            "info_request": None,
+            "draft_specialist_revision": state.get("specialist_revision", 0),
+            "draft_customer_revision": state.get("customer_revision", 0),
+            "draft_information_reviewed_at": (state.get("information_review") or {}).get(
+                "checked_at"
+            ),
             "pending": "draft",
             "retries": retries,
             "drafting_error": None,
             "evidence": evidence,
         }
 
-    def verify(state: TicketState) -> dict:
-        if error := state.get("drafting_error"):
-            return {
-                "checks": [CheckResult(name="draft_input_or_output", passed=False, reason=error)],
-                "fix_notes": [error],
-            }
-        language = state["draft"].slots.get("draft_language") or _language(state)
-        secondary = state["classification"].secondary_category
+    def checked_key(state: TicketState, candidate: schemas.Draft, language: str) -> str:
+        """검사한 본문뿐 아니라 근거·고객 문의·적용 조건까지 같을 때만 결과를 재사용한다."""
+        payload = {
+            "text": candidate.text,
+            "slots": candidate.slots,
+            "cited": candidate.cited,
+            "language": language,
+            "classification": state["classification"].model_dump(mode="json")
+            if state.get("classification")
+            else None,
+            "inquiry": state["inquiry"].model_dump(mode="json"),
+            "evidence": [e.model_dump(mode="json") for e in state.get("evidence", [])],
+            "specialist_revision": state.get("specialist_revision", 0),
+            "customer_revision": state.get("customer_revision", 0),
+            "information_review": state.get("information_review"),
+            "extraction": state["extraction"].model_dump(mode="json")
+            if state.get("extraction")
+            else None,
+            "manual_reply": state.get("manual_reply", False),
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    def check_candidate(state: TicketState, candidate: schemas.Draft, language: str) -> list:
+        classification = state.get("classification")
+        secondary = classification.secondary_category if classification else None
         if deps.verify is verification.verify and secondary:
-            secondary_check = verification.check_banned(state["draft"], secondary, language)
+            secondary_check = verification.check_banned(candidate, secondary, language)
             if not secondary_check.passed:
-                return {
-                    "checks": [secondary_check.model_copy(update={"name": "banned_secondary"})],
-                    "fix_notes": [secondary_check.reason],
-                }
+                return [secondary_check.model_copy(update={"name": "banned_secondary"})]
         checks = deps.verify(
-            state["draft"],
-            state["classification"].category,
-            drafting.required_slots(
-                state["classification"].category, state["classification"].secondary_category
-            ),
+            candidate,
+            classification.category if classification else None,
+            ()
+            if state.get("manual_reply")
+            else drafting.required_slots(classification.category, secondary),
             _inquiry_text(state),
             language,
             state.get("evidence", []),
             deps.llm,
         )
-        return {"checks": checks, "fix_notes": [c.reason or c.name for c in checks if not c.passed]}
+        if state.get("manual_reply") and not classification:
+            checks.append(
+                CheckResult(
+                    name="analysis_unavailable",
+                    passed=False,
+                    reason=(
+                        "분류 미확인: 유형별 점검을 완료하지 못했습니다. 담당자 확인이 필요합니다."
+                    ),
+                )
+            )
+        return checks
+
+    def verify(state: TicketState) -> dict:
+        if error := state.get("drafting_error"):
+            return {
+                "checks": [CheckResult(name="draft_input_or_output", passed=False, reason=error)],
+                "fix_notes": [error],
+                "approval_checks_key": None,
+                "approval_review": None,
+                "approval_cited": None,
+            }
+        candidate = state["draft"]
+        language = candidate.slots.get("draft_language") or _language(state)
+        checks = check_candidate(state, candidate, language)
+        return {
+            "checks": checks,
+            "fix_notes": [c.reason or c.name for c in checks if not c.passed],
+            "approval_checks_key": checked_key(state, candidate, language),
+        }
 
     def after_verify(state: TicketState) -> str:
         if state.get("drafting_error"):
@@ -356,6 +472,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         if (
             state.get("pending") == "draft"
             and not state.get("draft")
+            and not state.get("approval_text")
             and not (state.get("translation_error") and state.get("approved_reply"))
         ):
             if action == ReviewAction.APPROVE:
@@ -372,20 +489,74 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "fix_notes": [],
             "review_rounds": state.get("review_rounds", 0) + 1,
             "approved_reply": None,
+            "approval_text": None,
+            "approval_error": None,
+            "approval_checks_key": None,
+            "approval_review": None,
+            "approval_cited": None,
             "translation_error": None,
             "final_reply": None,
             **_restart_translation(state),
         }
+
+    def history(state: TicketState, kind: str, **data) -> list[dict]:
+        return [
+            *state.get("processing_history", []),
+            {
+                "id": str(uuid4()),
+                "kind": kind,
+                "created_at": datetime.now(UTC).isoformat(),
+                "actor": state["review"].reviewer,
+                **data,
+            },
+        ]
+
+    def sent_history(state: TicketState, text: str, final_reply: str, purpose: str) -> list[dict]:
+        draft = state.get("draft")
+        return history(
+            state,
+            "sent",
+            text=final_reply,
+            master_text=text,
+            purpose=purpose,
+            reply_language=_language(state),
+            edited=state.get("manual_reply", False)
+            or (
+                text
+                != (
+                    state.get("info_request")
+                    if purpose == "request"
+                    else (draft.text if draft else "")
+                )
+            ),
+        )
 
     def finish(state: TicketState) -> dict:
         review = state["review"]
         if review.action == ReviewAction.REJECT:
             return {
                 "status": TicketStatus.REJECTED,
+                "processing_history": history(state, "rejected", text="문의 반려"),
                 "final_reply": None,
                 "approved_reply": None,
+                "approval_text": None,
+                "approval_error": None,
+                "approval_checks_key": None,
+                "approval_review": None,
+                "approval_cited": None,
                 "translation_error": None,
             }
+        preview_text = None
+        if review.reply_preview_id:
+            if not valid_preview(state, review_text(state, review), review.reply_preview_id):
+                return {
+                    "status": TicketStatus.ON_HOLD,
+                    "final_reply": None,
+                    "approval_error": (
+                        "초안 또는 문의 정보가 변경되었습니다. 고객 언어로 다시 변환해 주세요"
+                    ),
+                }
+            preview_text = state["reply_preview"]["final_text"]
         if state.get("pending") == "info_request":
             # 번역 실패로 보류된 뒤 다시 승인하면, 직전에 상담원이 수정 승인한 글을 그대로 쓴다
             if review.action == ReviewAction.EDIT_APPROVE and review.edited_text:
@@ -397,7 +568,11 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             # 승인한 요청문이 고객 언어가 아니면(영어 틀 문장 등) 발송 직전에 옮긴다 (CSA-27).
             # 3번 다 실패하면 보내지 않고 보류 → 상담원이 다시 승인하면 다시 번역한다
             try:
-                final_reply = deps.localize_info_request(text, _language(state), deps.llm)
+                final_reply = (
+                    preview_text
+                    if preview_text is not None
+                    else deps.localize_info_request(text, _language(state), deps.llm)
+                )
             except info_request_agent.LocalizationError as error:
                 return {
                     "status": TicketStatus.ON_HOLD,
@@ -407,6 +582,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 }
             return {
                 "status": TicketStatus.WAITING_CUSTOMER,
+                "processing_history": sent_history(state, text, final_reply, "request"),
                 "final_reply": final_reply,
                 "approved_reply": text,
                 "translation_error": None,
@@ -414,6 +590,8 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         # 번역 재시도에서도 직전에 담당자가 수정 승인한 원문을 보존한다.
         if review.action == ReviewAction.EDIT_APPROVE:
             text = review.edited_text
+        elif state.get("approval_text"):
+            text = state["approval_text"]
         elif state.get("translation_error"):
             text = state.get("approved_reply")
         else:
@@ -425,10 +603,89 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             if draft
             else drafting.REVIEW_LANGUAGE
         )
+        # 담당자 수정본도 번역·발송 전에 정확히 그 본문을 검사한다. 원 AI 초안은 보존한다.
+        language = (
+            _language(state)
+            if info_request_agent.in_language(text, _language(state))
+            else source_language
+        )
+        candidate = (draft or schemas.Draft(text="")).model_copy(update={"text": text})
+        if not draft or text != draft.text:
+            candidate = candidate.model_copy(update={"model": "staff_review"})
+        checks = state.get("checks", [])
+        citation_error = None
+        try:
+            candidate = candidate.model_copy(
+                update={
+                    "cited": drafting._citations(
+                        text, [drafting._ref(e) for e in state.get("evidence", [])]
+                    )
+                }
+            )
+        except DraftingError as error:
+            citation_error = str(error)
+            candidate = candidate.model_copy(update={"cited": []})
+        key = checked_key(state, candidate, language)
+        already_checked = key == state.get("approval_checks_key") and bool(checks)
+        acknowledged = bool(review.acknowledged_failures and review.reviewer.strip())
+        transient_failure = any(
+            not check.passed
+            and (
+                check.name == "approval_verification_error"
+                or (check.name == "grounding" and "근거 검증 호출 실패" in (check.reason or ""))
+            )
+            for check in checks
+        )
+        if not already_checked or (transient_failure and not acknowledged):
+            try:
+                checks = (
+                    [CheckResult(name="citations", passed=False, reason=citation_error)]
+                    if citation_error
+                    else check_candidate(state, candidate, language)
+                )
+            except Exception:
+                checks = [
+                    CheckResult(
+                        name="approval_verification_error",
+                        passed=False,
+                        reason="최종 답변 점검 실패: 재점검하거나 담당자가 확인해 주세요.",
+                    )
+                ]
+        approval_review = (
+            dict(state.get("approval_review") or {}) if text == state.get("approval_text") else {}
+        )
+        current_review = review.model_dump(mode="json", exclude_none=True)
+        if (
+            approval_review.get("action") == ReviewAction.EDIT_APPROVE
+            and review.action == ReviewAction.APPROVE
+        ):
+            current_review.pop("action", None)
+        approval_review.update({k: v for k, v in current_review.items() if v != ""})
+        validation = {
+            "checks": checks,
+            "approval_text": text,
+            "approval_cited": candidate.cited,
+            "approval_checks_key": key,
+            "approval_error": None,
+            "approval_review": approval_review,
+        }
+        if not checks or any(not c.passed for c in checks):
+            # 이전 초안에 누른 체크박스로 새 수정본 실패를 묵시적으로 승인하지 않는다.
+            if not (already_checked and acknowledged):
+                return {
+                    **validation,
+                    "status": TicketStatus.ON_HOLD,
+                    "approved_reply": None,
+                    "final_reply": None,
+                    "translation_error": None,
+                    "approval_error": "최종 점검 실패: 수정 또는 실패 항목 확인 후 승인해 주세요.",
+                }
         try:
             # 상담원이 고객 언어로 직접 고쳐 승인했으면(그 언어로 확인될 때만) 번역하지 않는다.
             # 영어 초안 기준(en)으로 다시 옮기면 같은 글이 돌아와 번역 실패로 보류됐다
-            if info_request_agent.in_language(text, _language(state)):
+            if preview_text is not None:
+                final_reply = preview_text
+            elif info_request_agent.in_language(text, _language(state)):
                 final_reply = text
             else:
                 final_reply = deps.translate_reply(
@@ -436,13 +693,16 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 )
         except TranslationError as error:
             return {
+                **validation,
                 "status": TicketStatus.ON_HOLD,
                 "approved_reply": text,
                 "final_reply": None,
                 "translation_error": str(error),
             }
         return {
+            **validation,
             "status": TicketStatus.APPROVED,
+            "processing_history": sent_history(state, text, final_reply, "answer"),
             "approved_reply": text,
             "final_reply": final_reply,
             "translation_error": None,
@@ -514,7 +774,9 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     )
     g.add_edge("rewrite", "draft")
     g.add_conditional_edges(
-        "finish", lambda s: "hold" if s.get("translation_error") else END, ["hold", END]
+        "finish",
+        lambda s: "hold" if s.get("translation_error") or s.get("approval_error") else END,
+        ["hold", END],
     )
     g.add_edge("escalate", END)
 

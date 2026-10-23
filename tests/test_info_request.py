@@ -161,22 +161,33 @@ def test_without_llm_returns_english_template_with_all_items() -> None:
     assert f"1. {LABELS['product_model']}\n2. {LABELS['serial_no']}" in text
 
 
-def test_live_writes_in_customer_language() -> None:
-    writer = ScriptedWriter(SPANISH_OK)
+@pytest.mark.parametrize("language", ["en", "es", "fr", "ar", "zh", "ja", "ko"])
+def test_live_writes_english_for_staff_review(language) -> None:
+    writer = ScriptedWriter(ENGLISH)
 
-    text = write_info_request(["product_model", "serial_no"], "es", "¿Dimensiones?", live(writer))
+    text = write_info_request(
+        ["product_model", "serial_no"], language, "¿Dimensiones?", live(writer)
+    )
 
-    assert text == SPANISH_OK
+    assert text == ENGLISH
     assert len(writer.prompts) == 1 and "¿Dimensiones?" in writer.prompts[0]
+    assert "in English" in writer.prompts[0]
+
+
+def test_non_english_review_draft_is_rejected_even_for_same_language_customer() -> None:
+    writer = ScriptedWriter(SPANISH_OK, ENGLISH)
+    text = write_info_request(["product_model", "serial_no"], "es", "consulta", live(writer))
+    assert text == ENGLISH
+    assert len(writer.prompts) == 2
 
 
 def test_retries_once_with_reason_then_accepts() -> None:
-    missing_one = SPANISH_OK.replace("2. Número de serie (placa de características)\n", "")
-    writer = ScriptedWriter(missing_one, SPANISH_OK)
+    missing_one = template_request(item_labels(["product_model"], LABELS))
+    writer = ScriptedWriter(missing_one, ENGLISH)
 
     text = write_info_request(["product_model", "serial_no"], "es", "q", live(writer))
 
-    assert text == SPANISH_OK
+    assert text == ENGLISH
     assert "must have exactly 2" in writer.prompts[1]
 
 
@@ -185,8 +196,8 @@ def test_draft_tries_three_times_then_english_template_for_review() -> None:
     items = ["product_model", "serial_no"]
     english = template_request(item_labels(items, LABELS))
 
-    third_time = ScriptedWriter("1. solo uno", TimeoutError("busy"), SPANISH_OK)
-    assert write_info_request(items, "es", "q", live(third_time)) == SPANISH_OK
+    third_time = ScriptedWriter("1. solo uno", TimeoutError("busy"), ENGLISH)
+    assert write_info_request(items, "es", "q", live(third_time)) == ENGLISH
     assert len(third_time.prompts) == ATTEMPTS == 3
     assert "the call failed (TimeoutError)" in third_time.prompts[2]  # 호출 오류도 1번으로 센다
 

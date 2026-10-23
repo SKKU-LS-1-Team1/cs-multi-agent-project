@@ -1,5 +1,5 @@
 // 모든 모달 모음. 열림 상태는 store 의 ui.modal 하나로 관리한다.
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@admin/lib/utils";
 import { ArrowRight, Building2, ChevronDown, CircleCheck, Clock, Paperclip } from "lucide-react";
@@ -13,15 +13,16 @@ import { AiMark, Facts, Field, Mono, NativeSelect, PersonAvatar, Tag } from "./c
 import DocContent from "./DocContent";
 import { useNavigate } from "react-router-dom";
 import {
-  applyPendingAnswer, assignOwner, completeTicket, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply,
+  canSend, applyPendingAnswer, assignOwner, completeTicket, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply,
 } from "@admin/lib/actions";
 import {
-  candidates, completionDraft, customerLanguage, FEEDBACK_REASONS, informationAssessment, isEdited, needsLocalization, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, referralRows, resource, resourceReason, waitingReviews,
+  candidates, completionDraft, customerLanguage, informationAssessment, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, referralRows, resource, resourceReason, signedIn, waitingReviews,
 } from "@admin/lib/logic";
-import { closeModal, findTicket, openModal, ui, useStore } from "@admin/lib/store";
-import { addCareAction, KIND_LABEL, kindLabel, type CareKind } from "@admin/lib/care";
-import { AI_KINDS, AI_STYLE } from "./CareButtons";
-import { isLate, lateText, SEGMENT_KO, useCustomers, type Customer } from "@admin/lib/customers";
+import { closeModal, findTicket, openModal, tickets, ui, useStore } from "@admin/lib/store";
+import { kindLabel, rememberProgressNotice, type CareKind } from "@admin/lib/care";
+import { NoticeSession, noticeTickets, preparedNotice, type NoticeState } from "@admin/lib/progress-notice";
+import { AI_STYLE } from "./CareButtons";
+import { SEGMENT_KO, STATUS_KO, useCustomers, type Customer } from "@admin/lib/customers";
 import type { Ticket } from "@admin/lib/types";
 
 const TITLES: Record<string, string> = {
@@ -58,7 +59,7 @@ function Body({ type, props, t }: { type: string; props: Record<string, any>; t?
     case "completion": return t ? <Completion t={t} /> : null;
     case "customer-reply": return t ? <CustomerReply t={t} /> : null;
     case "department-review": return <DepartmentReview props={props} />;
-    case "care": return <CareModal customerId={props.customerId} kind={props.kind} />;
+    case "care": return <CareModal customerId={props.customerId} kind={props.kind} ticketId={props.ticketId} />;
     case "file": return <FileInfo file={props.file} t={t} />;
     case "document": return <DocumentView />;
     case "knowledge-document": return <KnowledgeDoc id={props.docId} />;
@@ -127,28 +128,25 @@ function Assign({ t }: { t: Ticket }) {
 }
 
 function Send({ t }: { t: Ticket }) {
-  const failed = runChecks(t).filter((c) => !c.passed), edited = isEdited(t);
-  const [ack, setAck] = useState(false), [reason, setReason] = useState(""), [note, setNote] = useState("");
+  const checks = runChecks(t), pending = checks.some((c) => c.pending);
+  const failed = checks.filter((c) => !c.passed && !c.pending);
+  const signature = JSON.stringify([t.draft, t.body, t.specialistRevision, t.customerRevision, t.informationReviewedAt, t.apiEvidence, t.approvalError, checks]);
+  const [ackFor, setAckFor] = useState("");
+  const ack = ackFor === signature, busy = Boolean(t.sending);
   return (
     <>
-      <p className="text-sm">{t.company}에 {t.purpose === "request" ? "고객 질의서를" : "답변을"} 발송하고 처리 이력에 기록합니다.{needsLocalization(t) && <> 승인하면 영어 초안을 <b>{customerLanguage(t)}</b>로 자동 변환해 보내며, 영어 원본도 함께 기록합니다.</>}</p>
+      <p className="text-sm">{t.company}에 {t.purpose === "request" ? "고객 질의서를" : "답변을"} 발송하고 처리 이력에 기록합니다. 영어 원문과 아래의 고객 언어 문구를 함께 기록합니다.</p>
+      <p dir="auto" className="whitespace-pre-wrap rounded-xl bg-muted p-4">{t.replyPreview?.final_text}</p>
+      {pending && <p role="status" className="text-sm text-muted-foreground">본문이 변경되어 최종 점검이 필요합니다. 발송 요청 시 현재 내용을 점검하며, 새 오류가 발견되면 발송을 보류합니다.</p>}
+      {t.approvalError && <p role="alert" className="text-sm text-destructive">{t.approvalError}</p>}
       {failed.length > 0 && (
         <section role="alert" className="grid gap-2 rounded-xl bg-destructive/10 p-4">
           <strong className="text-destructive">자동 점검에서 확인이 필요한 항목이 {failed.length}건 있습니다</strong>
           <ul className="grid gap-1 text-sm">{failed.map((c) => <li key={c.name}><b className="font-semibold">{c.label}</b> · {c.reason}</li>)}</ul>
-          <label className="flex items-center gap-2 text-sm"><Checkbox checked={ack} onCheckedChange={(v) => setAck(v === true)} />확인했고, 그대로 발송합니다.</label>
+          <label className="flex items-center gap-2 text-sm"><Checkbox disabled={busy} checked={ack} onCheckedChange={(v) => setAckFor(v === true ? signature : "")} />확인했고, 그대로 발송합니다.</label>
         </section>
       )}
-      {edited && (
-        <section className="grid gap-2.5 rounded-xl bg-muted p-4">
-          <strong className="text-sm">AI 초안에서 고치셨네요. 무엇을 고치셨나요? <span className="font-normal text-muted-foreground">(선택 · 다음 초안을 개선하는 데 쓰입니다)</span></strong>
-          <div className="flex flex-wrap gap-2" role="group" aria-label="수정 사유">
-            {FEEDBACK_REASONS.map(([key, label]) => <Button key={key} type="button" size="sm" variant={reason === key ? "default" : "outline"} aria-pressed={reason === key} onClick={() => setReason(reason === key ? "" : key)}>{label}</Button>)}
-          </div>
-          <Input aria-label="한 줄 메모" placeholder="한 줄 메모(선택)" value={note} onChange={(e) => setNote(e.target.value)} />
-        </section>
-      )}
-      <Footer><Close label="계속 수정" /><Button disabled={failed.length > 0 && !ack} onClick={() => confirmSend(t, { reason, note, acknowledgedFailures: failed.length > 0 && ack })}>발송 기록</Button></Footer>
+      <Footer><Button variant="outline" disabled={busy} onClick={closeModal}>계속 수정</Button><Button disabled={busy || !canSend(t) || (failed.length > 0 && !ack)} onClick={() => confirmSend(t, { acknowledgedFailures: failed.length > 0 && ack })}>{busy ? "처리 중…" : "발송하기"}</Button></Footer>
     </>
   );
 }
@@ -166,28 +164,35 @@ function Comparison({ t }: { t: Ticket }) {
 }
 
 function ReviewCustomer({ t }: { t: Ticket }) {
-  const reply = latestCustomerReply(t), items = informationAssessment(t);
-  const [vals, setVals] = useState<Record<string, { status: string; evidence: string }>>(() => Object.fromEntries(items.map((x) => [x.id, { status: x.status, evidence: x.evidence || "" }])));
+  const [snapshot] = useState(() => ({ replyId: latestCustomerReply(t)?.id, revision: t.customerRevision, reviewedAt: t.informationReviewedAt ?? null, items: informationAssessment(t) }));
+  const reply = t.events.find((e) => e.id === snapshot.replyId), items = snapshot.items;
+  const [vals, setVals] = useState<Record<string, { status: string; value: string; evidence: string }>>(() => Object.fromEntries(items.map((x) => [x.id, { status: x.status, value: x.value || "", evidence: x.evidence || "" }])));
   if (!reply) return null;
-  const set = (id: string, patch: Partial<{ status: string; evidence: string }>) => setVals((v) => ({ ...v, [id]: { ...v[id], ...patch } }));
+  const stale = t.source === "api" && (snapshot.reviewedAt !== (t.informationReviewedAt ?? null) || snapshot.revision !== t.customerRevision || latestCustomerReply(t)?.id !== snapshot.replyId);
+  const busy = Boolean(t.informationSaving);
+  const set = (id: string, patch: Partial<{ status: string; value: string; evidence: string }>) => setVals((v) => ({ ...v, [id]: { ...v[id], ...patch } }));
   return (
-    <form onSubmit={(e) => { e.preventDefault(); saveInfoReview(t, reply.id!, vals); }} className="grid gap-4">
+    <form onSubmit={(e) => { e.preventDefault(); if (!stale && !busy) void saveInfoReview(t, reply.id!, vals, snapshot.revision, snapshot.reviewedAt); }} className="grid gap-4">
+      {stale && <p role="alert" className="text-sm text-destructive">새 고객 회신이 도착했습니다. 창을 닫고 최신 회신을 다시 확인해 주세요.</p>}
       <article className="grid gap-2 rounded-xl bg-muted p-4">
         <h3 className="font-semibold">고객 회신</h3><small className="text-muted-foreground">{reply.time || "수신 시각 미기록"}</small><p className="text-sm">{reply.text}</p>
         <div className="flex flex-wrap gap-2">{(reply.files || []).map((f: string) => <Button key={f} type="button" size="sm" variant="outline" onClick={() => openModal("file", { file: f, id: t.id })}>{f}</Button>)}{!(reply.files || []).length && <small className="text-muted-foreground">연결된 첨부자료 없음</small>}</div>
       </article>
-      <fieldset className="grid gap-3"><legend className="mb-1 text-sm font-semibold">자료 충족 여부</legend>
+      <fieldset disabled={busy || stale} className="grid gap-3"><legend className="mb-1 text-sm font-semibold">자료 충족 여부</legend>
         {items.map((x) => (
           <div key={x.id} className="grid grid-cols-[150px_150px_1fr] items-center gap-2">
             <label htmlFor={"check-" + x.id} className="text-sm">{x.label}</label>
             <NativeSelect id={"check-" + x.id} value={vals[x.id].status} onChange={(e) => set(x.id, { status: e.target.value })}>
-              <option value="missing">미수신</option><option value="unusable">수신 · 보완 필요</option><option value="confirmed">확인 완료</option>
+              <option value="provided" disabled>추출됨 · 확인 필요</option><option value="missing">미수신</option><option value="unusable">수신 · 보완 필요</option><option value="confirmed">확인 완료</option>
             </NativeSelect>
-            <Input aria-label={`${x.label} 확인 근거`} placeholder="자료에서 확인한 내용" required={vals[x.id].status === "confirmed"} value={vals[x.id].evidence} onChange={(e) => set(x.id, { evidence: e.target.value })} />
+            <div className="grid gap-2">
+              {t.source === "api" && <Input aria-label={`${x.label} 확인값`} placeholder="실제 확인한 값" required={vals[x.id].status === "confirmed"} value={vals[x.id].value} onChange={(e) => set(x.id, { value: e.target.value })} />}
+              <Input aria-label={`${x.label} 확인 근거`} placeholder="자료에서 확인한 내용" required={vals[x.id].status === "confirmed"} value={vals[x.id].evidence} onChange={(e) => set(x.id, { evidence: e.target.value })} />
+            </div>
           </div>
         ))}
       </fieldset>
-      <Footer><Close label="취소" /><Button type="submit">확인 결과 저장</Button></Footer>
+      <Footer><Close label="취소" /><Button type="submit" disabled={busy || stale}>{busy ? "저장 중…" : "확인 결과 저장"}</Button></Footer>
     </form>
   );
 }
@@ -199,13 +204,13 @@ function ExpertReceive({ t, requestId }: { t: Ticket; requestId?: string }) {
   return (
     <form onSubmit={(e) => { e.preventDefault(); submitExpertReply(t, sel, body); }} className="grid gap-4">
       <Field label="연결 요청">
-        <NativeSelect value={sel} onChange={(e) => setSel(e.target.value)}>
+        <NativeSelect disabled={t.specialistSaving} value={sel} onChange={(e) => setSel(e.target.value)}>
           {pending.map((r) => <option key={r.id} value={r.id}>{r.department} · {r.id}</option>)}
           {t.legacyReviewPending && <option value="legacy">기존 검토 · 요청 정보 미기록</option>}
         </NativeSelect>
       </Field>
-      <Field label="회신 내용"><Textarea required className="min-h-32" value={body} onChange={(e) => setBody(e.target.value)} placeholder="전문부서에서 받은 원인·점검 결과·권장 조치를 입력하세요." /></Field>
-      <Footer><Close label="취소" /><Button type="submit">회신 등록</Button></Footer>
+      <Field label="회신 내용"><Textarea disabled={t.specialistSaving} required className="min-h-32" value={body} onChange={(e) => setBody(e.target.value)} placeholder="전문부서에서 받은 원인·점검 결과·권장 조치를 입력하세요." /></Field>
+      <Footer><Close label="취소" /><Button type="submit" disabled={t.specialistSaving || !body.trim() || !sel}>{t.specialistSaving ? "저장 중…" : "회신 등록"}</Button></Footer>
     </form>
   );
 }
@@ -245,58 +250,69 @@ function CustomerReply({ t }: { t: Ticket }) {
   );
 }
 
-/** 고객 조치 창: 안내·사과 초안 / 담당자 변경 / 근본 원인 검토 요청 / 다음 확인 일정. 저장하면 고객의 "조치 내역"에 남는다. */
-function CareModal({ customerId, kind }: { customerId: string; kind: CareKind }) {
-  const c = useCustomers()?.find((x) => x.id === customerId);
-  return c ? <CareForm c={c} kind={kind} /> : null;
+/** 진행상황 안내: 영어 초안 검토 → 고객 언어 문구 준비. 발송은 하지 않는다. */
+function CareModal({ customerId, ticketId }: { customerId: string; kind: CareKind; ticketId?: string }) {
+  const known = useCustomers()?.find((x) => x.id === customerId);
+  const linked = noticeTickets(customerId, tickets);
+  const c = known || (linked.length ? { id: customerId, name: linked[0].company || customerId } : null);
+  return c ? <CareForm key={customerId} c={c} ticketId={ticketId} linked={linked} /> : <p className="text-sm text-muted-foreground">서버에 연결된 고객 문의가 없습니다.</p>;
 }
-/** 문의마다 상태가 다르므로 안내 문구도 문의의 상태에 맞춰 한 줄씩 쓴다. */
-const STATUS_EN: Record<string, string> = { IN_PROGRESS: "being handled by our support team", ESCALATED: "under review by our specialist team", NEW: "received and queued for handling" };
-const careDraft = (c: Customer, picked: Customer["urgent"]) => {
-  const list = picked.length ? `\n\n${picked.map((u) => `- ${u[1]} (${u[0]}): ${STATUS_EN[u[5]] || "being handled by our team"}`).join("\n")}` : "";
-  return `Dear ${c.name} team,\n\nWe would like to update you on your open ${picked.length > 1 ? "requests" : "request"}:${list || " (details to be confirmed)"}\n\nWe will keep you informed as soon as there is further progress.\n\nWe appreciate your patience.\n\nBest regards,\nLS ELECTRIC Customer Support`;
-};
-function CareForm({ c }: { c: Customer; kind: CareKind }) {
-  const [text, setText] = useState(""), [busy, setBusy] = useState(false);
-  const [sel, setSel] = useState<string[]>(c.urgent.map((u) => u[0])); // 안내할 문의(기본: 지연·임박 전부)
-  const picked = c.urgent.filter((u) => sel.includes(u[0]));
-  // BACKEND: 고객 대응 AI 초안 (진행 상황 안내)
-  // 필요(제안): POST /customers/{id}/care-draft  { kind: "notice", ticket_ids?: string[], note?: string, language }
-  //            → { draft_en, sources[] }   sources = 초안에 쓴 문의·상태·전문부서 회신 등 근거 목록
-  // 입력: ticket_ids = 화면에서 담당자가 체크한 문의(기본은 지연·임박 전부), note = 담당자가 아는 사유·예상 시점(선택, 지금 화면은 받지 않는다).
-  //       진행 상황은 문의마다 다르므로 초안은 선택한 문의 한 줄씩 그 문의의 실제 상태·최근 처리 내용으로 써야 한다.
-  // 규칙: 확인되지 않은 사유·일정·약속은 지어내지 않는다(아래 문구 틀도 시한을 약속하지 않는다). 사람이 검토·수정한 뒤 발송한다.
-  // 지금: careDraft() 문구 틀에 고객 이름과 선택한 문의(번호·제목·문의 상태별 한 줄)을 채우는 시뮬레이션(버튼을 누르면 약 1초 뒤 채워진다).
-  const write = () => { setBusy(true); setTimeout(() => { setText(careDraft(c, picked)); setBusy(false); }, 900); };
-  const submit = (e: FormEvent) => {
+function CareForm({ c, ticketId, linked }: { c: Pick<Customer, "id" | "name"> & Partial<Customer>; ticketId?: string; linked: Ticket[] }) {
+  const [sel, setSel] = useState<string[]>(ticketId ? [ticketId] : linked.slice(0, 10).map((t) => t.id));
+  const [state, setState] = useState<NoticeState>({ ticketIds: [], text: "", notice: null, busy: null, error: "" });
+  const [session] = useState(() => new NoticeSession(setState));
+  const selected = linked.filter((t) => sel.includes(t.id));
+  const selectedKey = JSON.stringify(selected.map((t) => t.id).sort());
+  useEffect(() => {
+    session.select(JSON.parse(selectedKey)); void session.restore();
+    return () => session.dispose();
+  }, [session, selectedKey]);
+  const prepared = preparedNotice(state), busy = Boolean(state.busy);
+  const unavailable = !linked.length ? "이 화면의 예시 문의는 서버에 연결되어 있지 않습니다. 실제 고객 문의를 연결한 뒤 안내문을 작성할 수 있습니다."
+    : !selected.length ? "안내할 문의를 선택하세요."
+      : selected.some((t) => !t.apiLanguage) ? "고객 언어가 확인된 문의를 선택하세요."
+        : new Set(selected.map((t) => t.apiLanguage)).size > 1 ? "고객 언어가 같은 문의끼리 선택하세요." : "";
+  const changedPrepared = state.notice?.status === "prepared" && state.text !== state.notice.approved_text;
+  const write = async () => { if (!unavailable) await session.generate(); };
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy || !text.trim()) return;
-    addCareAction(c.id, "notice_draft", text, undefined, { ticketIds: picked.map((u) => u[0]), language: "en" });
-    closeModal(); toast("안내문을 이 브라우저에 보관했습니다. 실제 발송은 하지 않았습니다.");
+    if (unavailable || busy) return;
+    const result = await session.prepare(signedIn);
+    if (result) { rememberProgressNotice(result); toast("고객 언어 문구를 저장했습니다. 실제 발송은 하지 않았습니다."); }
   };
   return (
     <form onSubmit={submit} className="grid gap-5">
-      <p className="text-[15px] text-muted-foreground"><b className="font-semibold text-foreground">{c.name}</b> · {c.tier} · {SEGMENT_KO[c.seg] || c.seg}</p>
-      {c.urgent.length > 0 && (
+      <p className="text-[15px] text-muted-foreground"><b className="font-semibold text-foreground">{c.name}</b>{c.tier && ` · ${c.tier}`}{c.seg && ` · ${SEGMENT_KO[c.seg] || c.seg}`}</p>
+      {(linked.length > 0 || (c.urgent?.length || 0) > 0) && (
         <fieldset className="grid gap-1.5">
-          <legend className="mb-1 text-sm text-muted-foreground">안내할 문의 <span className="tabular-nums">{picked.length}/{c.urgent.length}</span></legend>
-          {c.urgent.map((u) => (
-            <label key={u[0]} className="flex cursor-pointer items-center gap-3 rounded-xl bg-muted/60 px-4 py-2.5 text-[15px]">
-              <Checkbox disabled={busy} checked={sel.includes(u[0])} onCheckedChange={(v) => { setSel((s) => (v === true ? [...s, u[0]] : s.filter((x) => x !== u[0]))); setText(""); }} />
-              <span className="min-w-0 flex-1"><span className="block truncate font-medium">{u[1]}</span><Mono className="text-xs text-muted-foreground">{u[0]}</Mono></span>
-              <span className={cn("shrink-0 text-sm", isLate(u) ? "text-destructive" : "text-warning-ink")}>{lateText(u)}</span>
+          <legend className="mb-1 text-sm text-muted-foreground">안내할 문의 <span className="tabular-nums">{selected.length}/{linked.length || c.urgent?.length}</span> · 최대 10건</legend>
+          {linked.length ? linked.map((t) => (
+            <label key={t.id} className="flex cursor-pointer items-center gap-3 rounded-xl bg-muted/60 px-4 py-2.5 text-[15px]">
+              <Checkbox disabled={busy || (!sel.includes(t.id) && selected.length >= 10)} checked={sel.includes(t.id)} onCheckedChange={(v) => setSel((s) => v === true ? [...s, t.id] : s.filter((id) => id !== t.id))} />
+              <span className="min-w-0 flex-1"><span className="block truncate font-medium">{t.title}</span><Mono className="text-xs text-muted-foreground">{t.id}</Mono></span>
+              <span className="shrink-0 text-sm text-muted-foreground">{t.status}</span>
+            </label>
+          )) : c.urgent?.map((u) => (
+            <label key={u[0]} className="flex items-center gap-3 rounded-xl bg-muted/60 px-4 py-2.5 text-[15px]">
+              <Checkbox disabled checked={false} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{u[1]}</span><Mono className="text-xs text-muted-foreground">{u[0]}</Mono></span><span className="text-sm text-muted-foreground">서버 연결 필요</span>
             </label>
           ))}
         </fieldset>
       )}
+      {unavailable && <p className="text-sm text-muted-foreground">{unavailable}</p>}
       <div className="grid gap-2.5">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-muted-foreground">안내 메일 (영어 · 현재는 로컬 초안 보관)</span>
-          <Button type="button" size="sm" className={AI_STYLE} disabled={busy || (c.urgent.length > 0 && picked.length === 0)} onClick={write}><AiMark className="size-3.5 text-white" />{busy ? "작성 중…" : text ? "다시 작성" : "AI 초안 작성"}</Button>
+          <span className="text-sm text-muted-foreground">안내 메일 · 담당자 검토용 영어 초안</span>
+          <Button type="button" size="sm" className={AI_STYLE} disabled={busy || Boolean(unavailable)} onClick={write}><AiMark className="size-3.5 text-white" />{state.busy === "generate" ? "작성 중…" : state.busy === "load" ? "불러오는 중…" : state.text ? "다시 작성" : "AI 초안 작성"}</Button>
         </div>
-        <Textarea aria-label="AI 초안" className="min-h-40 leading-relaxed" disabled={busy} value={text} onChange={(e) => setText(e.target.value)} placeholder={busy ? "고객 이력을 보고 초안을 쓰는 중입니다…" : "현재는 예시 문구를 만듭니다. 수정한 본문을 로컬에 보관할 수 있으며 실제 AI 생성·번역·발송은 연결 전입니다."} />
+        <Textarea aria-label="진행상황 영어 초안" className="min-h-40 leading-relaxed" disabled={Boolean(unavailable) || Boolean(prepared)} value={state.text} onChange={(e) => session.edit(e.target.value)} placeholder="실제 문의 상태와 처리 기록으로 영어 초안을 만듭니다. 담당자가 확인한 뒤 고객 언어로 변환합니다." />
+        {state.notice?.draft_text && state.notice.draft_text !== state.text && <details className="text-sm text-muted-foreground"><summary className="cursor-pointer">AI가 작성한 영어 원문</summary><p className="mt-2 whitespace-pre-wrap">{state.notice.draft_text}</p></details>}
+        {state.notice?.source_facts?.length ? <details className="text-sm text-muted-foreground"><summary className="cursor-pointer">초안에 사용한 문의 기록 · {state.notice.source_facts.length}건</summary><ul className="mt-2 grid gap-2">{state.notice.source_facts.map((f) => <li key={f.ticket_id}><Mono>{f.ticket_id}</Mono> · {STATUS_KO[f.status] || ({ READY_FOR_REVIEW: "답변 검토", ON_HOLD: "보류", APPROVED: "답변 승인", HUMAN_QUEUE: "사람 검토", ANALYSIS_PENDING: "분석 대기", REJECTED: "반려" } as Record<string, string>)[f.status] || f.status}{f.product_code && ` · ${f.product_code}`}<p>전문부서 회신 대기 {f.pending_specialist_count}건 · 회신 수신 {f.received_specialist_count}건{f.waiting_for_customer && " · 고객 회신 대기"}{f.resolution_outcome && ` · 처리 결과: ${{ resolved: "해결 확인", provided: "정보 제공 확인", unconfirmed: "해결 미확인 종결" }[f.resolution_outcome] || f.resolution_outcome}`}</p></li>)}</ul></details> : null}
       </div>
-      <Footer><Close label="취소" /><Button type="submit" disabled={busy || !text.trim()}>초안 보관</Button></Footer>
+      {state.error && <p role="alert" className="text-sm text-destructive">{state.error}</p>}
+      {changedPrepared && <p className="text-sm text-warning-ink">확인 요청 중 변경한 본문을 보존했습니다. 다시 작성하여 새 안내문을 확인해 주세요.</p>}
+      {prepared && <div className="grid gap-2 rounded-xl bg-muted/60 p-4"><strong className="text-sm">발송용 문구 준비 · 실제 발송 안 함</strong><small className="text-muted-foreground">고객 언어 · {prepared.target_language}</small><p lang={prepared.target_language} dir="auto" className="whitespace-pre-wrap text-sm leading-relaxed">{prepared.final_text}</p></div>}
+      <Footer><Close /><Button type="submit" disabled={busy || Boolean(unavailable) || !state.notice || !state.text.trim() || Boolean(prepared) || changedPrepared}>{state.busy === "prepare" ? "문구 준비 중…" : prepared ? "문구 저장 완료" : "확인 후 고객 언어로 변환"}</Button></Footer>
     </form>
   );
 }

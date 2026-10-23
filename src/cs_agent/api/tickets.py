@@ -20,12 +20,27 @@
 # 없는 ticket_id 는 404, 지금 상태에서 못 하는 처리는 409.
 from collections.abc import Iterator
 from contextlib import contextmanager
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 
+from cs_agent.agents.drafting import TranslationError
 from cs_agent.agents.escalation import EscalationError
-from cs_agent.api.deps import Tickets
-from cs_agent.schemas import AssignIn, EscalationRequestIn, InquiryIn, ReviewIn, TicketOut
+from cs_agent.agents.info_request import LocalizationError
+from cs_agent.api.deps import LLM, Tickets
+from cs_agent.schemas import (
+    AssignIn,
+    EscalationRequestIn,
+    InformationReviewIn,
+    InquiryIn,
+    ManualReplyIn,
+    ReplyPreviewIn,
+    ResolveIn,
+    ReviewIn,
+    SpecialistReplyIn,
+    SpecialistRequestIn,
+    TicketOut,
+)
 from cs_agent.services.tickets import InvalidAction, TicketNotFound
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -39,7 +54,7 @@ def _errors() -> Iterator[None]:
         raise HTTPException(404, f"ticket {e} not found") from e
     except InvalidAction as e:
         raise HTTPException(409, str(e)) from e
-    except EscalationError as e:
+    except (EscalationError, TranslationError, LocalizationError) as e:
         raise HTTPException(503, str(e)) from e
 
 
@@ -59,10 +74,27 @@ def answered(tickets: Tickets) -> list[str]:
     return tickets.answered()
 
 
+@router.get("/closed")
+def closed(tickets: Tickets) -> list[str]:
+    return tickets.closed()
+
+
+@router.post("/{ticket_id}/manual-reply", response_model=TicketOut)
+def save_manual_reply(ticket_id: str, body: ManualReplyIn, tickets: Tickets) -> TicketOut:
+    with _errors():
+        return tickets.save_manual_reply(ticket_id, body)
+
+
 @router.get("/{ticket_id}", response_model=TicketOut)
 def get_ticket(ticket_id: str, tickets: Tickets) -> TicketOut:
     with _errors():
         return tickets.get(ticket_id)
+
+
+@router.post("/{ticket_id}/reply-preview")
+def prepare_reply(ticket_id: str, body: ReplyPreviewIn, tickets: Tickets, llm: LLM) -> dict:
+    with _errors():
+        return tickets.prepare_reply(ticket_id, body.text, llm)
 
 
 @router.post("/{ticket_id}/action", response_model=TicketOut)
@@ -81,9 +113,9 @@ def generate_escalation_request(
 
 
 @router.post("/{ticket_id}/resolve", response_model=TicketOut)
-def resolve(ticket_id: str, tickets: Tickets) -> TicketOut:
+def resolve(ticket_id: str, tickets: Tickets, body: ResolveIn | None = None) -> TicketOut:
     with _errors():
-        return tickets.resolve(ticket_id)
+        return tickets.resolve(ticket_id, body)
 
 
 @router.post("/{ticket_id}/assign", response_model=TicketOut)
@@ -96,3 +128,28 @@ def assign(ticket_id: str, change: AssignIn, tickets: Tickets) -> TicketOut:
 def assignments(ticket_id: str, tickets: Tickets) -> list[dict]:
     with _errors():
         return tickets.assignments(ticket_id)
+
+
+@router.post("/{ticket_id}/specialist-requests", response_model=TicketOut)
+def add_specialist_request(
+    ticket_id: str, body: SpecialistRequestIn, tickets: Tickets
+) -> TicketOut:
+    """확인한 검토 요청을 기록. 메일 발송이나 문의 소유권 이관은 수행하지 않는다."""
+    with _errors():
+        return tickets.add_specialist_request(ticket_id, body)
+
+
+@router.post("/{ticket_id}/specialist-requests/{request_id}/reply", response_model=TicketOut)
+def add_specialist_reply(
+    ticket_id: str, request_id: UUID, body: SpecialistReplyIn, tickets: Tickets
+) -> TicketOut:
+    """담당자가 확인한 회신 등록. AI 재작성은 별도 /action rewrite로 실행."""
+    with _errors():
+        return tickets.add_specialist_reply(ticket_id, str(request_id), body)
+
+
+@router.post("/{ticket_id}/information-review", response_model=TicketOut)
+def review_information(ticket_id: str, body: InformationReviewIn, tickets: Tickets) -> TicketOut:
+    """최신 고객 회신의 자료 확인값을 저장하고 규칙·후속 답변만 갱신한다."""
+    with _errors():
+        return tickets.review_information(ticket_id, body)

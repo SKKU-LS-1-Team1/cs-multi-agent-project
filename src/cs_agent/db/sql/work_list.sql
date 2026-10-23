@@ -48,7 +48,7 @@ open_tickets AS (
     WHERE t.status NOT IN ('APPROVED', 'REJECTED', 'RESOLVED')
         AND (
             (t.sla_resolution_target_h IS NOT NULL AND t.assigned_dept IS NOT NULL)
-            OR (t.status = 'HUMAN_QUEUE' AND t.assigned_dept IS NULL)
+            OR ((t.status = 'HUMAN_QUEUE' OR t.route = 'human') AND t.assigned_dept IS NULL)
         )
         AND (
             CAST(:dept AS text) IS NULL
@@ -74,6 +74,6 @@ SELECT
         AS sla_due_at,
     CAST(round(CAST(ratio AS numeric), 3) AS double precision) AS sla_ratio,
     -- 사람 큐 안전 건은 비율이 없어도 경고로 보인다 (services/tickets.py _unruled_row)
-    CASE WHEN ratio IS NULL THEN status = 'HUMAN_QUEUE' ELSE ratio >= at_risk_ratio END AS at_risk
+    CASE WHEN ratio IS NULL THEN (status = 'HUMAN_QUEUE' OR route = 'human') ELSE ratio >= at_risk_ratio END AS at_risk
 FROM measured
 ORDER BY ratio DESC NULLS FIRST, received_at, ticket_id;

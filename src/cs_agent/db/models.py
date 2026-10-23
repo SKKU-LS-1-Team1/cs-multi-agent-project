@@ -69,6 +69,7 @@ class Ticket(Base):
     language: Mapped[str | None] = mapped_column(String(8))
     subject: Mapped[str] = mapped_column(Text, default="")
     body: Mapped[str] = mapped_column(Text)
+    resolution: Mapped[dict | None] = mapped_column(JSONB)
     body_ko: Mapped[str | None] = mapped_column(Text)  # 상담원 표시용 원문 번역 (CSA-57)
     provided_fields: Mapped[dict] = mapped_column(JSONB, default=dict)  # 문의서에서 고객이 채운 값
     thread_ref: Mapped[str | None] = mapped_column(String(128))  # 후속 문의 연결 키
@@ -161,6 +162,9 @@ class ReviewRow(_Timestamps, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.ticket_id", ondelete="CASCADE"))
     draft_id: Mapped[int | None] = mapped_column(ForeignKey("drafts.id", ondelete="SET NULL"))
+    acknowledged_failures: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     action: Mapped[str] = mapped_column(String(16))  # domain.ReviewAction
     reviewer: Mapped[str] = mapped_column(String(64), default="")
     edited_text: Mapped[str | None] = mapped_column(Text)
@@ -187,6 +191,26 @@ class AssignmentRow(_Timestamps, Base):
     assigned_by: Mapped[str] = mapped_column(String(64), default="")  # 비면 시스템(자동)
 
     __table_args__ = (Index("ix_assignments_ticket_id", "ticket_id"),)
+
+
+class SpecialistRequestRow(_Timestamps, Base):
+    """불변 요청과 확인된 회신 1건. 추가 회신은 새로운 요청으로 기록한다."""
+
+    __tablename__ = "specialist_requests"
+
+    request_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.ticket_id", ondelete="CASCADE"))
+    to_dept: Mapped[str] = mapped_column(String(32))
+    text: Mapped[str] = mapped_column(Text)
+    requested_by: Mapped[str] = mapped_column(String(100))
+    channel: Mapped[str] = mapped_column(String(64), default="")
+    attachment_names: Mapped[list] = mapped_column(JSONB, default=list)
+    reply_id: Mapped[str | None] = mapped_column(String(36), unique=True)
+    reply_text: Mapped[str | None] = mapped_column(Text)
+    reply_author: Mapped[str | None] = mapped_column(String(100))
+    replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_specialist_requests_ticket_id", "ticket_id"),)
 
 
 class ChatSession(_Timestamps, Base):
