@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 import logo from "./admin/assets/ls-electric-logo.png";
 import CustomerHome from "./pages/customer/CustomerHome";
+import InquirePage from "./pages/customer/InquirePage";
 import MyInquiries from "./pages/customer/MyInquiries";
 import "./pages/customer/shell.css";
 
@@ -14,6 +15,7 @@ export default function App() {
         </a>
         <nav className="cs-nav" aria-label="주 메뉴">
           <NavLink to="/" end>제품 · 상담</NavLink>
+          <NavLink to="/inquire">문의 남기기</NavLink>
           <NavLink to="/my">내 문의</NavLink>
         </nav>
         {/* 오른쪽 끝: 언어 선택 자리 (다국어 작업에서 붙인다) */}
@@ -23,6 +25,7 @@ export default function App() {
       </header>
       <Routes>
         <Route path="/" element={<CustomerHome />} />
+        <Route path="/inquire" element={<InquirePage />} />
         <Route path="/my" element={<MyInquiries />} />
       </Routes>
     </>

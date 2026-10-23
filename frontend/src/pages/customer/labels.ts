@@ -8,6 +8,8 @@ export const FIELD_KO: Record<string, string> = {
   install_date: "설치·시운전 날짜", failure_description: "고장 내용", po_number: "PO 번호", quantity: "수량", required_date: "희망 납기일",
   incoterms: "인도 조건", document_type: "필요한 문서", target_standard: "필요한 규격·인증", target_country: "사용 국가", current_fw: "현재 펌웨어",
   tool_version: "툴 버전", return_reason: "반품 사유", packaging_condition: "포장 상태", logs: "이벤트·트립 기록",
+  load_profile: "부하 전류·온도 기록", motor_nameplate: "모터 명판 정보", parameter_backup: "파라미터 백업", program_backup: "프로그램 백업",
+  battery_age: "배터리 설치일·사용 기간", battery_status: "이벤트 시점 배터리 상태", string_config: "PV 스트링 구성",
 };
 
 // 칸 아래 작은 안내 (예시가 있어야 덜 헤매는 항목만)

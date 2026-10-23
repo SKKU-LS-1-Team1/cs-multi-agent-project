@@ -1,0 +1,17 @@
+/* 문의 남기기 직접 진입 화면 (InquirePage). 색·모서리는 shell.css 의 cs- 토큰을 쓴다. */
+.iq-page h3 { font-size: 14px; font-weight: 700; color: var(--cs-g600); margin: 22px 0 8px; }
+.iq-list, .iq-chips { list-style: none; margin: 16px 0 0; padding: 0; }
+.iq-list { display: grid; gap: 10px; }
+.iq-opt { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border: 0; border-radius: 14px; background: var(--cs-g100); color: var(--cs-g900); font: inherit; text-align: left; cursor: pointer; transition: background-color .15s ease, transform .1s ease; }
+.iq-opt:hover { background: var(--cs-g200); }
+.iq-opt:active { transform: scale(.99); }
+.iq-opt:focus-visible, .iq-chip:focus-visible, .iq-link:focus-visible { outline: 2px solid var(--cs-blue-light); outline-offset: 2px; }
+.iq-opt b { display: block; font-size: 16px; font-weight: 700; }
+.iq-opt small { display: block; margin-top: 2px; font-size: 13px; color: var(--cs-g600); }
+.iq-opt > span:last-child { color: var(--cs-g500); font-size: 22px; }
+.iq-opt.is-ghost { background: #fff; border: 1px dashed var(--cs-g200); }
+.iq-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 0; }
+.iq-chip { min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--cs-g100); color: var(--cs-g700); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.iq-chip:hover { background: var(--cs-blue-50); color: var(--cs-blue); }
+.iq-link { border: 0; background: none; padding: 0; font: inherit; font-weight: 600; color: var(--cs-blue-light); text-decoration: underline; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .iq-opt { transition: none; } .iq-opt:active { transform: none; } }
