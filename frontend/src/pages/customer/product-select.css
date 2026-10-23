@@ -43,6 +43,7 @@
 .ps-arrow:hover { background: var(--ps-g50); color: var(--ps-blue); }
 .ps-l { left: 4px; } .ps-r { right: 4px; }
 .ps-info { text-align: center; padding: 8px 0; }
+.ps-info.is-top { padding: 0 0 4px; } /* 이름·선택 버튼은 사진 위 */
 .ps-info small { font-size: 13px; font-weight: 700; color: var(--ps-blue-light); }
 .ps-info h3 { font-size: 26px; line-height: 36px; font-weight: 700; color: var(--ps-g900); }
 .ps-info p { margin-top: 2px; font-size: 14px; color: var(--ps-g500); }

@@ -78,7 +78,6 @@ export default function ProductPicker({ selected, onSelect, focus }: Props) {
           {chosenItem.products.map((p) => (
             <button key={p.code} type="button" className={`ps-opt${p.code === selected ? " is-sel" : ""}`} onClick={() => onSelect(p.code)}>
               <b>{p.name}</b>
-              <small>{p.code}</small>
             </button>
           ))}
         </div>
@@ -92,6 +91,12 @@ export default function ProductPicker({ selected, onSelect, focus }: Props) {
       <h2>어떤 제품에 대해 알고 싶으세요?</h2>
       <p className="ps-sub">옆으로 넘겨서 제품군을 고르세요.</p>
       <div className="ps-car" role="group" aria-roledescription="carousel" aria-label="제품군">
+        <div className="ps-info is-top" aria-live="polite">
+          <small>{cur.division}</small>
+          <h3>{cur.name}</h3>
+          <p>{index + 1} / {n}</p>
+          <button type="button" className="ps-primary" onClick={() => setChosen(cur.family)}>이 제품군 선택하기</button>
+        </div>
         <div
           className={`ps-stage${dragging ? " is-dragging" : ""}`}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
@@ -127,12 +132,6 @@ export default function ProductPicker({ selected, onSelect, focus }: Props) {
           })}
           <button type="button" className="ps-arrow ps-l" aria-label="이전 제품군" onClick={() => go(-1)}>‹</button>
           <button type="button" className="ps-arrow ps-r" aria-label="다음 제품군" onClick={() => go(1)}>›</button>
-        </div>
-        <div className="ps-info" aria-live="polite">
-          <small>{cur.division}</small>
-          <h3>{cur.name}</h3>
-          <p>{index + 1} / {n}</p>
-          <button type="button" className="ps-primary" onClick={() => setChosen(cur.family)}>이 제품군 선택하기</button>
         </div>
         <div className="ps-jump" role="group" aria-label="제품군 바로 보기">
           {tree.map((d) => (
