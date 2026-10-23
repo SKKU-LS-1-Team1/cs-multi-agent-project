@@ -4,13 +4,13 @@ import { familyImage, familyName } from "./productFamilies";
 import { useProductTree } from "./useProductTree";
 import "./product-select.css";
 
-type Props = { selected: string | null; onSelect: (code: string) => void };
+type Props = { id?: string; selected: string | null; onSelect: (code: string) => void };
 
-export default function ProductTree({ selected, onSelect }: Props) {
+export default function ProductTree({ id, selected, onSelect }: Props) {
   const { tree, loading, error, reload } = useProductTree();
 
   return (
-    <aside className="ps ps-tree" aria-label="제품 분류">
+    <aside id={id} className="ps ps-tree" aria-label="제품 분류">
       {loading && <p className="ps-note">제품 목록을 불러오는 중이에요…</p>}
       {error && (
         <div className="ps-note" role="alert">
