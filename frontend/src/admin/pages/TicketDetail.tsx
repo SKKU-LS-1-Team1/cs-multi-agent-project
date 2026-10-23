@@ -15,6 +15,7 @@ import {
 import {
   canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
+import { escalationDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
@@ -345,9 +346,10 @@ function ExpertEditor({ t }: { t: Ticket }) {
         <div className="flex items-center justify-between"><h2 className="text-lg font-bold">전문부서 요청서 작성</h2><Button type="button" size="sm" variant="ghost" onClick={() => closeComposer(t)}>닫기</Button></div>
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">대상 부서</span>
-            <NativeSelect name="department" value={t.expertDraftDepartment || expertDepartments[0]} onChange={(e) => { t.expertDraftDepartment = e.target.value; commit(); }}>{expertDepartments.map((n) => <option key={n}>{n}</option>)}</NativeSelect></label>
+            <NativeSelect name="department" value={t.expertDraftDepartment || expertDepartments[0]} onChange={(e) => { t.expertDraftDepartment = e.target.value; commit(); if (t.source === "api") void escalationDraftViaApi(t, e.target.value); }}>{expertDepartments.map((n) => <option key={n}>{n}</option>)}</NativeSelect></label>
           <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">전달 방식</span><NativeSelect name="channel" defaultValue="이메일"><option>이메일</option><option>기업 메신저</option></NativeSelect></label>
         </div>
+        {t.expertDraftLoading && <small className="text-muted-foreground">AI가 요청서 초안을 쓰는 중이에요…</small>}
         <Textarea aria-label="전문부서 요청서" required className="min-h-32 max-h-44 leading-relaxed" value={t.expertDraft || ""} onChange={(e) => { t.expertDraft = e.target.value; commit(); }} />
         <fieldset className="grid gap-2 rounded-xl bg-background p-4"><legend className="px-1 text-sm text-muted-foreground">전달한 자료</legend>
           {files.length ? files.map((f) => (

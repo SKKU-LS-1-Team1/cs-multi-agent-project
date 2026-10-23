@@ -13,7 +13,12 @@
 //   · 답변 초안 작성 → 로컬 문구를 만들지 않고 AI 초안(aiDraft)을 다시 넣는다
 // - 화면 표시: 원문 언어(language)·접수 시각(receivedLabel)·한국어 번역(bodyKo, "한국어 번역" 토글)·
 //   근거 문서(apiEvidence → logic.answerContext 의 관련 기술문서)
-// - 담당자 배정·전문부서 요청·자료 확인은 아직 로컬 기록이다 (담당자는 백엔드 자동 배정을 보여 준다).
+//   · 초안 수정 요청 → POST /action rewrite (feedback). 같은 근거로 백엔드가 다시 쓴다
+//   · 추가정보 요청문 → POST /action info_request. 요청문 초안이 나오고, 승인하면 고객 회신 대기
+//   · 담당자 변경(배정·리소스 보드·일괄) → POST /assign (앞단 상담원끼리, CSA-53)
+//   · 전문부서 요청서 → POST /escalation-request 로 AI 초안. 전달(이관)은 아직 화면 기록이다 — 백엔드
+//     이관은 문의를 ESCALATED 로 멈추고, 전문부서 회신 반영(CSA-62)이 없어서 이어서 답할 수 없다.
+// - 고객 관리·로그인·자료 확인 기록은 백엔드가 없어 화면 기록이다.
 import { toast } from "sonner";
 import { api, type Agent, type Ticket as ApiTicket, type WorkItem } from "../../api/client";
 import { people, answerContext, contextKey, record, signedIn } from "./logic";
@@ -36,6 +41,13 @@ const LANGUAGE_LABEL: Record<string, string> = {
   en: "English", ko: "한국어", ja: "日本語", de: "Deutsch", fr: "Français", es: "Español", vi: "Tiếng Việt", zh: "中文",
 };
 const CLOSED = new Set(["RESOLVED", "REJECTED"]);
+// 부서 코드 → 이름 (data/ref/departments.csv dept_name_ko)
+export const DEPT_LABEL: Record<string, string> = {
+  GCS_L1: "글로벌 C/S 센터", TS_LV: "저압기기 기술지원", TS_MV: "고압·배전반 기술지원", TS_TRF: "변압기 기술지원",
+  TS_AUTO: "자동화 기술지원", TS_ENERGY: "에너지솔루션 기술지원", RND_FW: "펌웨어 개발", QA_CLAIM: "품질보증/클레임",
+  FIELD_SVC: "현장 서비스", CERT: "인증·규격", SALES_OPS: "해외영업 운영", SCM: "주문·물류", WARRANTY_DESK: "보증·RMA 데스크",
+};
+export const deptCode = (label: string) => Object.keys(DEPT_LABEL).find((k) => DEPT_LABEL[k] === label) ?? label;
 
 let agents = new Map<string, Agent>();
 let online = false;
@@ -94,6 +106,7 @@ function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     customerRequestStatus: api.status === "WAITING_CUSTOMER" ? "waiting" : "none",
     apiEvidence: api.evidence,
     apiChecks: api.checks,
+    apiInfoRequest: Boolean(api.info_request), // 지금 검토할 글이 백엔드 추가정보 요청문인가
     bodyKo: api.body_ko,
     finalReply: api.final_reply,
     translationError: api.translation_error,
@@ -103,8 +116,10 @@ function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     target.draft = aiDraft;
     target.purpose = api.info_request ? "request" : "answer";
     target.composerPurpose = target.purpose;
-    target.composerOpen = Boolean(aiDraft);
-    target.activeComposer = aiDraft ? "customer" : null;
+    // 전문부서 요청서를 쓰는 중이면 그 칸을 닫지 않는다 (동기화·요청서 초안 응답이 덮지 않게)
+    const writingExpert = target.activeComposer === "expert";
+    target.composerOpen = writingExpert || Boolean(aiDraft);
+    target.activeComposer = writingExpert ? "expert" : aiDraft ? "customer" : null;
     target.draftVersion = aiDraft ? 1 : 0;
     target.draftOrigin = aiDraft ? "ai" : null;
     if (reviewChanged) target.reviewed = false;
@@ -218,4 +233,97 @@ export function restoreAiDraft(t: Ticket) {
   t.composerOpen = true;
   t.activeComposer = "customer";
   commit();
+}
+
+
+const agentIdOf = (name: string) => [...agents.values()].find((a) => a.name === name && a.active)?.agent_id;
+
+/** 백엔드가 같은 상태로 새 글을 쓴 뒤에는 화면의 "고치던 글"을 버리고 새 초안을 넣는다. */
+function takeNewDraft(t: Ticket, row: ApiTicket) {
+  t.draft = "";
+  t.aiDraft = "";
+  apply(t, row);
+}
+
+/** 담당자 변경 (앞단 상담원끼리). 성공하면 true — 화면 이력은 호출한 쪽이 남긴다. */
+export async function reassignViaApi(t: Ticket, owner: string, reason: string): Promise<boolean> {
+  const agentId = agentIdOf(owner);
+  if (!agentId) {
+    toast.error(`${owner || "미배정"}은(는) 담당자 명단에 없습니다.`);
+    return false;
+  }
+  try {
+    apply(t, await api.assign(t.id, { assignee: agentId, reason, by: signedIn }));
+    commit();
+    return true;
+  } catch (e) {
+    toast.error(`담당자 변경 실패: ${e}`);
+    return false;
+  }
+}
+
+/** 초안 수정 요청 → 백엔드가 같은 근거로 다시 쓴다 (rewrite). */
+export async function rewriteViaApi(t: Ticket, instruction: string): Promise<boolean> {
+  t.regenerating = true;
+  commit();
+  try {
+    const row = await api.act(t.id, { action: "rewrite", feedback: instruction, reviewer: signedIn });
+    const version = (t.draftVersion || 1) + 1;
+    takeNewDraft(t, row);
+    t.draftVersion = version;
+    t.draftRequests = [...(t.draftRequests || []), { version, instruction, applied: ["AI 재작성"] }];
+    record(t, "draft-rewrite", `AI 초안 재작성 · ${instruction}`, { instruction, version });
+    toast(`v${version} 초안을 다시 만들었습니다.`);
+    return true;
+  } catch (e) {
+    toast.error(`초안 재작성 실패: ${e}`);
+    return false;
+  } finally {
+    t.regenerating = false;
+    commit();
+  }
+}
+
+/** 추가정보 요청문 초안 (info_request). 승인하면 고객에게 가고 회신 대기가 된다. */
+export async function infoRequestViaApi(t: Ticket): Promise<boolean> {
+  if (t.apiStatus !== "READY_FOR_REVIEW") {
+    toast("검토 대기 중인 문의에서만 추가정보 요청문을 만들 수 있습니다.");
+    return false;
+  }
+  t.regenerating = true;
+  commit();
+  try {
+    takeNewDraft(t, await api.act(t.id, { action: "info_request", reviewer: signedIn }));
+    record(t, "draft", "추가정보 요청문 초안 생성", { purpose: "request" });
+    toast("추가정보 요청문을 준비했습니다.");
+    return true;
+  } catch (e) {
+    toast.error(`요청문 생성 실패: ${e}`);
+    return false;
+  } finally {
+    t.regenerating = false;
+    commit();
+  }
+}
+
+/** 전문부서 요청서 AI 초안 (부서를 주면 그 부서용). 화면의 요청서 칸을 채운다. */
+export async function escalationDraftViaApi(t: Ticket, deptLabel?: string): Promise<boolean> {
+  t.expertDraftLoading = true;
+  commit();
+  try {
+    const row = await api.escalationRequest(t.id, deptLabel ? deptCode(deptLabel) : undefined);
+    apply(t, row);
+    const req = row.escalation_request;
+    if (req) {
+      t.expertDraft = req.text;
+      t.expertDraftDepartment = DEPT_LABEL[req.to_dept] ?? req.to_dept;
+    }
+    return true;
+  } catch (e) {
+    toast.error(`요청서 초안 생성 실패: ${e}`);
+    return false;
+  } finally {
+    t.expertDraftLoading = false;
+    commit();
+  }
 }

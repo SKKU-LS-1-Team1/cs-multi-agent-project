@@ -7,7 +7,7 @@ import {
 } from "./logic";
 import { closeModal, commit, openModal, setUi, tickets } from "./store";
 import type { Ticket } from "./types";
-import { isApiTicket, resolveViaApi, restoreAiDraft, sendViaApi } from "./api-sync";
+import { escalationDraftViaApi, infoRequestViaApi, isApiTicket, reassignViaApi, resolveViaApi, restoreAiDraft, rewriteViaApi, sendViaApi } from "./api-sync";
 
 const scrollToEditor = () => setTimeout(() => document.getElementById("answer-editor")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
 
@@ -33,7 +33,10 @@ function applyGeneratedAnswer(t: Ticket, c: any, draft: string) {
 }
 
 export function generate(t: Ticket, purpose?: string) {
-  if (isApiTicket(t)) return restoreAiDraft(t); // 백엔드 티켓은 AI 초안 (CSA-61)
+  if (isApiTicket(t)) { // 백엔드 티켓: 답변은 AI 초안, 추가정보 요청문은 백엔드가 만든다 (CSA-61)
+    if ((purpose ?? t.composerPurpose) === "request" && !t.apiInfoRequest) { void infoRequestViaApi(t); return; }
+    return restoreAiDraft(t);
+  }
   const full = answerContext(t, purpose);
   const c = full.purpose === "request"
     ? { ...full, references: [], availableReferences: [], technical: { documents: [], similarCases: [], possibleCause: null, recommendation: null, causeConfirmed: false }, expertResponse: null }
@@ -59,7 +62,9 @@ export function composeFromCopilot(t: Ticket, purpose: string) {
 }
 export function openExpertComposer(t: Ticket) {
   setUi({ tab: "문의·답변" });
-  t.activeComposer = "expert"; t.expertDraft ??= buildExpertRequest(t); t.reviewed = false;
+  t.activeComposer = "expert"; t.reviewed = false;
+  if (isApiTicket(t) && !t.expertDraft) { commit(); scrollToEditor(); void escalationDraftViaApi(t); return; } // AI 요청서 초안 (CSA-55)
+  t.expertDraft ??= buildExpertRequest(t);
   commit(); scrollToEditor();
 }
 export function closeComposer(t: Ticket) { t.activeComposer = null; t.composerOpen = false; commit(); }
@@ -124,7 +129,7 @@ function applyInstruction(text: string, ask: string, refs: string[]) {
 export function regenerateDraft(t: Ticket, instruction: string) {
   const ask = instruction.trim();
   if (!t.draft || !ask || t.regenerating) return;
-  if (isApiTicket(t)) { toast("백엔드 문의의 수정 지시 재생성은 아직 연결되지 않았습니다."); return; }
+  if (isApiTicket(t)) { void rewriteViaApi(t, ask); return; } // 백엔드가 같은 근거로 다시 쓴다 (rewrite)
   const refs = (t.draftContext?.references || []).map((r: any) => r.label);
   const out = applyInstruction(t.draft, ask, refs);
   if (!out.applied.length) { toast("지금은 짧게·정중하게·사과·근거·단계별·원인 미확정 지시만 반영합니다. 자유로운 문장은 백엔드가 연결되면 반영됩니다."); return; }
@@ -224,6 +229,15 @@ export function submitExpertReply(target: Ticket, selected: string, body: string
 }
 export function assignOwner(t: Ticket, owner: string) {
   if (!canAssign) { toast.error("배정은 팀장만 할 수 있습니다."); return; } // BACKEND: 서버도 팀장 역할만 허용해야 한다
+  if (isApiTicket(t)) { // 백엔드 담당자 변경 (CSA-53)
+    const before = t.owner;
+    void reassignViaApi(t, owner, "팀장 배정").then((ok) => {
+      if (!ok) return;
+      record(t, "assignment", `담당자 ${before || "미배정"} → ${t.owner}`);
+      closeModal(); commit(); toast("담당자를 변경했습니다.");
+    });
+    return;
+  }
   const before = t.owner;
   t.owner = owner;
   t.department = FRONTLINE;
@@ -267,6 +281,16 @@ export function openCompletion(t: Ticket) {
 export function moveTicket(t: Ticket, owner: string, opts: { silent?: boolean } = {}) {
   if (!canAssign) { toast.error("배정은 팀장만 할 수 있습니다."); return; }
   if (t.owner === owner) return;
+  if (isApiTicket(t)) { // 백엔드 담당자 변경 (CSA-53). 되돌리기도 같은 API 로
+    const before = t.owner;
+    void reassignViaApi(t, owner, "리소스 배정").then((ok) => {
+      if (!ok) return;
+      record(t, "assignment", `담당자 ${before || "미배정"} → ${owner} (리소스 배정)`);
+      commit();
+      if (!opts.silent && before) toast(`${t.id} · ${owner}으로 변경했습니다.`, { action: { label: "되돌리기", onClick: () => moveTicket(t, before, { silent: true }) } });
+    });
+    return;
+  }
   const before = t.owner, beforeDept = t.department, beforeStatus = t.status;
   t.owner = owner;
   t.department = FRONTLINE;

@@ -16,6 +16,7 @@ export type InquiryIn = {
   thread_ref?: string | null;
   received_at?: string;
 };
+export type EscalationRequest = { to_dept: string; reason: string; summary: string; fields: Record<string, string>; cited: string[]; text: string; model: string };
 export type Ticket = {
   ticket_id: string;
   inquiry: InquiryIn | null; // 문의 원문 (회신이 오면 이어 붙인 본문)
@@ -32,6 +33,7 @@ export type Ticket = {
   info_request: string | null;
   approved_reply: string | null;
   final_reply: string | null; // 고객에게 보낸 글 (고객 언어)
+  escalation_request: EscalationRequest | null; // 전문부서 이관 요청서 초안 (CSA-55)
   final_reply_language: string | null;
   translation_error: string | null;
   checks: CheckResult[];
@@ -154,7 +156,12 @@ export const api = {
   resolve: (id: string) => request<Ticket>(`/tickets/${id}/resolve`, { method: "POST" }),
   agents: (dept?: string) => request<Agent[]>(`/agents${dept ? `?dept=${dept}` : ""}`),
   workList: (dept?: string) => request<WorkItem[]>(`/tickets${dept ? `?dept=${dept}` : ""}`),
-  answered: () => request<string[]>("/tickets/answered"), // 발송했고 해결 확정 전 (작업 목록에는 없다)
+  answered: () => request<string[]>("/tickets/answered"),
+  assign: (id: string, body: { assignee: string; reason?: string; by?: string }) =>
+    request<Ticket>(`/tickets/${id}/assign`, { method: "POST", body: JSON.stringify(body) }),
+  // 전문부서 이관 요청서 초안 만들기 (CSA-55). 실제 이관은 act(escalate)
+  escalationRequest: (id: string, toDept?: string) =>
+    request<Ticket>(`/tickets/${id}/escalation-request`, { method: "POST", body: JSON.stringify(toDept ? { to_dept: toDept } : {}) }), // 발송했고 해결 확정 전 (작업 목록에는 없다)
   ticket: (id: string) => request<Ticket>(`/tickets/${id}`),
   act: (id: string, body: { action: ReviewAction } & Record<string, unknown>) =>
     request<Ticket>(`/tickets/${id}/action`, { method: "POST", body: JSON.stringify(body) }),

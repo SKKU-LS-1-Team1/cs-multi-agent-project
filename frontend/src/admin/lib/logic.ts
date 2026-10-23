@@ -154,7 +154,8 @@ export const unreadReplies = (t: Ticket) =>
 export const latestCustomerReply = (t: Ticket): Ev | undefined => t.events.findLast((e) => ["customer", "customer-followup"].includes(e.kind));
 export const sourceInquiry = (t: Ticket) => t.body || (t.id === "CSV1-000050" ? "The iS7 75kW trips with E.OC immediately at run command. Restarting did not resolve the issue." : t.title);
 
-export const expertDepartments = ["자동화 기술지원", "저압 기술지원", "현장 서비스"];
+// 전문부서 요청 대상 = 백엔드 이관 대상(agents/escalation.py ESCALATION_TARGETS)의 이름 (departments.csv)
+export const expertDepartments = ["자동화 기술지원", "저압기기 기술지원", "고압·배전반 기술지원", "변압기 기술지원", "에너지솔루션 기술지원", "현장 서비스", "품질보증/클레임", "펌웨어 개발", "인증·규격", "보증·RMA 데스크", "해외영업 운영", "주문·물류"];
 export function referralRows() {
   const rows: any[] = [];
   for (const t of tickets) {
@@ -433,7 +434,9 @@ save();
 /** 아직 길이 정해지지 않은 문의의 세 갈래: 고객 질의서 · 전문부서 요청서 · 답변 초안. 이미 초안이 있거나 누구의 회신을 기다리는 중이면 갈래가 아니라 그 상태가 보인다. */
 export type Choice = "answer" | "expert" | "request";
 export function branchChoice(t: Ticket): Choice | null {
-  if (t.stage === 5 || t.sent || !t.owner || t.draft || t.activeComposer === "expert") return null;
+  // 백엔드 문의는 처음부터 AI 답변 초안이 있다. 고치기 전에는 전문부서 요청·고객 질의서로도 갈 수 있게 갈림길을 보인다 (CSA-61)
+  const untouchedAiDraft = t.source === "api" && t.purpose === "answer" && !!t.draft && t.draft === t.aiDraft;
+  if (t.stage === 5 || t.sent || !t.owner || (t.draft && !untouchedAiDraft) || t.activeComposer === "expert") return null;
   const reply = latestCustomerReply(t), c = answerContext(t);
   if (t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting") return null;
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return null;
@@ -478,7 +481,9 @@ export function inquirySummary(t: Ticket) {
   const c = answerContext(t), a = c.analysis;
   const pendingReview = waitingReviews(t).length + (t.legacyReviewPending ? 1 : 0);
   const facts = [a.errorCode && `오류 코드 ${a.errorCode}`, a.conditions.firmware && `FW ${a.conditions.firmware} · 부하 ${a.conditions.load}`, t.files?.length ? `첨부 ${t.files.length}건` : ""].filter(Boolean).join(" · ");
-  const gist = t.id === "CSV1-000050" ? "운전 명령 직후 E.OC(과전류) 트립이 발생하고, 재시작해도 같은 증상이 반복됩니다." : `‘${t.title}’ 내용입니다.`;
+  // 백엔드 문의는 원문 한국어 번역(body_ko, CSA-57) 앞부분으로 요지를 보인다
+  const ko = typeof t.bodyKo === "string" ? t.bodyKo.split(/(?<=[.!?。])\s+/).slice(0, 2).join(" ").slice(0, 180) : "";
+  const gist = t.id === "CSV1-000050" ? "운전 명령 직후 E.OC(과전류) 트립이 발생하고, 재시작해도 같은 증상이 반복됩니다." : ko || `‘${t.title}’ 내용입니다.`;
   const reply = latestCustomerReply(t);
   const next = t.stage === 5 ? "처리가 완료된 문의입니다."
     : t.sent ? "고객 답변을 발송했습니다."
