@@ -16,7 +16,10 @@
 # - judge: Jev → confidence < settings.jev_min_confidence 거나 Jev 호출이 실패하면 같은 입력을
 #   Gemini(fast)로 다시 판단. JEV_API_KEY·JEV_MODEL 이 비어 있으면 처음부터 Gemini.
 #   확신도 기준은 시험 문의로 정한다 (CSA-49).
-# - write: Gemini writer 모델로 문장 작성.
+# - write: Gemini writer 모델로 문장 작성. 챗봇 대화(CHAT_TASKS)는 같은 모델을 thinking_level=low 로
+#   부른다: 기본 thinking 은 짧은 답에도 수천 토큰을 생각하다 Google 쪽 504(DEADLINE_EXCEEDED)로
+#   끝나기도 했다 (2026-10-23 "E.OC 떴어요": 기본 89초 504 / 37초 5,066 토큰, low 4~6초 230 토큰,
+#   답 품질 같음). gemini-3.8-flash 는 minimal 을 받지 않는다. 문의 답변 초안은 그대로 둔다.
 # - 호출마다 tracing.trace(task, model, prompt) 로 기록한다. task 이름은 단계 이름(classify,
 #   draft, verify_grounding …)으로 통일한다. 대체 호출은 metadata.fallback_from 에 앞 모델이 남는다.
 # - 같은 요청 캐시·분당 호출 제한 (CSA-45, cache/store.py): kv(Redis 또는 MemoryKV)를 받은
@@ -57,6 +60,9 @@ from cs_agent.llm.clients import (
 from cs_agent.llm.tracing import trace
 
 _LOGGER = logging.getLogger(__name__)
+
+# 챗봇 대화: 짧은 답이라 thinking_level=low 로 부른다 (위 메모)
+CHAT_TASKS = frozenset({"chat_answer", "chat_partial", "chat_handoff"})
 RATE_WINDOW_S = 60
 
 
@@ -87,8 +93,10 @@ class LLMRouter:
         if jev or gemini_judge or writer:
             self.jev, self.gemini_judge = jev, gemini_judge
             self.writer: Writer = writer or FakeWriter()
+            self.chat_writer: Writer = self.writer
         elif not self.enabled:
             self.jev, self.gemini_judge, self.writer = FakeJudge(), None, FakeWriter()
+            self.chat_writer = self.writer
         else:
             if not settings.gemini_api_key:
                 raise ValueError("LLM_PROVIDER=live 인데 GEMINI_API_KEY 가 비어 있다")
@@ -101,6 +109,9 @@ class LLMRouter:
                 settings.gemini_api_key, settings.gemini_model_fast, json_mode=True
             )
             self.writer = GeminiClient(settings.gemini_api_key, settings.gemini_model_writer)
+            self.chat_writer = GeminiClient(
+                settings.gemini_api_key, settings.gemini_model_writer, thinking_level="low"
+            )
 
     # --- 캐시·호출 제한 (CSA-45) ------------------------------------------------------------
 
@@ -200,25 +211,34 @@ class LLMRouter:
             first_confidence=result.confidence,
         )
 
+    def _writer_for(self, task: str) -> Writer:
+        return self.chat_writer if task in CHAT_TASKS else self.writer
+
+    def _write_key(self, task: str, prompt: str) -> str:
+        writer = self._writer_for(task)
+        level = getattr(writer, "thinking_level", None)
+        return cache_key(task, json.dumps([writer.name, prompt] + ([level] if level else [])))
+
     def invalidate_write(self, task: str, prompt: str) -> None:
         """호출자가 검증에서 거절한 응답을 재시도 때 캐시로 다시 받지 않게 한다."""
         if self.kv is None:
             return
-        key = cache_key(task, json.dumps([self.writer.name, prompt]))
+        key = self._write_key(task, prompt)
         try:
             self.kv.expire(key, 0)
         except Exception as e:
             _LOGGER.warning("검증 실패 응답의 캐시 만료 실패: %s", type(e).__name__)
 
     def write(self, task: str, prompt: str) -> str:
-        key = cache_key(task, json.dumps([self.writer.name, prompt]))
+        key = self._write_key(task, prompt)
         if (hit := self._cache_get(key)) is not None:
             with trace(task, hit["model"], prompt, cache_hit=True) as span:
                 span.output = hit["text"]
             return hit["text"]
+        writer = self._writer_for(task)
         self._wait_turn("gemini")
-        with trace(task, self.writer.name, prompt) as span:
-            out = self.writer.write(prompt)
+        with trace(task, writer.name, prompt) as span:
+            out = writer.write(prompt)
             span.output = out.text
             span.usage = out.usage
         self._cache_set(key, {"text": out.text, "model": out.model})

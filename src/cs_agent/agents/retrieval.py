@@ -99,6 +99,10 @@ def _tokens(text: str) -> list[str]:
 class KeywordRetriever:
     """질문 단어가 글에 얼마나 들어 있는지(idf 가중)로 고른다. 영어 외 문의에는 약하다."""
 
+    # 점수 척도가 코사인 유사도와 달라 chatbot/handoff.py 의 기준값(MIN_RETRIEVAL_SCORE)과 비교할
+    # 수 없다. 그런 검색기는 calibrated=False 로 둔다 (챗봇은 '찾았는지'만 본다).
+    calibrated = False
+
     def __init__(self, items: Iterable[tuple[Evidence, str]]):
         self.items = [(evidence, set(_tokens(text))) for evidence, text in items]
         df = Counter(token for _, tokens in self.items for token in tokens)
@@ -145,6 +149,22 @@ def keyword_docs(chunks: Iterable[Any] | None = None) -> KeywordRetriever:
         )
         items.append((evidence, f"{chunk.metadata.get('title', '')} {chunk.title} {chunk.text}"))
     return KeywordRetriever(items)
+
+
+@lru_cache(maxsize=1)
+def _sections_by_doc() -> dict[str, tuple[Evidence, ...]]:
+    sections: dict[str, list[Evidence]] = {}
+    for evidence, _ in keyword_docs().items:
+        sections.setdefault(evidence.doc_id, []).append(evidence)
+    return {doc_id: tuple(items) for doc_id, items in sections.items()}
+
+
+def doc_sections(doc_id: str) -> list[Evidence]:
+    """한 문서의 절 전체 (data/raw/docs). 검색 결과와 상관없이 꼭 봐야 하는 정책 문서용.
+
+    정책 문서(POL-*)는 짧고(2KB 안팎) 한국어 등 영어가 아닌 질문은 키워드 검색으로 못 찾는다.
+    """
+    return [e.model_copy(update={"score": 1.0}) for e in _sections_by_doc().get(doc_id, ())]
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -225,6 +245,8 @@ def _embed_query(text: str) -> list[float]:
 
 class PgVectorRetriever:
     """질문 임베딩과 코사인 거리가 가까운 행. score = 1 - 거리."""
+
+    calibrated = True  # 문의 전환 기준값(MIN_RETRIEVAL_SCORE)을 이 점수로 쟀다
 
     def __init__(
         self,
