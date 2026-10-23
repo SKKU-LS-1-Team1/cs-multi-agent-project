@@ -775,7 +775,7 @@ class ExtractionDetails(BaseModel):
     issues: list[str] = Field(default_factory=list)
 
     def to_extraction(self) -> Extraction:
-        """공통 출력에 확정 필드값을 전달한다. 근거/미확인 이력은 상세 결과에 보존한다.
+        """확정값과 그 근거·미확인 이력을 공통 출력까지 전달한다.
 
         기존 그래프는 urgency == SAFETY만 사람 큐로 보낸다. 별도 검토 필드가 없으므로
         안전 검토가 필요한 건의 공통 출력은 SAFETY로 보수적으로 전달한다.
@@ -813,6 +813,17 @@ class ExtractionDetails(BaseModel):
             language=self.language,
             provided_info=list(self.provided_info),
             field_values=dict(self.fields),
+            field_evidence=dict(self.evidence),
+            field_sources=dict(self.sources),
+            unconfirmed_fields=dict(self.unconfirmed_fields),
+            unconfirmed_evidence=dict(self.unconfirmed_evidence),
+            field_candidates={
+                key: [dict(item) for item in values]
+                for key, values in self.field_candidates.items()
+            },
+            issues=list(self.issues),
+            assessed_urgency=self.urgency,
+            safety_review_required=review_required,
             return_defect=self.return_defect,
         )
 
@@ -1252,6 +1263,7 @@ def extract_return_defect(
     llm: JudgeRouter | None,
     *,
     transcript: Sequence[ChatMessage | Mapping[str, str]] = (),
+    current_return_reason: str | None = None,
 ) -> ReturnDefectResult:
     """반품 사유만 원문에서 판단한다. 유형·부서·라우팅 정답은 입력하지 않는다.
 
@@ -1261,7 +1273,9 @@ def extract_return_defect(
     inquiry = _inquiry(inquiry)
     transcript = [ChatMessage.model_validate(m) for m in transcript]
     reason = _value(inquiry.provided_fields.get("return_reason"))
-    if not _customer_text(inquiry, transcript) and reason is None:
+    # 최신 폼의 UNKNOWN·미확인 표현도 최신 발언이다. 과거 확정 사유로 복구하지 않는다.
+    current_reason = current_return_reason.strip() if current_return_reason is not None else None
+    if not _customer_text(inquiry, transcript) and reason is None and not current_reason:
         return ReturnDefectResult(decision="UNKNOWN")
     if llm is None:
         return ReturnDefectResult(error="return_defect_router_unavailable")
@@ -1273,8 +1287,14 @@ def extract_return_defect(
                 inquiry,
                 RETURN_DEFECT_INSTRUCTIONS,
                 transcript=transcript,
-                return_reason=reason if not transcript else None,
-                previous_return_reason=reason if transcript else None,
+                return_reason=(
+                    current_reason
+                    if current_return_reason is not None
+                    else (reason if not transcript else None)
+                ),
+                previous_return_reason=(
+                    reason if transcript and current_return_reason is None else None
+                ),
                 criteria=RETURN_DEFECT_DEFINITIONS,
                 few_shot_examples=_few_shot_payload(RETURN_DEFECT_FEW_SHOT_EXAMPLES),
             ),
@@ -1485,6 +1505,8 @@ def extract(
     category: Category | None = None,
     secondary_category: Category | None = None,
     extraction_model: str | None = None,
+    current_provided_fields: Mapping[str, str] | None = None,
+    current_product_code: str | None = None,
 ) -> Extraction:
     """스켈레톤의 extract(inquiry, tables) 호출과 기존 공통 Extraction을 유지한다.
 
@@ -1517,6 +1539,8 @@ def extract(
         category=category,
         secondary_category=secondary_category,
         extraction_model=extraction_model,
+        current_provided_fields=current_provided_fields,
+        current_product_code=current_product_code,
     ).to_extraction()
 
 
@@ -1532,6 +1556,8 @@ def extract_details(
     category: Category | None = None,
     secondary_category: Category | None = None,
     extraction_model: str | None = None,
+    current_provided_fields: Mapping[str, str] | None = None,
+    current_product_code: str | None = None,
 ) -> ExtractionDetails:
     """상세 결과: llm은 Jev 판단, 추출 모델은 Settings.gemini_model_fast(.env) 사용.
 
@@ -1643,7 +1669,12 @@ def extract_details(
         result.issues.append("safety_mention_requires_review")
 
     if (category or inquiry.category) == Category.RETURN:
-        judgement = extract_return_defect(inquiry, llm, transcript=transcript)
+        judgement = extract_return_defect(
+            inquiry,
+            llm,
+            transcript=transcript,
+            current_return_reason=(current_provided_fields or {}).get("return_reason"),
+        )
         result.return_defect = judgement.return_defect
         if judgement.model:
             result.models["return_defect"] = judgement.model
@@ -1676,8 +1707,39 @@ def extract_details(
         field_limits = _dialogue_field_limits(
             messages, list(dict.fromkeys(requested)), result, products, field_labels
         )
+    # 회신 폼에서 이번에 직접 제공한 값은 과거 본문 때문에 철회되지 않는다.
+    # 폼 값은 원문 인용으로 꾸미지 않고 customer_form 출처로 보존한다.
+    current_fields = dict(current_provided_fields or {})
+    if current_product_code is not None:
+        current_fields["product_model"] = current_product_code
+    current_keys = []
+    for key, raw in current_fields.items():
+        value = _value(raw)
+        if key not in allowed_fields or value is None:
+            continue
+        current_keys.append(key)
+        if key == "product_model":
+            current_matches = _product_matches(value, products)
+            if len(current_matches) != 1:
+                _unconfirm_field(result, key, "UNKNOWN", value)
+                result.issues.append("invalid_or_ambiguous_current_product")
+                continue
+            value = next(iter(current_matches))
+        _set_field(result, key, value, "customer_form", str(raw))
+    if current_keys:
+        # 같은 회신의 본문이 새 폼 값을 부정·철회하면 확정하지 않고 재평가한다.
+        current_limits = _dialogue_field_limits(
+            [inquiry.body], current_keys, result, products, field_labels
+        )
+        field_limits.update({key: len(messages) - 1 for key in current_limits})
+        requested += current_keys
+        if requested_fields is None:
+            requested += auto_required_fields()
     targets = [
-        key for key in dict.fromkeys(requested) if bool(transcript) or key not in result.fields
+        key
+        for key in dict.fromkeys(requested)
+        if (bool(transcript) or key not in result.fields)
+        and result.sources.get(key) != "customer_form"
     ]
     # 안전 건도 추출한다. 사람 큐로 가더라도 상담원이 고객이 준 정보를 보고 바로 처리할 수 있어야
     # 하고, 같은 정보를 다시 묻지 않게 한다 (분기는 그래프의 urgency 로 그대로 사람 큐).
@@ -1773,10 +1835,11 @@ def _extract_structured(
                     requested_fields=targets,
                     field_definitions={key: field_labels.get(key, key) for key in targets},
                     confirmed_fields={
-                        k: v for k, v in result.fields.items() if result.sources[k] == "customer"
-                    }
-                    if not transcript
-                    else {},
+                        k: v
+                        for k, v in result.fields.items()
+                        if result.sources[k] == "customer_form"
+                        or (not transcript and result.sources[k] == "customer")
+                    },
                     previous_fields=previous_fields,
                     product_catalog=[{"code": p.code, "name": p.name} for p in products.values()],
                 ),

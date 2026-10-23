@@ -30,21 +30,44 @@
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import wraps
 from typing import Any
 
 from langgraph.types import Command
 
+from cs_agent.agents import drafting, info_request
 from cs_agent.agents.case_memory import SAVE_ON, build_case
-from cs_agent.agents.escalation import EscalationError, InvalidEscalation
+from cs_agent.agents.escalation import ESCALATION_TARGETS, EscalationError, InvalidEscalation
 from cs_agent.agents.translation import new_part, source_body
 from cs_agent.agents.verification import detect_language
-from cs_agent.domain import ReviewAction, Route, TicketStatus
+from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
+from cs_agent.llm.router import LLMRouter
 from cs_agent.llm.tracing import ticket_scope
+from cs_agent.rules.engine import apply_rules
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
-from cs_agent.schemas import AssignIn, EscalationRequest, InquiryIn, ReviewIn, TicketOut
+from cs_agent.rules.tables import load_tables
+from cs_agent.schemas import (
+    AssignIn,
+    CustomerMessage,
+    Draft,
+    EscalationRequest,
+    InformationReview,
+    InformationReviewIn,
+    InquiryIn,
+    ManualReplyIn,
+    Resolution,
+    ResolveIn,
+    ReviewIn,
+    SpecialistReplyIn,
+    SpecialistRequestIn,
+    TicketOut,
+)
 from cs_agent.services import assignment
 from cs_agent.services.assignment import Agent
+from cs_agent.services.information import apply_information_review
 from cs_agent.services.records import MemoryRecords, Records
+from cs_agent.services.reply_preview import context_key, review_text, target_language, valid_preview
+from cs_agent.services.specialist_records import SpecialistConflict
 
 CLOSED = frozenset({TicketStatus.APPROVED, TicketStatus.REJECTED, TicketStatus.RESOLVED})
 
@@ -55,6 +78,20 @@ class TicketNotFound(LookupError):
 
 class InvalidAction(ValueError):
     """지금 상태에서 할 수 없는 처리 (예: 검토 대기가 아닌데 승인)"""
+
+
+def _serialized(method):
+    """Serialize graph mutations and durable specialist writes for the same ticket."""
+
+    @wraps(method)
+    def wrapped(self, ticket_id, *args, **kwargs):
+        try:
+            with self.records.ticket_lock(ticket_id):
+                return method(self, ticket_id, *args, **kwargs)
+        except SpecialistConflict as exc:
+            raise InvalidAction(str(exc)) from exc
+
+    return wrapped
 
 
 def ticket_dept(values: dict) -> str | None:
@@ -151,11 +188,46 @@ class TicketService:
             )
         ticket_id = f"T-{uuid.uuid4().hex[:12].upper()}"
         self.records.add_ticket(ticket_id, inquiry)
-        self._run(ticket_id, {"ticket_id": ticket_id, "inquiry": inquiry, "followups": 0})
+        self._run(
+            ticket_id,
+            {
+                "ticket_id": ticket_id,
+                "inquiry": inquiry,
+                "followups": 0,
+                "customer_messages": [self._customer_message(inquiry, "initial")],
+                "customer_revision": 0,
+            },
+        )
         return self.get(ticket_id)
 
+    @staticmethod
+    def _customer_message(inquiry: InquiryIn, kind: str, message_id: str | None = None) -> dict:
+        return CustomerMessage(
+            message_id=message_id or str(uuid.uuid4()),
+            kind=kind,
+            **inquiry.model_dump(
+                include={
+                    "body",
+                    "subject",
+                    "received_at",
+                    "language",
+                    "provided_fields",
+                    "category",
+                    "product_code",
+                }
+            ),
+        ).model_dump(mode="json")
+
+    def _customer_messages(self, ticket_id: str, values: dict) -> list[dict]:
+        if values.get("customer_messages"):
+            return list(values["customer_messages"])
+        # Older checkpoints only kept the merged body. Do not fabricate reply boundaries.
+        return [self._customer_message(values["inquiry"], "initial", f"{ticket_id}:initial")]
+
+    @_serialized
     def reply(self, ticket_id: str, inquiry: InquiryIn) -> TicketOut:
         """고객 회신. 진행 중이던 검토는 버리고 원문 + 회신으로 처음부터 다시 판단한다."""
+        self._sync_specialists(ticket_id)
         values = self._state(ticket_id).values
         if values.get("status") == TicketStatus.RESOLVED:
             self.records.deactivate_case(ticket_id)  # 다시 열린 문의의 사례는 검색에서 뺀다
@@ -167,9 +239,18 @@ class TicketService:
             parts = [new_part(original.body, original.language)]
         stamp = inquiry.received_at.strftime("%Y-%m-%d %H:%M")
         parts.append(new_part(inquiry.body, inquiry.language, f"\n\n[Customer reply {stamp}]\n"))
+        resolution = values.get("resolution")
+        messages = self._customer_messages(ticket_id, values)
+        messages.append(self._customer_message(inquiry, "reply"))
         self._run(
             ticket_id,
             {
+                "customer_messages": messages,
+                "customer_revision": values.get("customer_revision", 0) + 1,
+                "information_review": None,
+                "information_review_refresh": False,
+                "resolution": {**resolution, "superseded": True} if resolution else None,
+                "resolution_case_saved": False,
                 "ticket_id": ticket_id,
                 "inquiry": merged,
                 "followups": followups,
@@ -179,6 +260,7 @@ class TicketService:
         )
         return self.get(ticket_id)
 
+    @_serialized
     def generate_escalation_request(self, ticket_id: str, to_dept: str | None = None) -> TicketOut:
         """검토 중/사람 큐에서 요청서만 생성. 승인·이관·자동 배정은 하지 않는다."""
         snapshot = self._state(ticket_id)
@@ -216,10 +298,344 @@ class TicketService:
         self.records.save_state(ticket_id, values)
         return self.get(ticket_id)
 
-    def act(self, ticket_id: str, review: ReviewIn) -> TicketOut:
+    def _sync_specialists(self, ticket_id: str) -> list[dict]:
+        """DB is authoritative. Recover a missed checkpoint write before any rewrite/approval."""
+        requests = self.records.specialist_requests(ticket_id)
+        revision = len(requests) + sum(r["reply"] is not None for r in requests)
+        snapshot = self._state(ticket_id)
+        if snapshot.values.get("specialist_revision", 0) == revision:
+            return requests
+        replies = [
+            {
+                **r["reply"],
+                "request_id": r["request_id"],
+                "to_dept": r["to_dept"],
+                "request_text": r["text"],
+                "created_at": r["reply"]["created_at"].isoformat(),
+            }
+            for r in requests
+            if r["reply"]
+        ]
+        node = {
+            TicketStatus.READY_FOR_REVIEW: "ready",
+            TicketStatus.ON_HOLD: "hold",
+            TicketStatus.HUMAN_QUEUE: "human",
+            TicketStatus.WAITING_CUSTOMER: "finish",
+        }.get(snapshot.values.get("status"))
+        updates = {
+            "specialist_requests": [
+                {
+                    **r,
+                    "created_at": r["created_at"].isoformat(),
+                    "reply": {**r["reply"], "created_at": r["reply"]["created_at"].isoformat()}
+                    if r["reply"]
+                    else None,
+                }
+                for r in requests
+            ],
+            "specialist_replies": replies,
+            "specialist_revision": revision,
+        }
+        # A specialist reply must not erase the already sent request for customer information.
+        if snapshot.values.get("pending") != "info_request":
+            updates.update(
+                checks=[],
+                approved_reply=None,
+                final_reply=None,
+                translation_error=None,
+                approval_cited=None,
+                approval_text=None,
+                approval_error=None,
+                approval_checks_key=None,
+                approval_review=None,
+            )
+        self.graph.update_state(
+            self._config(ticket_id), updates, **({"as_node": node} if node else {})
+        )
+        self.records.save_state(ticket_id, self._state(ticket_id).values)
+        return requests
+
+    def _require_specialist_state(self, ticket_id: str) -> None:
+        status = self._state(ticket_id).values.get("status")
+        if status not in {
+            TicketStatus.READY_FOR_REVIEW,
+            TicketStatus.ON_HOLD,
+            TicketStatus.HUMAN_QUEUE,
+            TicketStatus.WAITING_CUSTOMER,
+        }:
+            raise InvalidAction("검토·회신 대기 또는 사람 큐 문의에서만 등록할 수 있습니다")
+
+    @staticmethod
+    def _check_specialist_budget(requests: list[dict], additional_chars: int) -> None:
+        from cs_agent.agents.drafting import MAX_SPECIALIST_CONTEXT_CHARS
+
+        # Reserve 512 provenance chars per request and 512 reply chars while unanswered.
+        # A new request must leave room for a concise reply rather than fill the whole budget.
+        # Reject before immutable storage; silently clipping could drop the actual conclusion.
+        used = sum(
+            len(r["text"]) + (len(r["reply"]["text"]) if r["reply"] else 512) + 512
+            for r in requests
+        )
+        if used + additional_chars > MAX_SPECIALIST_CONTEXT_CHARS:
+            raise InvalidAction(
+                "전문부서 요청·회신의 전체 작성 문맥 한도를 초과합니다. "
+                "저장되지 않았습니다. 요청·회신을 핵심 사실과 결론 위주로 줄여 다시 등록해 주세요"
+            )
+
+    @_serialized
+    def add_specialist_request(self, ticket_id: str, body: SpecialistRequestIn) -> TicketOut:
+        self._require_specialist_state(ticket_id)
+        if body.to_dept not in ESCALATION_TARGETS:
+            raise InvalidAction("유효한 전문부서를 선택해 주세요")
+        requests = self.records.specialist_requests(ticket_id)
+        if not any(r["request_id"] == str(body.request_id) for r in requests):
+            self._check_specialist_budget(requests, len(body.text) + 1024)
+        self.records.add_specialist_request(ticket_id, body)
+        self._sync_specialists(ticket_id)
+        return self.get(ticket_id)
+
+    @_serialized
+    def add_specialist_reply(
+        self, ticket_id: str, request_id: str, body: SpecialistReplyIn
+    ) -> TicketOut:
+        self._require_specialist_state(ticket_id)
+        requests = self.records.specialist_requests(ticket_id)
+        target = next((r for r in requests if r["request_id"] == request_id), None)
+        if target is not None and target["reply"] is None:
+            self._check_specialist_budget(requests, len(body.text) - 512)
+        self.records.add_specialist_reply(ticket_id, request_id, body)
+        self._sync_specialists(ticket_id)
+        return self.get(ticket_id)
+
+    @_serialized
+    def review_information(self, ticket_id: str, review: InformationReviewIn) -> TicketOut:
+        values = self._state(ticket_id).values
+        messages = self._customer_messages(ticket_id, values)
+        latest = messages[-1]
+        revision = values.get("customer_revision", 0)
+        if (
+            latest["kind"] != "reply"
+            or review.reply_id != latest["message_id"]
+            or review.customer_revision != revision
+        ):
+            raise InvalidAction(
+                "새 고객 회신이 있습니다. 최신 회신을 확인하고 자료를 검토해 주세요"
+            )
+        if values.get("status") not in {
+            TicketStatus.READY_FOR_REVIEW,
+            TicketStatus.ON_HOLD,
+            TicketStatus.HUMAN_QUEUE,
+        }:
+            raise InvalidAction("검토 대기 또는 사람 큐에서만 수신 자료를 확인할 수 있습니다")
+        if not values.get("classification") or not values.get("extraction"):
+            raise InvalidAction("분석이 완료된 뒤 자료를 확인해 주세요")
+        tables = load_tables()
+        try:
+            extraction, fields = apply_information_review(
+                values["extraction"], review.fields, tables
+            )
+        except ValueError as error:
+            raise InvalidAction(str(error)) from error
+        normalized = review.model_copy(update={"fields": fields})
+        previous = values.get("information_review")
+        previous_review = InformationReview.model_validate(previous) if previous else None
+        if previous_review and previous_review.model_dump(
+            exclude={"checked_at", "expected_reviewed_at"}
+        ) == normalized.model_dump(exclude={"expected_reviewed_at"}):
+            snapshot = self._state(ticket_id)
+            if snapshot.next and snapshot.next != ("review",):
+                self._run(ticket_id, None)  # resume an interrupted previous regeneration
+            else:
+                self.records.save_state(
+                    ticket_id, snapshot.values
+                )  # repair projection-only failure
+            return self.get(ticket_id)
+        if review.expected_reviewed_at != (previous_review.checked_at if previous_review else None):
+            raise InvalidAction(
+                "다른 담당자가 자료 확인을 변경했습니다. 최신 확인값을 읽고 다시 검토해 주세요"
+            )
+        record = InformationReview(
+            **normalized.model_dump(), checked_at=datetime.now(UTC)
+        ).model_dump(mode="json")
+        rules = apply_rules(
+            values["classification"], extraction, values["inquiry"].customer_tier, tables
+        )
+        route = (
+            Route.HUMAN
+            if extraction.urgency == Urgency.SAFETY
+            else Route.INFO_REQUEST
+            if rules.missing_blocking
+            else Route.DRAFT
+        )
+        updates = {
+            "extraction": extraction,
+            "rules": rules,
+            "route": route,
+            "information_review": record,
+            "information_reviews": [*values.get("information_reviews", []), record],
+            "information_review_refresh": True,
+            "draft": None,
+            "drafting_error": None,
+            "info_request": None,
+            "escalation_request": None,
+            "checks": [],
+            "fix_notes": [],
+            "retries": 0,
+            "review": None,
+            "final_reply": None,
+            "approved_reply": None,
+            "approval_text": None,
+            "approval_error": None,
+            "approval_checks_key": None,
+            "approval_cited": None,
+            "approval_review": None,
+            "translation_error": None,
+        }
+        self.graph.update_state(self._config(ticket_id), updates, as_node="rules")
+        self._run(ticket_id, None)
+        return self.get(ticket_id)
+
+    @_serialized
+    def save_manual_reply(self, ticket_id: str, body: ManualReplyIn) -> TicketOut:
+        """Use the existing review/translation path for a staff-written human-queue reply."""
+        requests = self._sync_specialists(ticket_id)
+        snapshot = self._state(ticket_id)
+        state = snapshot.values
+        if state.get("status") != TicketStatus.HUMAN_QUEUE and not (
+            state.get("manual_reply") and "review" in snapshot.next
+        ):
+            raise InvalidAction("사람 검토 문의에서만 담당자 답변을 저장할 수 있습니다")
+        if not body.text.strip():
+            raise InvalidAction("답변 본문은 비워 둘 수 없습니다")
+        revision = len(requests) + sum(r["reply"] is not None for r in requests)
+        if any(r["reply"] is None for r in requests):
+            raise InvalidAction("전문부서 회신을 모두 확인한 뒤 답변을 작성해 주세요")
+        checked = state.get("information_review")
+        checked_at = InformationReview.model_validate(checked).checked_at if checked else None
+        if (
+            body.expected_customer_revision != state.get("customer_revision", 0)
+            or body.expected_specialist_revision != revision
+            or body.expected_information_reviewed_at != checked_at
+        ):
+            raise InvalidAction("문의 정보가 변경되었습니다. 최신 회신을 확인해 주세요")
+        if (
+            state.get("manual_reply")
+            and state.get("draft")
+            and (
+                state["draft"].text == body.text
+                and state.get("draft_customer_revision", 0) == body.expected_customer_revision
+                and state.get("draft_specialist_revision", 0) == revision
+                and state.get("draft_information_reviewed_at")
+                == (checked_at.isoformat() if checked_at else None)
+            )
+        ):
+            return self.get(ticket_id)
+        evidence = [e for e in state.get("evidence", []) if e.source != "specialist"]
+        evidence += drafting.specialist_evidence(state.get("specialist_replies", []))
+        updates = {
+            "manual_reply": True,
+            "draft": Draft(text=body.text, slots={"draft_language": "en"}, model="staff_review"),
+            "status": TicketStatus.ON_HOLD,
+            "pending": "draft",
+            "evidence": evidence,
+            "draft_specialist_revision": revision,
+            "draft_customer_revision": state.get("customer_revision", 0),
+            "draft_information_reviewed_at": checked_at.isoformat() if checked_at else None,
+            "checks": [],
+            "approval_text": None,
+            "approval_error": None,
+            "approval_checks_key": None,
+            "approval_review": None,
+            "approval_cited": None,
+            "reply_preview": None,
+            "approved_reply": None,
+            "final_reply": None,
+            "translation_error": None,
+            "drafting_error": None,
+            "info_request": None,
+        }
+        self.graph.update_state(self._config(ticket_id), updates, as_node="hold")
+        self._run(ticket_id, None)
+        return self.get(ticket_id)
+
+    @_serialized
+    def prepare_reply(self, ticket_id: str, text: str, llm: LLMRouter) -> dict:
+        """Translate for staff inspection without approving or sending anything."""
+        self._sync_specialists(ticket_id)
         snapshot = self._state(ticket_id)
         if "review" not in snapshot.next:
+            raise InvalidAction("상담원 검토 대기 상태에서만 변환할 수 있습니다")
+        state = snapshot.values
+        previous = state.get("reply_preview") or {}
+        if valid_preview(state, text, previous.get("preview_id")):
+            return previous
+        if not info_request.in_language(text, "en"):
+            raise InvalidAction("영어 초안을 확인한 뒤 고객 언어로 변환해 주세요")
+        language = target_language(state)
+        with ticket_scope(ticket_id):
+            if state.get("pending") == "info_request":
+                translated = info_request.localize_request(text, language, llm)
+            else:
+                translated = drafting.translate_reply(text, "en", language, llm)
+        if not translated or not translated.strip():
+            raise drafting.TranslationError("고객 언어 변환 결과가 비어 있습니다")
+        preview = {
+            "preview_id": str(uuid.uuid4()),
+            "source_text": text,
+            "target_language": language,
+            "final_text": translated,
+            "context_key": context_key(state),
+        }
+        node = "hold" if state.get("status") == TicketStatus.ON_HOLD else "ready"
+        self.graph.update_state(self._config(ticket_id), {"reply_preview": preview}, as_node=node)
+        return preview
+
+    @_serialized
+    def act(self, ticket_id: str, review: ReviewIn) -> TicketOut:
+        if review.acknowledged_failures and not review.reviewer.strip():
+            raise InvalidAction("점검 실패를 확인하고 승인하려면 담당자 이름이 필요합니다")
+        requests = self._sync_specialists(ticket_id)
+        snapshot = self._state(ticket_id)
+        if (
+            review.expected_customer_revision is not None
+            and review.expected_customer_revision != snapshot.values.get("customer_revision", 0)
+        ):
+            raise InvalidAction("새 고객 회신이 있습니다. 최신 내용으로 답변을 다시 검토해 주세요")
+        if "expected_information_reviewed_at" in review.model_fields_set:
+            current_review = snapshot.values.get("information_review")
+            checked_at = (
+                InformationReview.model_validate(current_review).checked_at
+                if current_review
+                else None
+            )
+            if review.expected_information_reviewed_at != checked_at:
+                raise InvalidAction("자료 확인값이 변경되었습니다. 최신 초안을 다시 검토해 주세요")
+        if (
+            review.action in {ReviewAction.APPROVE, ReviewAction.EDIT_APPROVE}
+            and snapshot.values.get("pending") != "info_request"
+        ):
+            revision = len(requests) + sum(r["reply"] is not None for r in requests)
+            if any(r["reply"] is None for r in requests):
+                raise InvalidAction(
+                    "전문부서 회신이 대기 중입니다. 회신 확인 후 답변을 작성해 주세요"
+                )
+            if requests and review.expected_specialist_revision != revision:
+                raise InvalidAction("검토한 회신 버전이 변경되었습니다. 최신 문의를 확인해 주세요")
+            if revision != snapshot.values.get("draft_specialist_revision", 0):
+                raise InvalidAction("새 전문부서 회신이 있습니다. 답변을 재작성한 뒤 승인해 주세요")
+        if "review" not in snapshot.next:
             raise InvalidAction(f"{ticket_id} 는 상담원 검토 대기 상태가 아니다")
+        if review.reply_preview_id and not valid_preview(
+            snapshot.values, review_text(snapshot.values, review), review.reply_preview_id
+        ):
+            raise InvalidAction(
+                "초안 또는 문의 정보가 변경되었습니다. 고객 언어로 다시 변환해 주세요"
+            )
+        if snapshot.values.get("manual_reply") and review.action in {
+            ReviewAction.REWRITE,
+            ReviewAction.INFO_REQUEST,
+        }:
+            raise InvalidAction("사람 검토 답변은 담당자가 직접 수정해 주세요")
         request = snapshot.values.get("escalation_request")
         if review.action == ReviewAction.ESCALATE and request:
             if review.escalate_to is not None and review.escalate_to != request.to_dept:
@@ -244,16 +660,68 @@ class TicketService:
         self._run(ticket_id, Command(resume=review.model_dump(mode="json")))
         return self.get(ticket_id)
 
-    def resolve(self, ticket_id: str) -> TicketOut:
+    @_serialized
+    def resolve(self, ticket_id: str, resolution: ResolveIn | None = None) -> TicketOut:
+        """Complete with confirmed results; identical retries repair partial saves safely.
+
+        A missing body retains the pre-existing evaluation/client contract. New UI callers
+        must send ResolveIn; explicitly unconfirmed closures never create a verified case.
+        """
         values = self._state(ticket_id).values
-        if values.get("status") not in {TicketStatus.APPROVED, TicketStatus.ESCALATED}:
+        status = values.get("status")
+        if status == TicketStatus.RESOLVED:
+            previous = values.get("resolution")
+            previous_input = (
+                ResolveIn.model_validate(previous).model_dump(mode="json") if previous else None
+            )
+            current_input = resolution.model_dump(mode="json") if resolution else None
+            if previous_input != current_input:
+                raise InvalidAction(
+                    "이미 완료된 문의의 처리 결과가 다릅니다. 재문의 후 다시 처리해 주세요"
+                )
+        elif status in {TicketStatus.APPROVED, TicketStatus.ESCALATED}:
+            record = (
+                Resolution(**resolution.model_dump(), confirmed_at=datetime.now(UTC)).model_dump(
+                    mode="json"
+                )
+                if resolution
+                else None
+            )
+            self.graph.update_state(
+                self._config(ticket_id),
+                {
+                    "status": TicketStatus.RESOLVED,
+                    "resolution": record,
+                    "resolution_case_saved": False,
+                    "processing_history": [
+                        *values.get("processing_history", []),
+                        {
+                            "id": str(uuid.uuid4()),
+                            "kind": "completed",
+                            "created_at": record["confirmed_at"]
+                            if record
+                            else datetime.now(UTC).isoformat(),
+                            "actor": record["confirmed_by"] if record else "",
+                            "resolution": record,
+                            "text": "처리 결과 저장 및 문의 완료" if record else "문의 완료",
+                        },
+                    ],
+                },
+            )
+        else:
             raise InvalidAction(f"{ticket_id} 는 승인·이관된 문의만 해결 확정할 수 있다")
-        self.graph.update_state(self._config(ticket_id), {"status": TicketStatus.RESOLVED})
         resolved = self._state(ticket_id).values
+        # Persist closure before publishing the verified case. If either write fails, a same
+        # payload retry reaches this path even though the checkpoint already says RESOLVED.
         self.records.save_state(ticket_id, resolved)
-        review = values.get("review")
-        if review and review.action in SAVE_ON:
-            self.records.save_case(build_case(resolved))
+        if not resolved.get("resolution_case_saved", False):
+            review = resolved.get("review")
+            record = resolved.get("resolution")
+            if record and record["outcome"] == "unconfirmed":
+                self.records.deactivate_case(ticket_id)
+            elif review and review.action in SAVE_ON:
+                self.records.save_case(build_case(resolved))
+            self.graph.update_state(self._config(ticket_id), {"resolution_case_saved": True})
         return self.get(ticket_id)
 
     def retry_pending(self) -> list[str]:
@@ -273,11 +741,15 @@ class TicketService:
         rules = v.get("rules")
         classification = v.get("classification")
         extraction = v.get("extraction")
+        specialist_requests = self.records.specialist_requests(ticket_id)
         return TicketOut(
             ticket_id=ticket_id,
             inquiry=v.get("inquiry"),
             body_ko=v.get("body_ko"),
             status=v.get("status", TicketStatus.NEW),
+            manual_reply=v.get("manual_reply", False),
+            processing_history=v.get("processing_history", []),
+            assignment_history=self.records.assignments(ticket_id),
             route=Route(v["route"]) if v.get("route") else None,
             category=classification.category if classification else None,
             product_code=extraction.product_code if extraction else None,
@@ -296,6 +768,9 @@ class TicketService:
             draft=v.get("draft"),
             info_request=v.get("info_request"),
             escalation_request=v.get("escalation_request"),
+            approval_cited=v.get("approval_cited"),
+            approval_text=v.get("approval_text"),
+            approval_error=v.get("approval_error"),
             approved_reply=v.get("approved_reply"),
             final_reply=v.get("final_reply"),
             final_reply_language=(
@@ -306,7 +781,29 @@ class TicketService:
             translation_error=v.get("translation_error"),
             checks=v.get("checks", []),
             evidence=v.get("evidence", []),
+            specialist_requests=specialist_requests,
+            specialist_revision=len(specialist_requests)
+            + sum(r["reply"] is not None for r in specialist_requests),
+            draft_specialist_revision=v.get("draft_specialist_revision", 0),
+            resolution=v.get("resolution"),
+            classification=classification,
+            extraction=extraction,
+            rules=rules,
+            field_labels={**load_tables().field_labels, **load_tables().request_labels},
+            customer_messages=self._customer_messages(ticket_id, v),
+            customer_revision=v.get("customer_revision", 0),
+            draft_customer_revision=v.get("draft_customer_revision", 0),
+            draft_information_reviewed_at=v.get("draft_information_reviewed_at"),
+            information_review=v.get("information_review"),
+            information_reviews=v.get("information_reviews", []),
         )
+
+    def closed(self) -> list[str]:
+        """Closed records are discoverable without a browser's previously loaded IDs."""
+        others = frozenset(
+            s for s in TicketStatus if s not in {TicketStatus.RESOLVED, TicketStatus.REJECTED}
+        )
+        return self.records.ticket_ids(exclude=others)
 
     def answered(self) -> list[str]:
         """답변을 보냈고 아직 해결 확정 전(APPROVED)인 문의, 접수 순 (관리자 화면 완료 처리용)."""
@@ -332,8 +829,14 @@ class TicketService:
             if v.get("status") in CLOSED:
                 continue
             if rules is None:
-                if v.get("status") == TicketStatus.HUMAN_QUEUE and not dept and not assignee:
-                    rows.append(_unruled_row(ticket_id, v))
+                current = self.records.assignee_of(ticket_id)
+                human = v.get("status") == TicketStatus.HUMAN_QUEUE or v.get("route") == Route.HUMAN
+                if (
+                    human
+                    and (not dept or ticket_dept(v) == dept)
+                    and (not assignee or current == assignee)
+                ):
+                    rows.append(_unruled_row(ticket_id, v, current))
                 continue
             # 이관됐으면 이관 부서 목록에 보인다 (db/sql/work_list.sql 과 같다)
             assigned_dept = ticket_dept(v)
@@ -361,15 +864,15 @@ class TicketService:
         return sorted(rows, key=lambda r: (r["sla_ratio"] is not None, -(r["sla_ratio"] or 0)))
 
 
-def _unruled_row(ticket_id: str, v: dict) -> dict:
+def _unruled_row(ticket_id: str, v: dict, assignee: str | None = None) -> dict:
     """분류 없이 사람 큐로 간 안전 건. 유형·부서·SLA 는 상담원이 정한다."""
     return {
         "ticket_id": ticket_id,
         "status": v["status"],
         "category": None,
         "priority": None,
-        "assigned_dept": None,
-        "assignee": None,
+        "assigned_dept": ticket_dept(v),
+        "assignee": assignee,
         "sla_due_at": None,
         "sla_ratio": None,
         "at_risk": True,
@@ -384,7 +887,7 @@ def merge_reply(original: InquiryIn, reply: InquiryIn) -> InquiryIn:
             "body": f"{original.body}\n\n[Customer reply {stamp}]\n{reply.body}".strip(),
             "language": reply.language or original.language,
             "product_code": reply.product_code or original.product_code,
-            "category": original.category or reply.category,
+            "category": reply.category or original.category,
             "provided_fields": {**original.provided_fields, **reply.provided_fields},
         }
     )

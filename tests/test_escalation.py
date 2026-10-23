@@ -25,6 +25,7 @@ from cs_agent.main import create_app
 from cs_agent.rules.engine import apply_rules
 from cs_agent.rules.tables import load_tables
 from cs_agent.schemas import (
+    CheckResult,
     Classification,
     Draft,
     EscalationRequest,
@@ -336,7 +337,7 @@ def client(llm):
             agents={
                 **ANALYSIS,
                 "write_draft": lambda *a, **k: Draft(text="Please review."),
-                "verify": lambda *a, **k: [],
+                "verify": lambda *a, **k: [CheckResult(name="escalation_test", passed=True)],
                 "translate": lambda *a: None,
             },
         )

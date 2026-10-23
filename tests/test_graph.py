@@ -159,6 +159,7 @@ def test_translation_failure_retains_edited_reply_for_retry_and_reopen_clears_it
         classify=stubs.classify,
         extract=stubs.extract,
         write_draft=lambda *a, **k: Draft(text="Original draft.", slots={"draft_language": "en"}),
+        verify=lambda *a: [CheckResult(name="translation_test", passed=True)],
         translate_reply=translate,
     )
     service = TicketService(build_ticket_graph(deps))
@@ -284,6 +285,11 @@ def test_info_request_is_localized_when_sent():
     """승인한 요청문(영어 틀 문장 등)은 보낼 때 고객 언어로 옮긴다. 상담원이 본 원문은 그대로."""
     calls = Calls()
     localized = []
+    written_languages = []
+
+    def write_request(missing, language, summary, llm):
+        written_languages.append(language)
+        return calls.write_info_request(missing, language, summary, llm)
 
     def localize(text, language, llm):
         localized.append((text, language))
@@ -295,7 +301,7 @@ def test_info_request_is_localized_when_sent():
         extract=calls.extract,
         write_draft=calls.write_draft,
         verify=calls.verify,
-        write_info_request=calls.write_info_request,
+        write_info_request=write_request,
         localize_info_request=localize,
     )
     graph = build_ticket_graph(deps)
@@ -304,6 +310,8 @@ def test_info_request_is_localized_when_sent():
         update={"subject": "Dimensiones", "body": "¿Cuáles son las dimensiones?", "language": "es"}
     )
     graph.invoke({"ticket_id": "T-ES", "inquiry": inquiry}, config)
+    assert written_languages == ["en"]
+    assert localized == []  # 고객 언어 변환은 담당자 확인 후에만 실행
     review = ReviewIn(action=ReviewAction.EDIT_APPROVE, edited_text="Please send the model.")
     graph.invoke(Command(resume=review.model_dump(mode="json")), config)
 

@@ -1,4 +1,4 @@
-// 레거시 click/submit 핸들러의 상태 변경을 함수로 분리했다. 모두 로컬 기록이며 외부 전송은 하지 않는다.
+// 화면 동작을 공통 함수로 관리한다. 실제 티켓은 API로 저장하고, 프로토타입 티켓은 로컬에서 처리한다.
 import { toast } from "sonner";
 import {
   answerContext, buildExpertRequest, canAssign, checkAssign, composeAnswer, composerKey, composerLanguage, contextIsNew, contextKey, customerLanguage, FRONTLINE, isEdited, needsLocalization, runChecks, translateText,
@@ -7,7 +7,7 @@ import {
 } from "./logic";
 import { closeModal, commit, openModal, setUi, tickets } from "./store";
 import type { Ticket } from "./types";
-import { escalationDraftViaApi, infoRequestViaApi, isApiTicket, reassignViaApi, resolveViaApi, restoreAiDraft, rewriteViaApi, sendViaApi } from "./api-sync";
+import { isManualReplyTicket, hasCurrentReplyPreview, replyPreviewKey, prepareReplyViaApi, escalationDraftViaApi, infoRequestViaApi, isApiTicket, reassignViaApi, resolveViaApi, restoreAiDraft, rewriteViaApi, sendViaApi, specialistDraftStale, specialistRequestViaApi, specialistReplyViaApi, informationReviewViaApi } from "./api-sync";
 
 const scrollToEditor = () => setTimeout(() => document.getElementById("answer-editor")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
 
@@ -16,7 +16,7 @@ export function switchComposer(t: Ticket, purpose: string, language = composerLa
   storeComposer(t);
   t.activeComposer = "customer"; t.composerPurpose = purpose; t.responseLanguage = language; t.purpose = purpose;
   const saved = t.composerDrafts?.[composerKey(purpose, language)];
-  for (const key of ["draft", "draftContext", "draftContextKey", "draftVersion", "draftOrigin", "ignoredContextKey", "draftOriginal", "draftRequests"])
+  for (const key of ["draft", "draftContext", "draftContextKey", "draftVersion", "draftOrigin", "ignoredContextKey", "draftOriginal", "draftRequests", "draftSpecialistRevision", "draftCustomerRevision", "draftInformationReviewedAt", "draftCited"])
     t[key] = saved?.[key] ?? (key === "draft" ? "" : key === "draftVersion" ? 0 : null);
   t.reviewed = false; t.pendingAnswer = null;
   commit(); scrollToEditor();
@@ -33,6 +33,7 @@ function applyGeneratedAnswer(t: Ticket, c: any, draft: string) {
 }
 
 export function generate(t: Ticket, purpose?: string) {
+  if (isManualReplyTicket(t)) return restoreAiDraft(t);
   if (isApiTicket(t)) { // 백엔드 티켓: 답변은 AI 초안, 추가정보 요청문은 백엔드가 만든다 (CSA-61)
     if ((purpose ?? t.composerPurpose) === "request" && !t.apiInfoRequest) { void infoRequestViaApi(t); return; }
     return restoreAiDraft(t);
@@ -74,6 +75,13 @@ export function applyPendingAnswer(t: Ticket) {
   if (!p) return;
   record(t, "draft-replaced", "초안 갱신 전 작성 내용", { draft: t.draft });
   t.pendingAnswer = null; closeModal();
+  if (isApiTicket(t) && p.apiSpecialistRevision !== undefined) {
+    Object.assign(t, { draft: p.draft, draftContext: p.context, draftContextKey: contextKey(p.context),
+      draftSpecialistRevision: p.apiSpecialistRevision, draftCustomerRevision: p.apiCustomerRevision ?? 0, draftInformationReviewedAt: p.apiInformationReviewedAt ?? null, draftCited: p.cited || [], reviewed: false,
+      draftVersion: (t.draftVersion || 1) + 1, purpose: "answer", composerPurpose: "answer" });
+    commit();
+    return;
+  }
   applyGeneratedAnswer(t, p.context, p.draft);
 }
 export function keepCurrentAnswer(t: Ticket) {
@@ -83,7 +91,7 @@ export function keepCurrentAnswer(t: Ticket) {
   record(t, "draft-retained", "새 검토 결과 확인 · 현재 답변 유지", { generationContext: p.context, draft: t.draft });
   t.pendingAnswer = null; closeModal(); commit();
 }
-export function editDraft(t: Ticket, value: string) { t.draft = value; t.reviewed = false; commit(); }
+export function editDraft(t: Ticket, value: string) { t.draft = value; t.reviewed = false; t.replyPreview = null; t.replyPreviewKey = null; commit(); }
 
 /* ───────── 피드백 루프: 담당자의 수정 지시로 초안을 다시 만든다 ───────── */
 // 백엔드 review 단계의 rewrite(수정 지시) 동작을 흉내 낸다. 프로토타입은 아래 키워드 규칙만 반영하고, 연결되면 자유 문장을 LLM 이 반영한다.
@@ -129,6 +137,7 @@ function applyInstruction(text: string, ask: string, refs: string[]) {
 export function regenerateDraft(t: Ticket, instruction: string) {
   const ask = instruction.trim();
   if (!t.draft || !ask || t.regenerating) return;
+  if (isManualReplyTicket(t)) { toast("사람 검토 답변은 내용을 직접 수정해 주세요."); return; }
   if (isApiTicket(t)) { void rewriteViaApi(t, ask); return; } // 백엔드가 같은 근거로 다시 쓴다 (rewrite)
   const refs = (t.draftContext?.references || []).map((r: any) => r.label);
   const out = applyInstruction(t.draft, ask, refs);
@@ -154,21 +163,37 @@ export function toggleReference(t: Ticket, id: string, checked: boolean) {
   t.answerReferenceIds = [...ids]; t.reviewed = false; commit();
 }
 
+export async function prepareCustomerReply(t: Ticket) {
+  if (isApiTicket(t)) return prepareReplyViaApi(t);
+  if (!t.draft?.trim()) return false;
+  const text = needsLocalization(t) ? translateText(t.draft, "English", customerLanguage(t)) : t.draft;
+  t.replyPreview = { final_text: text, source_text: t.draft, target_language: customerLanguage(t) };
+  t.replyPreviewKey = replyPreviewKey(t);
+  t.reviewed = false;
+  commit(); toast("예시 데이터의 변환 시뮬레이션입니다. 실제 AI 번역은 서버 문의에서 실행됩니다.");
+  return true;
+}
+
 export function canSend(t: Ticket) {
+  if (t.translatingReply || !hasCurrentReplyPreview(t)) return false;
+  if (isApiTicket(t) && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return false;
+  if (isApiTicket(t) && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return false;
+  if (isApiTicket(t) && t.purpose !== "request" && specialistDraftStale(t)) return false;
   const isNew = contextIsNew(t);
   if (t.purpose !== "request" && (waitingReviews(t).length || t.legacyReviewPending)) return false; // 전문부서 회신을 기다리는 동안은 고객 답변을 발송하지 않는다
   return t.reviewed && (!isNew || t.ignoredContextKey === contextKey(answerContext(t)));
 }
-export function confirmSend(t: Ticket, feedback: { reason?: string; note?: string; acknowledgedFailures?: boolean } = {}) {
-  if (isApiTicket(t)) { closeModal(); void sendViaApi(t); return; } // 백엔드로 승인·발송 (CSA-61)
-  // 백엔드와 같은 순서: 담당자가 승인하면 고객 언어로 자동 변환해 발송한다(프로토타입은 정해진 문구만 옮기는 시뮬레이션).
-  const sentText = needsLocalization(t) ? translateText(t.draft, "English", customerLanguage(t)) : t.draft;
+export async function confirmSend(t: Ticket, options: { acknowledgedFailures?: boolean } = {}) {
+  if (isApiTicket(t)) { if (await sendViaApi(t, options)) closeModal(); return; } // 백엔드로 승인·발송 (CSA-61)
+  if (!canSend(t)) return;
+  // 화면에서 확인한 변환본 그대로 기록한다.
+  const sentText = t.replyPreview.final_text;
   record(t, "sent", sentText, {
     purpose: t.purpose || "answer", draftVersion: t.draftVersion || 1, finalApprovedDraft: sentText, masterText: t.draft, replyLanguage: needsLocalization(t) ? customerLanguage(t) : composerLanguage(t),
     generationContext: t.draftContext || null, currentContext: answerContext(t), unreflectedContextAcknowledged: t.ignoredContextKey || null,
     approvedBy: signedIn, approvedAt: new Date().toISOString(),
-    edited: isEdited(t), feedbackReason: isEdited(t) ? feedback.reason || null : null, feedbackNote: isEdited(t) ? feedback.note || null : null,
-    checks: runChecks(t), failuresAcknowledged: !!feedback.acknowledgedFailures, rewrites: t.draftRequests || [],
+    edited: isEdited(t),
+    checks: runChecks(t), failuresAcknowledged: !!options.acknowledgedFailures, rewrites: t.draftRequests || [],
   });
   if (t.purpose === "request") t.customerRequestStatus = "waiting";
   t.status = ticketProgress(t);
@@ -198,14 +223,19 @@ export function createTicket(d: Record<string, any>, files: string[]): string {
   return id;
 }
 
-export function saveInfoReview(t: Ticket, replyId: string, values: Record<string, { status: string; evidence: string }>) {
+export async function saveInfoReview(t: Ticket, replyId: string, values: Record<string, { status: string; value?: string; evidence: string }>, revision = t.customerRevision, expectedReviewedAt = t.informationReviewedAt ?? null) {
   const reply = t.events.find((x) => x.id === replyId && ["customer", "customer-followup"].includes(x.kind));
   if (!reply) return;
   const checks: Record<string, any> = {};
   for (const item of requiredInformation(t)) {
-    const v = values[item.id], evidence = (v?.evidence || "").trim();
-    if (!v || !["missing", "unusable", "confirmed"].includes(v.status) || (v.status === "confirmed" && !evidence)) { toast("확인 완료 항목의 근거를 입력하세요."); return; }
-    checks[item.id] = { status: v.status, evidence, confirmedBy: v.status === "confirmed" ? signedIn : null, checkedAt: new Date().toISOString() };
+    const v = values[item.id], evidence = (v?.evidence || "").trim(), value = (v?.value || "").trim();
+    if (!v || !["missing", "unusable", "confirmed"].includes(v.status) || (v.status === "confirmed" && (!evidence || (isApiTicket(t) && !value)))) { toast("각 항목의 상태와 확인한 값·근거를 입력하세요."); return; }
+    checks[item.id] = { status: v.status, value, evidence, confirmedBy: v.status === "confirmed" ? signedIn : null, checkedAt: new Date().toISOString() };
+  }
+  if (isApiTicket(t)) {
+    const fields = Object.fromEntries(Object.entries(checks).map(([id, v]) => [id, { status: v.status, value: v.status === "confirmed" ? v.value : undefined, evidence: v.evidence }]));
+    if (!await informationReviewViaApi(t, replyId, revision, fields, expectedReviewedAt)) return;
+    closeModal(); commit(); toast("자료 확인 결과를 서버에 저장했습니다."); return;
   }
   t.infoChecks = { ...(t.infoChecks || {}), ...checks }; t.reviewedReplyKey = reply.id; t.reviewed = false;
   record(t, "information-reviewed", "수신 자료 확인", { replyId: reply.id, informationChecks: checks, actor: signedIn });
@@ -213,14 +243,26 @@ export function saveInfoReview(t: Ticket, replyId: string, values: Record<string
   toast(informationAssessment(t).some((x) => x.status !== "confirmed") ? "확인 완료 · 남은 자료가 있습니다." : "요청 자료 확인 완료");
 }
 
-export function submitExpertRequest(t: Ticket, d: { department: string; channel: string; body: string; files: string[] }) {
+export async function submitExpertRequest(t: Ticket, d: { department: string; channel: string; body: string; files: string[] }) {
+  if (isApiTicket(t)) {
+    if (!await specialistRequestViaApi(t, d)) return;
+    t.activeComposer = null; t.expertDraft = null; t.expertDraftFiles = [];
+    closeModal(); commit(); toast("검토 요청을 저장했습니다.");
+    return;
+  }
   t.status = ticketProgress(t); t.reviewed = false;
   record(t, "escalation", `${d.department} 검토 요청 기록`, { request: d.body, channel: d.channel, department: d.department, actor: signedIn, transmittedFiles: d.files, requestContext: answerContext(t, "answer") });
   t.activeComposer = null; t.expertDraft = null; t.expertDraftFiles = [];
   closeModal(); commit(); toast("검토 요청을 기록했습니다.");
 }
-export function submitExpertReply(target: Ticket, selected: string, body: string) {
+export async function submitExpertReply(target: Ticket, selected: string, body: string) {
   if (!(selected === "legacy" && target.legacyReviewPending) && !waitingReviews(target).some((x) => x.id === selected)) { toast("회신 대기 요청을 선택하세요."); return; }
+  if (isApiTicket(target)) {
+    if (selected === "legacy") { toast.error("서버에 저장된 요청을 선택하세요."); return; }
+    if (!await specialistReplyViaApi(target, selected, body)) return;
+    closeModal(); commit(); toast("전문부서 회신을 저장했습니다. 최신 회신으로 답변을 다시 작성하세요.");
+    return;
+  }
   target.status = ticketProgress(target);
   if (selected === "legacy") target.legacyReviewPending = false;
   target.reviewed = false;
@@ -230,10 +272,8 @@ export function submitExpertReply(target: Ticket, selected: string, body: string
 export function assignOwner(t: Ticket, owner: string) {
   if (!canAssign) { toast.error("배정은 팀장만 할 수 있습니다."); return; } // BACKEND: 서버도 팀장 역할만 허용해야 한다
   if (isApiTicket(t)) { // 백엔드 담당자 변경 (CSA-53)
-    const before = t.owner;
     void reassignViaApi(t, owner, "팀장 배정").then((ok) => {
       if (!ok) return;
-      record(t, "assignment", `담당자 ${before || "미배정"} → ${t.owner}`);
       closeModal(); commit(); toast("담당자를 변경했습니다.");
     });
     return;
@@ -254,8 +294,21 @@ export async function completeTicket(t: Ticket, d: Record<string, string>) {
   commit(); // 실패하거나 창을 다시 열어도 제출한 입력을 복구한다.
   try {
     const references = answerContext(t, "answer").references.map((r: any) => ({ id: r.id, label: r.label, kind: r.kind }));
-    // 기존 완료 API가 성공한 경우에만 완료 이력과 상세 결과를 확정한다.
-    if (isApiTicket(t) && !(await resolveViaApi(t))) return;
+    if (isApiTicket(t)) {
+      if (!["resolved", "provided", "unconfirmed"].includes(input.outcome) ||
+        ["cause", "action", "result", "verification"].some((key) => !input[key]?.trim())) {
+        toast.error("처리 결과와 확인 근거를 입력하세요. 확인되지 않은 내용은 미확인으로 기록하세요.");
+        return;
+      }
+      const ok = await resolveViaApi(t, { outcome: input.outcome as "resolved" | "provided" | "unconfirmed",
+        cause: input.cause, action: input.action, result: input.result, verification: input.verification,
+        confirmed_by: signedIn, references });
+      if (!ok) return;
+      t.preCompletionSla = previousSla;
+      delete t.resolutionDraft;
+      closeModal(); commit(); toast("처리 결과를 서버에 저장했습니다.");
+      return;
+    }
     t.preCompletionSla = previousSla;
     if (!isApiTicket(t)) {
       t.stage = 5; t.status = "완료"; t.sla = t.risk ? "기한 초과 완료" : "기한 내 완료";
@@ -285,7 +338,6 @@ export function moveTicket(t: Ticket, owner: string, opts: { silent?: boolean } 
     const before = t.owner;
     void reassignViaApi(t, owner, "리소스 배정").then((ok) => {
       if (!ok) return;
-      record(t, "assignment", `담당자 ${before || "미배정"} → ${owner} (리소스 배정)`);
       commit();
       if (!opts.silent && before) toast(`${t.id} · ${owner}으로 변경했습니다.`, { action: { label: "되돌리기", onClick: () => moveTicket(t, before, { silent: true }) } });
     });

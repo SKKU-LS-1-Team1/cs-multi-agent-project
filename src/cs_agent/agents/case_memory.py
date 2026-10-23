@@ -93,11 +93,32 @@ def build_case(state: dict) -> dict:
     draft = _dump(state.get("draft"))
     review = _dump(state.get("review"))
     slots = draft.get("slots") or {}
+    original_review = _dump(state.get("approval_review"))
+    if original_review and original_review.get("edited_text") == state.get("approved_reply"):
+        review = original_review
+    resolution = _dump(state.get("resolution"))
+    if resolution and (resolution.get("outcome") == "unconfirmed" or resolution.get("superseded")):
+        raise ValueError("Unconfirmed or superseded closure is not a verified resolution case")
 
-    final_reply = state.get("final_reply") or review.get("edited_text") or draft.get("text") or ""
-    summary = mask_pii(inquiry.get("subject") or inquiry.get("body", "")[:200])
-    cause = slots.get("root_cause") or slots.get("cause") or ""
-    action = slots.get("action") or ""
+    final_reply = state.get("final_reply") or ""
+    # Legacy evaluation callers without confirmed results keep their existing contract.
+    if not resolution:
+        final_reply = final_reply or review.get("edited_text") or draft.get("text") or ""
+
+    def masked(value: str) -> str:
+        serial = extraction.get("serial_no")
+        if serial:
+            value = value.replace(serial, MASK)
+        return mask_pii(value)
+
+    summary = masked(inquiry.get("subject") or inquiry.get("body", "")[:200])
+    cause = (
+        resolution.get("cause")
+        if resolution
+        else slots.get("root_cause") or slots.get("cause") or ""
+    )
+    action = resolution.get("action") if resolution else slots.get("action") or ""
+    cause, action = masked(cause or ""), masked(action or "")
     feedback_reason = review.get("feedback_reason")
 
     lines = [summary]
@@ -105,8 +126,21 @@ def build_case(state: dict) -> dict:
         lines.append(f"Cause: {cause}")
     if action:
         lines.append(f"Corrective action: {action}")
-    lines.append(f"Reply: {mask_pii(final_reply)}")
+    if resolution:
+        lines.extend(
+            [
+                f"Outcome: {resolution['outcome']}",
+                f"Confirmed result: {masked(resolution['result'])}",
+                f"Verification: {masked(resolution['verification'])}",
+            ]
+        )
+    lines.append(f"Reply: {masked(final_reply)}")
 
+    cited = (
+        state["approval_cited"]
+        if state.get("approved_reply") and state.get("approval_cited") is not None
+        else draft.get("cited") or []
+    )
     return {
         "case_id": f"CASE-{state['ticket_id']}",
         "ticket_id": state["ticket_id"],
@@ -118,12 +152,19 @@ def build_case(state: dict) -> dict:
         "error_code": extraction.get("error_code"),
         "cause": cause,
         "action": action,
-        "final_reply": mask_pii(final_reply),
-        "cited": list(draft.get("cited") or []),
+        "final_reply": masked(final_reply),
+        "cited": list(
+            dict.fromkeys(
+                [
+                    *cited,
+                    *(ref["id"] for ref in resolution.get("references", [])),
+                ]
+            )
+        ),
         "resolved_by_dept": state.get("escalated_to") or rules.get("assigned_dept"),
         "review_action": review.get("action"),
         "edited": review.get("action") == ReviewAction.EDIT_APPROVE,
-        "feedback": review.get("feedback"),
+        "feedback": masked(review["feedback"]) if review.get("feedback") else None,
         "feedback_reason": feedback_reason,
         # 할 일 6: 사실 오류로 고친 건은 기준표·문서도 고쳐야 한다
         "source_fix_needed": feedback_reason == FeedbackReason.FACT_ERROR,
@@ -142,7 +183,9 @@ def case_evidence(case: Mapping[str, Any]) -> Evidence:
     return Evidence(
         source="cases",
         doc_id=case["case_id"],
-        text=case_text(
+        text=case["text"]
+        if "Confirmed result:" in (case.get("text") or "")
+        else case_text(
             {
                 "case_summary": case.get("summary") or "",
                 "root_cause": case.get("cause") or "",

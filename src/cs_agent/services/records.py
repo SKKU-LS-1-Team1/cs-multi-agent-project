@@ -26,16 +26,30 @@
 # - work_list(): 작업 목록. SqlRecords 는 db/sql/work_list.sql 결과, MemoryRecords 는 None
 #   (services/tickets.py 가 그래프 상태로 같은 규칙을 계산한다).
 import logging
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from cs_agent.domain import ReviewAction, TicketStatus
-from cs_agent.schemas import InquiryIn, ReviewIn
+from cs_agent.schemas import Draft, InquiryIn, ReviewIn, SpecialistReplyIn, SpecialistRequestIn
+from cs_agent.services.specialist_records import MemorySpecialists, SqlSpecialists
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class Records(Protocol):
+    def ticket_lock(self, ticket_id: str) -> AbstractContextManager[None]: ...
+
+    def ticket_locks(self, ticket_ids: list[str]) -> AbstractContextManager[None]: ...
+
+    def specialist_requests(self, ticket_id: str) -> list[dict]: ...
+
+    def add_specialist_request(self, ticket_id: str, body: SpecialistRequestIn) -> None: ...
+
+    def add_specialist_reply(
+        self, ticket_id: str, request_id: str, body: SpecialistReplyIn
+    ) -> None: ...
+
     def add_ticket(self, ticket_id: str, inquiry: InquiryIn) -> None: ...
 
     def exists(self, ticket_id: str) -> bool: ...
@@ -107,6 +121,7 @@ def ticket_row(values: dict) -> dict:
         "subject": inquiry.subject,
         "body": inquiry.body,
         "body_ko": values.get("body_ko"),
+        "resolution": values.get("resolution"),
         "provided_fields": dict(inquiry.provided_fields),
         "thread_ref": inquiry.thread_ref,
         "received_at": inquiry.received_at,
@@ -145,18 +160,28 @@ def draft_versions(values: dict) -> list[dict]:
     feedback = review.feedback if review and review.action == ReviewAction.REWRITE else None
     rows = []
     draft = values.get("draft")
+    if draft is None and values.get("approval_text"):
+        draft = Draft(
+            text=values["approval_text"],
+            cited=values.get("approval_cited") or [],
+            model="staff_review",
+        )
     if draft is not None:
         rows.append(
             {
                 "kind": "draft",
-                "text": draft.text,
+                "text": values.get("approval_text") or draft.text,
                 "template": draft.template,
                 "slots": dict(draft.slots),
-                "cited": list(draft.cited),
+                "cited": list(values["approval_cited"])
+                if values.get("approval_text") and values.get("approval_cited") is not None
+                else list(draft.cited),
                 "evidence": [e.model_dump(mode="json") for e in values.get("evidence", [])],
                 "checks": [c.model_dump(mode="json") for c in values.get("checks", [])],
                 "reviewer_feedback": feedback,
-                "model": draft.model,
+                "model": ""
+                if values.get("approval_text") not in {None, draft.text}
+                else draft.model,
             }
         )
     if values.get("info_request"):
@@ -198,8 +223,9 @@ def current_wait(waiting_since: datetime | None, wait_hours: float, now: datetim
 # 메모리 ---------------------------------------------------------------------------------------
 
 
-class MemoryRecords:
+class MemoryRecords(MemorySpecialists):
     def __init__(self) -> None:
+        self._init_specialists()
         self.tickets: dict[str, dict] = {}  # 접수 순서 유지 (dict 순서)
         self.drafts: dict[str, list[dict]] = {}
         self.reviews: dict[str, list[ReviewIn]] = {}
@@ -297,7 +323,7 @@ class MemoryRecords:
         return None  # DB 가 없으면 services/tickets.py 가 그래프 상태로 계산한다
 
 
-class SqlRecords:
+class SqlRecords(SqlSpecialists):
     def __init__(self, sessionmaker: Any, embed_fn: Any = None) -> None:
         self.sessionmaker = sessionmaker
         self.embed_fn = embed_fn  # 사례 임베딩. None 이면 벡터 없이 저장
@@ -399,6 +425,7 @@ class SqlRecords:
                     ticket_id=ticket_id,
                     draft_id=draft_id,
                     action=str(review.action),
+                    acknowledged_failures=review.acknowledged_failures,
                     reviewer=review.reviewer,
                     edited_text=review.edited_text,
                     feedback=review.feedback,

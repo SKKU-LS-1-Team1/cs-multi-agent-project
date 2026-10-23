@@ -146,13 +146,13 @@ export function record(t: Ticket, kind: string, text: string, extra: Record<stri
   });
   save();
 }
-export const waitingReviews = (t: Ticket) => t.events.filter((e) => e.kind === "escalation" && !t.events.some((r) => r.kind === "expert" && r.requestId === e.id));
+export const waitingReviews = (t: Ticket) => t.events.filter((e) => e.kind === "escalation" && (t.source !== "api" || e.source === "specialist-api") && !t.events.some((r) => r.kind === "expert" && r.requestId === e.id));
 export const ticketProgress = (t: Ticket) => (t.stage === 5 ? "완료" : t.owner ? "진행 중" : "미배정");
 /** 담당자가 아직 열어 보지 않은 고객 회신 수. 문의 상세를 열면 읽음 처리된다. */
 export const unreadReplies = (t: Ticket) =>
   t.stage === 5 ? 0 : t.events.filter((e) => ["customer", "customer-followup"].includes(e.kind) && (!t.seenAt || (e.createdAt && e.createdAt > t.seenAt))).length;
 export const latestCustomerReply = (t: Ticket): Ev | undefined => t.events.findLast((e) => ["customer", "customer-followup"].includes(e.kind));
-export const sourceInquiry = (t: Ticket) => t.body || (t.id === "CSV1-000050" ? "The iS7 75kW trips with E.OC immediately at run command. Restarting did not resolve the issue." : t.title);
+export const sourceInquiry = (t: Ticket) => t.body || (t.source !== "api" && t.id === "CSV1-000050" ? "The iS7 75kW trips with E.OC immediately at run command. Restarting did not resolve the issue." : t.title);
 
 // 전문부서 요청 대상 = 백엔드 이관 대상(agents/escalation.py ESCALATION_TARGETS)의 이름 (departments.csv)
 export const expertDepartments = ["자동화 기술지원", "저압기기 기술지원", "고압·배전반 기술지원", "변압기 기술지원", "에너지솔루션 기술지원", "현장 서비스", "품질보증/클레임", "펌웨어 개발", "인증·규격", "보증·RMA 데스크", "해외영업 운영", "주문·물류"];
@@ -174,16 +174,18 @@ export const requestRow = (ticketId: string, requestId: string) => referralRows(
 /* ───────── 추가정보 · 답변 컨텍스트 ───────── */
 export function requiredInformation(t: Ticket): { id: string; label: string }[] {
   if (Array.isArray(t.requiredInformation)) return t.requiredInformation;
-  if (t.id === "CSV1-000050") return [{ id: "product-photo", label: "제품·오류 화면 사진" }, { id: "motor-nameplate", label: "모터 명판" }];
+  if (t.source !== "api" && t.id === "CSV1-000050") return [{ id: "product-photo", label: "제품·오류 화면 사진" }, { id: "motor-nameplate", label: "모터 명판" }];
   return [];
 }
 export const informationAssessment = (t: Ticket) =>
   requiredInformation(t).map((item) => ({ ...item, ...(t.infoChecks?.[item.id] || {}), status: (t.infoChecks?.[item.id]?.status || "missing") as string, evidence: t.infoChecks?.[item.id]?.evidence as string | undefined }));
 export function informationSummary(t: Ticket) {
-  const items = informationAssessment(t), remaining = items.filter((x) => x.status !== "confirmed").length;
+  const items = informationAssessment(t), remaining = items.filter((x) => !["provided", "confirmed"].includes(x.status)).length;
+  if (t.source === "api" && !t.analysisReady) return "필수정보 확인 대기";
   if (!items.length) return t.customerRequestStatus === "received" ? "회신 수신" : "요청 없음";
   if (t.customerRequestStatus === "waiting") return `회신 대기 · 필요 ${remaining}건`;
   if (t.customerRequestStatus === "received" && !latestCustomerReply(t)) return "수신 내역 미기록";
+  if (t.source === "api" && t.customerRequestStatus === "received" && latestCustomerReply(t)?.id !== t.reviewedReplyKey) return "회신 수신 · 담당자 확인 필요";
   if (t.customerRequestStatus === "received") return remaining ? `회신 수신 · 미충족 ${remaining}건` : "요청 자료 확인 완료";
   return "요청 없음";
 }
@@ -202,14 +204,19 @@ export type Ctx = any;
 function apiDocuments(t: Ticket) {
   return (t.apiEvidence || [])
     .filter((e: any) => e.source === "docs")
-    .slice(0, 3)
     .map((e: any) => ({ id: e.section ? `${e.doc_id}#${e.section}` : e.doc_id, label: e.section ? `${e.doc_id} §${e.section}` : e.doc_id, text: String(e.text || "").slice(0, 240), kind: "document" }));
 }
 export function answerContext(t: Ticket, purpose?: string): Ctx {
-  const isSample = t.id === "CSV1-000050";
+  const isSample = t.source !== "api" && t.id === "CSV1-000050";
   const extra = t.events.filter((e) => ["customer", "customer-followup"].includes(e.kind));
-  const expert = t.events.findLast((e) => e.kind === "expert");
-  const missing = informationAssessment(t).filter((x) => x.status !== "confirmed").map((x) => x.label);
+  const expertEvents = t.events.filter((e) => e.kind === "expert" && (t.source !== "api" || e.source === "specialist-api"));
+  const expert = expertEvents.at(-1);
+  const expertReferences = expertEvents.map((e) => ({
+    id: e.source === "specialist-api" ? `specialist:${e.id}` : e.createdAt || "expert-" + t.events.indexOf(e),
+    label: (t.events.find((req) => req.id === e.requestId)?.department || "전문부서") + " 검토 회신",
+    kind: "expert", text: e.text, createdAt: e.createdAt,
+  }));
+  const missing = informationAssessment(t).filter((x) => !["provided", "confirmed"].includes(x.status)).map((x) => x.label);
   const documents = isSample ? [{ id: "TG-iS7-3.2", label: "iS7 Guide §3.2 · §3.3", text: "E.OC 발생 시점별 과전류 검토", kind: "document" }] : apiDocuments(t);
   const similar = isSample
     ? cases
@@ -217,31 +224,42 @@ export function answerContext(t: Ticket, purpose?: string): Ctx {
         .sort((a, b) => Number(b.raw.reference_section === "3.2") - Number(a.raw.reference_section === "3.2"))
         .slice(0, 2)
         .map((c) => ({ ...c, kind: "case", matches: c.raw.reference_section === "3.2", label: c.id + " · " + c.title }))
-    : [];
+    : (t.apiEvidence || []).filter((e: any) => e.source === "cases").map((e: any) => ({
+        id: e.section ? `${e.doc_id}#${e.section}` : e.doc_id, label: e.metadata?.title || e.doc_id,
+        text: e.text, kind: "case", matches: false,
+      }));
   const refs: any[] = [
     ...documents, ...similar,
-    ...(expert ? [{ id: expert.createdAt || "expert-" + t.events.indexOf(expert), label: (t.events.find((e) => e.id === expert.requestId)?.department || "전문부서") + " 검토 회신", kind: "expert", text: expert.text }] : []),
+    ...expertReferences,
   ];
-  const selected = refs.filter((r) => (t.answerReferenceIds ? t.answerReferenceIds.includes(r.id) || r.kind === "expert" : r.kind !== "case" || r.matches));
+  const checkedCitations = t.draft && t.draft !== t.apiCheckedText ? [] : t.draftCited || [];
+  const selected = refs.filter((r) => t.source === "api" ? checkedCitations.includes(r.id) : (t.answerReferenceIds ? t.answerReferenceIds.includes(r.id) || r.kind === "expert" : r.kind !== "case" || r.matches));
   return {
     ticketId: t.id,
     language: composerLanguage(t),
     purpose: purpose || t.composerPurpose || (t.draft ? t.purpose : null) || (missing.length && !expert ? "request" : "answer"),
-    analysis: { inquiry: sourceInquiry(t), summary: t.title, type: t.type, product: t.product, errorCode: isSample ? "E.OC" : null, conditions: isSample ? { firmware: "4.00", load: "69%" } : {} },
+    analysis: { inquiry: sourceInquiry(t), summary: t.title, type: t.type, product: t.product, errorCode: isSample ? "E.OC" : t.apiExtraction?.error_code || null, conditions: isSample ? { firmware: "4.00", load: "69%" } : { firmware: t.apiExtraction?.fw_version || null }, fieldValues: t.apiExtraction?.field_values || {}, fieldEvidence: t.apiExtraction?.field_evidence || {}, fieldSources: t.apiExtraction?.field_sources || {}, unconfirmed: t.apiExtraction?.unconfirmed_fields || {}, issues: t.apiExtraction?.issues || [] },
     missingInfo: missing,
     additionalInfo: extra.map((e) => ({ text: e.text, files: e.files || [], createdAt: e.createdAt, kind: e.kind })),
     technical: { documents, similarCases: similar, possibleCause: isSample ? "모터·출력 케이블 상태 검토 필요" : null, recommendation: isSample ? "근거와 현장 상태를 비교해 전문부서에서 판단" : "제품과 문의 조건에 맞는 근거 확인", causeConfirmed: false },
+    expertReferences,
+    specialistRevision: t.specialistRevision ?? 0,
+    customerRevision: t.customerRevision ?? 0,
     expertResponse: expert ? { text: expert.text, createdAt: expert.createdAt } : null,
+    referenceContextIds: t.source === "api" ? refs.map((r) => r.id) : undefined,
     availableReferences: refs,
     references: selected,
   };
 }
 export function contextKey(c: Ctx) {
   if (c.purpose === "request") return JSON.stringify({ purpose: "request", language: c.language, product: c.analysis.product, missingInfo: c.missingInfo });
-  return JSON.stringify({ analysis: c.analysis, missing: c.missingInfo, extra: c.additionalInfo, expert: c.expertResponse, references: c.references.map((r: any) => r.id), purpose: c.purpose, language: c.language });
+  return JSON.stringify({ analysis: c.analysis, missing: c.missingInfo, extra: c.additionalInfo, expert: c.expertReferences ?? c.expertResponse, specialistRevision: c.specialistRevision, customerRevision: c.customerRevision, references: c.referenceContextIds || c.references.map((r: any) => r.id), purpose: c.purpose, language: c.language });
 }
 export function contextIsNew(t: Ticket) {
   if (!t.draft) return false;
+  if (t.source === "api" && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return true;
+  if (t.source === "api" && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return true;
+  if (t.source === "api" && (t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0)) return true;
   const c = answerContext(t);
   return Boolean(t.draftContextKey && t.draftContextKey !== contextKey(c)) || (!t.draftContextKey && t.events.some((e) => ["customer", "expert"].includes(e.kind)));
 }
@@ -293,7 +311,7 @@ export function composeAnswer(c: Ctx) {
 }
 export function buildExpertRequest(t: Ticket) {
   const c = answerContext(t);
-  return `${t.id} / ${t.product}\n\n문의: ${c.analysis.inquiry}\n\n확보 자료: ${(t.files || []).join(", ") || "등록된 첨부자료 없음"}${t.id === "CSV1-000050" ? " · 이벤트 로그 · FW 4.00 · 부하 69%" : ""}\n추가 확인: ${c.missingInfo.join(", ") || "현재 확인된 누락 항목 없음"}\n\n검토 근거: ${c.references.map((r: any) => r.label).join(", ") || "연결된 기술 근거 없음"}\n\n요청사항: 위 증상과 자료를 검토하고, 가능한 원인·추가 점검사항·권장 조치를 회신해 주세요. 현재 원인은 미확정입니다.`;
+  return `${t.id} / ${t.product}\n\n문의: ${c.analysis.inquiry}\n\n확보 자료: ${(t.files || []).join(", ") || "등록된 첨부자료 없음"}${t.source !== "api" && t.id === "CSV1-000050" ? " · 이벤트 로그 · FW 4.00 · 부하 69%" : ""}\n추가 확인: ${c.missingInfo.join(", ") || "현재 확인된 누락 항목 없음"}\n\n검토 근거: ${c.references.map((r: any) => r.label).join(", ") || "연결된 기술 근거 없음"}\n\n요청사항: 위 증상과 자료를 검토하고, 가능한 원인·추가 점검사항·권장 조치를 회신해 주세요. 현재 원인은 미확정입니다.`;
 }
 
 /* ───────── 완료 기록 ───────── */
@@ -301,7 +319,7 @@ export function completionRecords() {
   return tickets
     .map((t) => {
       const e = t.events.findLast((x) => x.kind === "completed");
-      const r = e?.resolution || t.resolution;
+      const r = t.source === "api" ? t.resolution : e?.resolution || t.resolution;
       if (!r) return null;
       return {
         ticket: t, resolution: r, time: e?.createdAt || r.confirmedAt,
@@ -324,7 +342,7 @@ export function storeComposer(t: Ticket) {
   if (!t.draft) return;
   t.composerDrafts ??= {};
   t.composerDrafts[composerKey(t.purpose || t.composerPurpose || answerContext(t).purpose, composerLanguage(t))] = {
-    draft: t.draft, draftContext: t.draftContext, draftContextKey: t.draftContextKey, draftVersion: t.draftVersion, draftOrigin: t.draftOrigin, ignoredContextKey: t.ignoredContextKey, draftOriginal: t.draftOriginal, draftRequests: t.draftRequests,
+    draft: t.draft, draftSpecialistRevision: t.draftSpecialistRevision, draftCustomerRevision: t.draftCustomerRevision, draftInformationReviewedAt: t.draftInformationReviewedAt, draftCited: t.draftCited, draftContext: t.draftContext, draftContextKey: t.draftContextKey, draftVersion: t.draftVersion, draftOrigin: t.draftOrigin, ignoredContextKey: t.ignoredContextKey, draftOriginal: t.draftOriginal, draftRequests: t.draftRequests,
   };
 }
 export function resumeTicket(t: Ticket) {
@@ -338,6 +356,7 @@ export function resumeTicket(t: Ticket) {
 }
 
 for (const t of tickets) {
+  if (t.source === "api") continue;
   if (t.stage === 0 && t.owner && t.status === "검토 중") t.status = "진행 중";
   if (!t.workflowVersion) {
     // 전체 상태와 고객 추가정보/전문부서 요청 상태를 분리한다.
@@ -350,6 +369,7 @@ for (const t of tickets) {
 }
 
 for (const t of tickets) {
+  if (t.source === "api") continue;
   if (t.id === "CSV1-000056" && !t.seededReply && t.stage !== 5 && !t.sent && !t.events.some((e) => e.kind === "customer")) {
     t.events.push({ kind: "customer", text: "Additional info: the unit was bought through our local distributor in March. The invoice is attached.", time: "오전 09:42", createdAt: new Date().toISOString(), files: ["invoice.pdf"], actor: "customer" });
     t.seededReply = true;
@@ -363,7 +383,7 @@ const CUSTOMER_OF: Record<string, string> = { "CSV1-000049": "CUST-0600", "CSV1-
 // 같은 고객은 어느 화면에서나 같은 이름으로 보이도록, 연결된 고객의 이름(고객 관리 데이터)을 문의의 회사명으로 쓴다.
 // BACKEND: 문의는 customerId 만 들고 오고, 회사명·국가는 고객 정보에서 가져온다(두 곳에 따로 적지 않는다).
 const CUSTOMER_NAME: Record<string, string> = { "CUST-0256": "COMPANY_8291_0256", "CUST-0600": "COMPANY_1337_0600", "CUST-0160": "COMPANY_3039_0160", "CUST-0433": "COMPANY_9541_0433", "CUST-0325": "COMPANY_2368_0325", "CUST-0147": "COMPANY_4257_0147", "CUST-0462": "COMPANY_6741_0462" };
-const linkCustomers = () => { for (const t of tickets) if (CUSTOMER_OF[t.id]) { t.customerId = CUSTOMER_OF[t.id]; t.company = CUSTOMER_NAME[t.customerId] || t.company; } };
+const linkCustomers = () => { for (const t of tickets) if (t.source !== "api" && CUSTOMER_OF[t.id]) { t.customerId = CUSTOMER_OF[t.id]; t.company = CUSTOMER_NAME[t.customerId] || t.company; } };
 linkCustomers();
 
 // 예전 저장 데이터 정리: 요청하는 쪽 부서를 글로벌 C/S 센터로 통일한다.
@@ -378,7 +398,7 @@ for (const t of tickets) {
   const request = (t: Ticket, id: string, department: string, text: string, hoursAgo: number, channel = "이메일") => {
     t.events.push({ kind: "escalation", id, text: `${department} 검토 요청`, request: text, department, requestingDepartment: ticketDepartment(t), channel, time: "오늘", createdAt: ago(hoursAgo), actor: t.owner || "Doyeon Kim" });
   };
-  const byId = (id: string) => tickets.find((x) => x.id === id);
+  const byId = (id: string) => tickets.find((x) => x.source !== "api" && x.id === id);
   const a = byId("CSV1-000053"), b = byId("CSV1-000052"), c = byId("CSV1-000054");
   if (a && !a.seededCollab) { a.seededCollab = true; a.legacyReviewPending = false; request(a, "REQ-S100OVH1", "현장 서비스", "S100 7.5kW 과열 알람이 반복됩니다. 현장 냉각 팬과 설치 환경 점검 가능 여부를 회신해 주세요.", 5); }
   if (b && !b.seededCollab) { b.seededCollab = true; request(b, "REQ-XGIFW002", "자동화 기술지원", "XGI CPU 펌웨어 업데이트 순서와 주의사항을 확인해 주세요.", 2, "기업 메신저"); }
@@ -405,6 +425,7 @@ if (!tickets.some((t) => t.id === "CSV1-000049")) {
 /** 고객 시스템에서 들어온 회신/후속 회신 이벤트를 문의 상태에 반영한다. */
 export function synchronizeCustomerEvents() {
   for (const t of tickets) {
+    if (t.source === "api") continue; // Server status/revisions are authoritative.
     for (const e of t.events) if (["customer", "customer-followup"].includes(e.kind) && !e.id) e.id = "CUSTOMER-" + crypto.randomUUID().slice(0, 8);
     const ri = t.events.findLastIndex((e) => e.kind === "sent" && e.purpose === "request");
     const ci = t.events.findLastIndex((e) => ["customer", "customer-followup"].includes(e.kind));
@@ -435,6 +456,7 @@ save();
 export type Choice = "answer" | "expert" | "request";
 export function branchChoice(t: Ticket): Choice | null {
   // 백엔드 문의는 처음부터 AI 답변 초안이 있다. 고치기 전에는 전문부서 요청·고객 질의서로도 갈 수 있게 갈림길을 보인다 (CSA-61)
+  if (t.source === "api" && !t.analysisReady) return null;
   const untouchedAiDraft = t.source === "api" && t.purpose === "answer" && !!t.draft && t.draft === t.aiDraft;
   if (t.stage === 5 || t.sent || !t.owner || (t.draft && !untouchedAiDraft) || t.activeComposer === "expert") return null;
   const reply = latestCustomerReply(t), c = answerContext(t);
@@ -480,10 +502,10 @@ export const awaitingReview = (t: Ticket) => !!t.draft && t.purpose === "answer"
 export function inquirySummary(t: Ticket) {
   const c = answerContext(t), a = c.analysis;
   const pendingReview = waitingReviews(t).length + (t.legacyReviewPending ? 1 : 0);
-  const facts = [a.errorCode && `오류 코드 ${a.errorCode}`, a.conditions.firmware && `FW ${a.conditions.firmware} · 부하 ${a.conditions.load}`, t.files?.length ? `첨부 ${t.files.length}건` : ""].filter(Boolean).join(" · ");
+  const facts = [a.errorCode && `오류 코드 ${a.errorCode}`, a.conditions.firmware && `FW ${a.conditions.firmware}${a.conditions.load ? " · 부하 " + a.conditions.load : ""}`, t.files?.length ? `첨부 ${t.files.length}건` : ""].filter(Boolean).join(" · ");
   // 백엔드 문의는 원문 한국어 번역(body_ko, CSA-57) 앞부분으로 요지를 보인다
   const ko = typeof t.bodyKo === "string" ? t.bodyKo.split(/(?<=[.!?。])\s+/).slice(0, 2).join(" ").slice(0, 180) : "";
-  const gist = t.id === "CSV1-000050" ? "운전 명령 직후 E.OC(과전류) 트립이 발생하고, 재시작해도 같은 증상이 반복됩니다." : ko || `‘${t.title}’ 내용입니다.`;
+  const gist = t.source !== "api" && t.id === "CSV1-000050" ? "운전 명령 직후 E.OC(과전류) 트립이 발생하고, 재시작해도 같은 증상이 반복됩니다." : ko || `‘${t.title}’ 내용입니다.`;
   const reply = latestCustomerReply(t);
   const next = t.stage === 5 ? "처리가 완료된 문의입니다."
     : t.sent ? "고객 답변을 발송했습니다."
@@ -493,6 +515,7 @@ export function inquirySummary(t: Ticket) {
     : pendingReview ? `전문부서 회신 ${pendingReview}건을 기다리는 중입니다.`
     : c.expertResponse ? "전문부서 회신이 도착했습니다. 답변에 반영하세요."
     : t.customerRequestStatus === "received" && reply ? `고객이 추가정보를 보냈습니다${reply.files?.length ? `(첨부 ${reply.files.length}건)` : ""}. 확인하고 답변을 작성하세요.`
+    : t.source === "api" && !t.analysisReady ? "문의 분석과 필수정보 확인이 아직 완료되지 않았습니다."
     : "추가 자료 없이 답변을 작성할 수 있습니다.";
   const urgent = ["P1", "P2"].includes(t.priority);
   return {
@@ -501,14 +524,14 @@ export function inquirySummary(t: Ticket) {
       { label: "제품", value: t.product, tone: "" as const },
       { label: "유형", value: t.type, tone: "" as const },
       ...(a.errorCode ? [{ label: "오류 코드", value: a.errorCode as string, tone: "amber" as const }] : []),
-      { label: "긴급도", value: t.priority, tone: (urgent ? "red" : "") as "red" | "" },
+      { label: "우선순위", value: t.priority, tone: (urgent ? "red" : "") as "red" | "" },
       { label: "고객 언어", value: customerLanguage(t), tone: "" as const },
     ],
   };
 }
 
 /* ───────── 자동 점검(시뮬레이션) ───────── */
-export type CheckItem = { name: string; label: string; passed: boolean; reason: string };
+export type CheckItem = { name: string; label: string; passed: boolean; reason: string; pending?: boolean };
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
 function evidenceText(t: Ticket) {
   const c = answerContext(t);
@@ -527,7 +550,9 @@ function evidenceText(t: Ticket) {
  */
 export function runChecks(t: Ticket): CheckItem[] {
   if (t.source === "api") {
-    const labels: Record<string, string> = { slots: "필수 항목", values: "수치 일치", specs: "규격·사양", language: "초안 언어", banned: "단정 표현", grounding: "근거 연결" };
+    if (t.draft && (t.draft !== t.apiCheckedText || (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0) || (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null) || (t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0))) return [{ name: "pending", label: "최종본 재점검 필요",
+      passed: false, pending: true, reason: "본문 또는 근거가 변경되었습니다. 최신 내용을 반영한 뒤 서버 최종 점검을 받습니다." }];
+    const labels: Record<string, string> = { slots: "필수 항목", values: "수치 일치", specs: "규격·사양", language: "초안 언어", banned: "단정 표현", grounding: "근거 연결", analysis_unavailable: "분류 미확인" };
     return (t.apiChecks || []).map((c: { name: string; passed: boolean; reason: string }) => ({ ...c, label: labels[c.name] || c.name }));
   }
   const draft = t.draft || "", ev = norm(evidenceText(t)), c = answerContext(t);
@@ -570,7 +595,7 @@ export const feedbackLabel = (k?: string) => FEEDBACK_REASONS.find(([key]) => ke
 /** AI 가 만든 초안에서 담당자가 고쳤는가. */
 export const isEdited = (t: Ticket) => {
   const original = t.source === "api" ? t.aiDraft : t.draftOriginal;
-  return !!t.draft && !!original && t.draft.trim() !== String(original).trim();
+  return !!t.draft && !!original && (t.source === "api" ? t.draft !== String(original) : t.draft.trim() !== String(original).trim());
 };
 
 // BACKEND: 오늘 내가 할 일

@@ -46,7 +46,18 @@ def test_embedding_dim_matches_settings():
 def test_rows_keep_every_schema_field():
     """조회용 필드는 열로, 추출 실제 값은 체크포인트·초안 slots로 보존한다."""
     assert set(InquiryIn.model_fields) - {"category", "product_code"} <= _columns(Ticket)
-    assert set(Extraction.model_fields) - {"urgency", "field_values"} <= _columns(Ticket)
+    assert set(Extraction.model_fields) - {
+        "urgency",
+        "field_values",
+        "field_evidence",
+        "field_sources",
+        "unconfirmed_fields",
+        "unconfirmed_evidence",
+        "field_candidates",
+        "issues",
+        "assessed_urgency",
+        "safety_review_required",
+    } <= _columns(Ticket)
     assert set(RuleResult.model_fields) - {
         "escalate_to",
         "required_info",
@@ -54,7 +65,15 @@ def test_rows_keep_every_schema_field():
         "sla_resolution_h",
     } <= _columns(Ticket)
     assert set(Draft.model_fields) <= _columns(DraftRow)
-    assert set(ReviewIn.model_fields) <= _columns(ReviewRow) | {"escalate_to"}
+    assert (
+        set(ReviewIn.model_fields)
+        - {
+            "reply_preview_id",  # 체크포인트에 저장된 변환본 식별자
+            "expected_specialist_revision",
+            "expected_customer_revision",
+            "expected_information_reviewed_at",
+        }
+    ) <= _columns(ReviewRow) | {"escalate_to"}
 
 
 def test_case_columns_match_build_case():
@@ -457,3 +476,60 @@ def test_sql_work_list_pauses_sla_while_waiting_for_customer(db, monkeypatch):
         assert row(20)["sla_ratio"] == round((20 - 10) / target_h, 3)
         assert row(20)["sla_due_at"] == at(target_h + 10)
         assert service.get(tid).sla_due_at == at(target_h + 10)
+
+
+@needs_db
+def test_reply_preview_survives_restart_and_is_sent_without_retranslation(db, monkeypatch):
+    from cs_agent.agents import drafting
+    from cs_agent.graph.builder import postgres_checkpointer
+    from cs_agent.llm.router import LLMRouter
+    from cs_agent.schemas import CheckResult
+
+    _, Session = db
+    source = "Please confirm the product specifications before proceeding with installation."
+    translated = (
+        "Veuillez confirmer les spécifications du produit avant de procéder à l’installation."
+    )
+    calls = []
+
+    def translate(*args):
+        calls.append(args[0])
+        return translated
+
+    def forbidden(*args):
+        raise AssertionError("Sending must reuse the previously displayed translation")
+
+    monkeypatch.setattr(drafting, "translate_reply", translate)
+    agents = {
+        "write_draft": lambda *a, **k: Draft(text=source, slots={"draft_language": "en"}),
+        "verify": lambda *a, **k: [CheckResult(name="test", passed=True)],
+        "translate_reply": forbidden,
+    }
+    inquiry = InquiryIn(
+        channel="email",
+        language="fr",
+        category=Category.TECH_SPEC,
+        product_code="TRF-OIL-1000",
+        body="Please confirm the dimensions.",
+        provided_fields={"application": "substation"},
+    )
+    with postgres_checkpointer(TEST_DATABASE_URL) as saver:
+        service = _db_service(Session, saver, **agents)
+        row = service.submit(inquiry)
+        preview = service.prepare_reply(row.ticket_id, source, LLMRouter(Settings(_env_file=None)))
+        assert service.get(row.ticket_id).final_reply is None
+        assert service._state(row.ticket_id).next == ("review",)
+    with postgres_checkpointer(TEST_DATABASE_URL) as saver:
+        restored = _db_service(Session, saver, **agents)
+        result = restored.act(
+            row.ticket_id,
+            ReviewIn(
+                action="approve",
+                reviewer="tester",
+                reply_preview_id=preview["preview_id"],
+            ),
+        )
+        assert result.status == TicketStatus.APPROVED
+        assert result.final_reply == translated
+        assert result.approved_reply == source
+        assert calls == [source]
