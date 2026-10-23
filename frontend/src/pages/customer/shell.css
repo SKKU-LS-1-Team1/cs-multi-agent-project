@@ -1,5 +1,5 @@
 /* 고객 화면 틀: 상단 헤더 · 화면 폭별 배치 · 문의하기 · 내 문의. 클래스는 cs- 로 시작한다. 색은 LS 디자인 시스템 토큰.
-   폭: 1200px 이상 트리·본문·챗봇 3단 / 900~1199px 본문·챗봇 2단 / 900px 미만 본문 + 챗봇 서랍 */
+   폭: 900px 이상 제품 목록(처음엔 접힌 막대)·본문·챗봇 / 900px 미만 본문 + 챗봇 서랍 */
 :root {
   --cs-blue: #0a1e5a; --cs-blue-mid: #183b80; --cs-blue-light: #3562a6; --cs-blue-50: #eff2f8; --cs-blue-100: #dfe6f1;
   --cs-g50: #f9fafb; --cs-g100: #f2f4f6; --cs-g200: #e5e8eb; --cs-g500: #8b95a1; --cs-g600: #6b7684; --cs-g700: #4e5968; --cs-g900: #191f28;
@@ -26,7 +26,15 @@ h2, h3, p { margin-top: 0; }
 .cs-staff:hover { color: var(--cs-g700); text-decoration: underline; }
 
 /* 고객 홈 배치 */
-.cs-home { display: grid; grid-template-columns: 260px minmax(0, 1fr) 380px; height: calc(100dvh - var(--cs-top-h)); }
+.cs-home { display: grid; grid-template-columns: auto minmax(0, 1fr) 380px; height: calc(100dvh - var(--cs-top-h)); }
+.cs-side { display: flex; flex-direction: column; min-height: 0; width: 64px; border-right: 1px solid var(--cs-g200); background: var(--cs-g50); }
+.cs-home.is-tree .cs-side { width: 260px; background: #fff; }
+.cs-side > .ps-tree { flex: 1; border-right: 0; }
+.cs-side-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 4px; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 600; color: var(--cs-g700); cursor: pointer; }
+.cs-side-btn > span:first-child { font-size: 18px; color: var(--cs-blue); }
+.cs-side-btn:hover { color: var(--cs-blue); background: var(--cs-blue-50); }
+.cs-home.is-tree .cs-side-btn { flex-direction: row; justify-content: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--cs-g200); }
+.cs-home.is-tree .cs-side-btn > span:first-child { font-size: 15px; }
 .cs-main { min-width: 0; overflow: auto; padding: 24px 28px 40px; }
 .cs-chat { display: flex; flex-direction: column; min-height: 0; }
 .cs-chat > .cp { flex: 1; }
@@ -35,8 +43,7 @@ h2, h3, p { margin-top: 0; }
 .cs-back:hover { text-decoration: underline; }
 
 @media (max-width: 1199px) {
-  .cs-home { grid-template-columns: minmax(0, 1fr) 360px; }
-  .cs-home > .ps-tree { display: none; }
+  .cs-home { grid-template-columns: auto minmax(0, 1fr) 360px; }
 }
 @media (max-width: 899px) {
   .cs-top { gap: 12px; padding: 0 16px; }
@@ -44,6 +51,7 @@ h2, h3, p { margin-top: 0; }
   .cs-brand img { height: 18px; }
   .cs-nav a { padding: 0 8px; font-size: 14px; }
   .cs-home { display: block; height: auto; }
+  .cs-side { display: none; }
   .cs-main { overflow: visible; padding: 16px 16px 96px; }
   .cs-chat { display: none; position: fixed; inset: 0; z-index: 100; background: #fff; }
   .cs-home.is-chat .cs-chat { display: flex; }
@@ -62,7 +70,7 @@ h2, h3, p { margin-top: 0; }
 .cs-btn.is-ghost { background: var(--cs-g100); color: var(--cs-g700); }
 .cs-btn.is-ghost:hover { background: var(--cs-g200); }
 .cs-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.cs-top a:focus-visible, .cs-btn:focus-visible, .cs-back:focus-visible, .cs-fab:focus-visible, .cs-chat-close:focus-visible,
+.cs-top a:focus-visible, .cs-btn:focus-visible, .cs-side-btn:focus-visible, .cs-back:focus-visible, .cs-fab:focus-visible, .cs-chat-close:focus-visible,
 .cs-field input:focus-visible, .cs-field textarea:focus-visible { outline: 2px solid var(--cs-blue-light); outline-offset: 2px; }
 
 /* 입력 칸 */

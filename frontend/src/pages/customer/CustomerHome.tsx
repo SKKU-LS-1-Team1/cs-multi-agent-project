@@ -1,6 +1,7 @@
 // 고객 화면: 좌측 제품 대시보드 + 우측 챗봇 (기획서 5.1). 챗봇 응답의 이동 지시로 대시보드가 바뀐다.
-// 화면 폭에 맞춰 바뀐다 (shell.css): 넓으면 트리 · 본문 · 챗봇 3단, 중간이면 트리를 빼고 2단,
-// 좁으면(휴대폰) 본문만 두고 챗봇은 오른쪽 아래 버튼으로 여는 서랍.
+// 왼쪽 제품 목록은 처음엔 접혀 있고(얇은 막대) 눌러서 펼친다. 첫 화면은 본문의 제품 사진 고르기.
+// 화면 폭에 맞춰 바뀐다 (shell.css): 넓으면 목록 · 본문 · 챗봇, 좁으면(휴대폰) 목록을 빼고
+// 본문만 두고 챗봇은 오른쪽 아래 버튼으로 여는 서랍.
 import { useState } from "react";
 import type { InquiryForm as FormDraft, Navigation } from "../../api/client";
 import ProductTree from "./ProductTree";
@@ -15,6 +16,7 @@ export default function CustomerHome() {
   const [anchor, setAnchor] = useState<string | null>(null);
   const [form, setForm] = useState<FormDraft | null>(null);
   const [chatOpen, setChatOpen] = useState(false); // 좁은 화면에서만 쓴다
+  const [treeOpen, setTreeOpen] = useState(false);
 
   const onNavigate = (nav: Navigation) => {
     if (nav.product_code) setProductCode(nav.product_code);
@@ -26,8 +28,14 @@ export default function CustomerHome() {
   const openForm = (f: FormDraft) => { setForm(f); setChatOpen(false); };
 
   return (
-    <div className={`cs-home${chatOpen ? " is-chat" : ""}`}>
-      <ProductTree selected={productCode} onSelect={(c) => { setProductCode(c); setForm(null); }} />
+    <div className={`cs-home${chatOpen ? " is-chat" : ""}${treeOpen ? " is-tree" : ""}`}>
+      <div className="cs-side">
+        <button type="button" className="cs-side-btn" aria-controls="cs-tree" aria-expanded={treeOpen} onClick={() => setTreeOpen((o) => !o)}>
+          <span aria-hidden="true">{treeOpen ? "«" : "☰"}</span>
+          <span>{treeOpen ? "목록 접기" : "제품 목록"}</span>
+        </button>
+        {treeOpen && <ProductTree id="cs-tree" selected={productCode} onSelect={(c) => { setProductCode(c); setForm(null); }} />}
+      </div>
       <main className="cs-main">
         {form ? (
           <InquiryForm draft={form} onDone={() => setForm(null)} />

@@ -45,7 +45,16 @@
 #   언어별 고정 문장(HANDOFF_FALLBACK)을 쓴다. 비영어 고객에게 영어 문장을 그대로 보내지 않는다.
 #   handoff_reason 은 기록·상담원용 영어 이유다 (고객에게는 answer 가 보인다).
 # - 안전 신호(연기·화재·감전)는 여기서 따로 막지 않는다. 필요하면 handoff 조건에 더한다.
+# - 아직 구체적인 질문이 없는 말("UPS 에 대해 궁금한 점이 있어요", 인사)은 검색 1등 점수가 낮아
+#   '근거 없음'(handoff.py MIN_RETRIEVAL_SCORE)에 걸린다. 그 기준값은 실제 질문과 범위 밖 질문으로만
+#   쟀으므로, Jev 가 GENERAL 로 본 말은 근거 없음으로 넘기지 않고 무엇이 궁금한지 되묻는다.
+#   (해결 안 됨·상담원 요청·재발·결정 유형 전환은 그대로)
+# - 제품군 이름(무정전전원장치·태양광·인버터 …)은 규칙 추출이 모델명만 찾아서 놓친다. 그래서
+#   FAMILY_TERMS 로 제품군을 찾아 채운다 → 화면은 FAMILY_ONLY("제품 선택" 버튼), 답변은 그 제품군
+#   제품 목록을 맥락으로 쓴다. 여러 제품군에 걸리면 가장 긴 낱말이 이기고, 같은 길이로 갈리면
+#   비운다.
 import logging
+import re
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 
@@ -56,7 +65,7 @@ from cs_agent.agents.drafting import plain_text
 from cs_agent.agents.info_request import in_language, language_name
 from cs_agent.agents.retrieval import Retriever, finalize_evidence, first_pass
 from cs_agent.chatbot.form_filler import InquiryDraftForm, fill_form
-from cs_agent.chatbot.handoff import should_handoff
+from cs_agent.chatbot.handoff import HandoffDecision, should_handoff
 from cs_agent.chatbot.navigation import Navigation, decide
 from cs_agent.domain import BUNDLE_OF, Bundle
 from cs_agent.llm.router import LLMRouter, RateLimited
@@ -77,8 +86,104 @@ HANDOFF_TRANSLATE_ATTEMPTS = 3
 
 _POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="chat-extract")
 
-RECURRENCE, REQUEST_AGENT, OTHER = "RECURRENCE", "REQUEST_AGENT", "OTHER"
-INTENT_OPTIONS = [RECURRENCE, REQUEST_AGENT, OTHER]
+RECURRENCE, REQUEST_AGENT, GENERAL, OTHER = "RECURRENCE", "REQUEST_AGENT", "GENERAL", "OTHER"
+INTENT_OPTIONS = [RECURRENCE, REQUEST_AGENT, GENERAL, OTHER]
+
+# 제품군을 가리키는 말 (고객 화면 제품군 이름 + 영어·일본어·중국어 흔한 이름). 소문자로 비교한다.
+# 영문 낱말은 앞뒤가 영문·숫자가 아닐 때만, 나머지는 띄어쓰기를 빼고 찾는다. "pcs" 는 수량(20 pcs)과
+# 겹쳐서 넣지 않는다 (PCS 모델명은 규칙 추출이 찾는다).
+FAMILY_TERMS: dict[str, tuple[str, ...]] = {
+    "LV_BREAKER": (
+        "저압차단기",
+        "차단기",
+        "배선용차단기",
+        "누전차단기",
+        "기중차단기",
+        "mccb",
+        "acb",
+        "elcb",
+        "circuit breaker",
+        "breaker",
+        "遮断器",
+        "断路器",
+    ),
+    "MV_EQUIP": (
+        "고압전력기기",
+        "고압차단기",
+        "진공차단기",
+        "배전반",
+        "수배전반",
+        "개폐기",
+        "vcb",
+        "switchgear",
+        "vacuum circuit breaker",
+        "medium voltage",
+        "配電盤",
+        "开关柜",
+    ),
+    "TRANSFORMER": ("변압기", "트랜스", "transformer", "変圧器", "变压器"),
+    "METER": (
+        "전력계측기",
+        "계측기",
+        "전력량계",
+        "전력미터",
+        "power meter",
+        "energy meter",
+        "電力量計",
+        "电能表",
+        "电表",
+    ),
+    "CONTROL": (
+        "제어기",
+        "전자접촉기",
+        "접촉기",
+        "마그네트",
+        "과부하계전기",
+        "열동계전기",
+        "계전기",
+        "contactor",
+        "overload relay",
+        "電磁接触器",
+        "接触器",
+        "继电器",
+    ),
+    "DRIVE": (
+        "인버터",
+        "드라이브",
+        "inverter",
+        "vfd",
+        "variable frequency drive",
+        "インバータ",
+        "变频器",
+    ),
+    "PLC": ("plc", "피엘씨", "programmable logic controller"),
+    "HMI": (
+        "hmi",
+        "터치패널",
+        "운전패널",
+        "touch panel",
+        "operator panel",
+        "タッチパネル",
+        "触摸屏",
+    ),
+    "ESS": ("에너지저장장치", "에너지저장", "ess", "energy storage", "bms", "蓄電システム", "储能"),
+    "PV": (
+        "태양광",
+        "태양광인버터",
+        "솔라인버터",
+        "솔라",
+        "solar",
+        "solar inverter",
+        "pv",
+        "pv inverter",
+        "photovoltaic",
+        "太陽光",
+        "太陽光インバータ",
+        "逆变器",
+        "光伏",
+    ),
+    "UPS": ("무정전전원장치", "무정전", "ups", "uninterruptible power", "無停電電源", "不间断电源"),
+}
 
 INTENT_PROMPT = """Classify the customer's latest message in a support chat.
 
@@ -86,7 +191,9 @@ RECURRENCE: the customer says the problem happened again or still continues afte
 assistant's earlier advice.
 REQUEST_AGENT: the customer says the problem is not solved, or asks to talk to a person or to
 submit an inquiry.
-OTHER: anything else, including a new question.
+GENERAL: a greeting, or the customer only names a product, product line or topic, or says they
+have a question, without asking anything specific yet (e.g. "I have a question about your UPS").
+OTHER: anything else, including a specific new question.
 
 Assistant's previous advice:
 {advice}
@@ -101,6 +208,11 @@ Answer the customer's latest message in {language}.
 Rules:
 - Use ONLY the reference documents below. If they do not contain the answer, say you could not
   find it and that a support engineer can help.
+- If the customer has not asked a specific question yet (a greeting, only a product or topic
+  name, or "I have a question"), do not say you could not find anything. In one or two
+  sentences say what you can help with for the product(s) below (specifications, installation,
+  error codes, firmware, warranty, manuals) and ask what they would like to know. If several
+  products are listed and none is chosen, ask which one.
 - Never confirm a quotation amount, approve a warranty or a return, or state a definite root cause.
   Offer to open the inquiry form instead.
 - Be concise: a few sentences. When you give a value or a step, name the document section it
@@ -206,19 +318,29 @@ def respond(
         if classification
         else None
     )
-    quick = _with_viewing(_rule_extraction(inquiry, transcript, category, tables), viewing, tables)
+    said = [chat.message, *reversed(customer)]  # 제품군은 지금 말부터 찾는다
+    quick = _with_family(
+        _with_viewing(_rule_extraction(inquiry, transcript, category, tables), viewing, tables),
+        said,
+    )
 
     query = "\n".join([*customer[-(QUERY_MESSAGES - 1) :], chat.message])
     best_score = _best_score(docs, query)
-    unresolved, attempts = _intent_signals(chat, customer, advice, category, llm)
-    decision = should_handoff(category, best_score, unresolved or chat.unresolved, attempts)
+    current, attempts = _intent_signals(chat, customer, advice, category, llm)
+    decision = should_handoff(
+        category, best_score, current == REQUEST_AGENT or chat.unresolved, attempts
+    )
+    if decision.code == "no_evidence" and current == GENERAL:
+        decision = HandoffDecision(
+            handoff=False
+        )  # 아직 질문 전이다 → 무엇이 궁금한지 묻는다 (위 메모)
 
     candidates = first_pass(docs, None, query) if docs is not None else []
     evidence = finalize_evidence(candidates, quick, category=category)
 
     if decision.handoff:
         answer = _handoff_answer(decision.reason, language, llm)  # 추출을 기다리는 동안 옮긴다
-        extraction = _with_viewing(_joined(full, quick), viewing, tables)
+        extraction = _with_family(_with_viewing(_joined(full, quick), viewing, tables), said)
         form = (
             fill_form(classification, extraction, [*history, chat.message], llm, tables)
             if classification
@@ -233,17 +355,18 @@ def respond(
             form=form,
         )
 
-    product = tables.products.get(quick.product_code or "")
     prompt = CHAT_PROMPT.format(
         language=language_name(language),
-        product=product.name if product else "unknown",
+        product=_product_context(quick, tables),
         category=category or "unknown",
         evidence=_evidence_block(evidence),
         conversation=_conversation(history) or "(first message)",
         message=chat.message,
     )
     answer = plain_text(llm.write("chat_answer", prompt))
-    extraction = _with_viewing(_joined(full, quick, EXTRACT_GRACE_S), viewing, tables)
+    extraction = _with_family(
+        _with_viewing(_joined(full, quick, EXTRACT_GRACE_S), viewing, tables), said
+    )
     return ChatOut(
         answer=answer,
         navigation=_navigation(extraction, classification, tables),
@@ -337,6 +460,46 @@ def _with_viewing(extraction: Extraction, viewing: str | None, tables: RefTables
     )
 
 
+def mentioned_family(texts: list[str]) -> str | None:
+    """말에서 제품군 코드를 찾는다 (FAMILY_TERMS). 앞의 말부터 보고, 처음 걸린 말의 결과를 쓴다."""
+    for text in texts:
+        lower = text.lower()
+        compact = re.sub(r"\s+", "", lower)
+        hits: dict[str, int] = {}
+        for family, terms in FAMILY_TERMS.items():
+            for term in terms:
+                if term.isascii():
+                    found = re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", lower)
+                else:
+                    found = term.replace(" ", "") in compact
+                if found:
+                    hits[family] = max(hits.get(family, 0), len(term))
+        if hits:
+            longest = max(hits.values())
+            best = [f for f, n in hits.items() if n == longest]
+            return best[0] if len(best) == 1 else None
+    return None
+
+
+def _with_family(extraction: Extraction, texts: list[str]) -> Extraction:
+    """제품도 제품군도 못 찾았으면 말에 나온 제품군 이름으로 채운다."""
+    if extraction.product_code is not None or extraction.product_family:
+        return extraction
+    family = mentioned_family(texts)
+    return extraction.model_copy(update={"product_family": family}) if family else extraction
+
+
+def _product_context(extraction: Extraction, tables: RefTables) -> str:
+    """답변 프롬프트의 Product 줄: 제품 이름, 제품군만 알면 그 제품군 제품 목록."""
+    product = tables.products.get(extraction.product_code or "")
+    if product:
+        return product.name
+    names = [p.name for p in tables.products.values() if p.family == extraction.product_family]
+    if names:
+        return f"not chosen yet; {extraction.product_family} products: " + ", ".join(names)
+    return "unknown"
+
+
 def _navigation(
     extraction: Extraction, classification: Classification | None, tables: RefTables
 ) -> Navigation:
@@ -354,7 +517,7 @@ def _best_score(docs: Retriever | None, query: str) -> float:
 def _intent_signals(
     chat: ChatIn, customer: list[str], advice: list[str], category, llm: LLMRouter
 ) -> tuple[bool, int]:
-    """(상담원 연결 요청 여부, 원격 조치 재발 횟수). 위 구현 메모 참고."""
+    """(지금 고객 말의 의도, 원격 조치 재발 횟수). 위 구현 메모 참고."""
     last_advice = advice[-1] if advice else None
     current = _intent(llm, last_advice, chat.message)
     attempts = 1 if current == RECURRENCE and last_advice else 0
@@ -363,7 +526,7 @@ def _intent_signals(
         for i in range(max(1, len(customer) - INTENT_HISTORY), len(customer)):
             if i - 1 < len(advice) and _intent(llm, advice[i - 1], customer[i]) == RECURRENCE:
                 attempts += 1
-    return current == REQUEST_AGENT, attempts
+    return current, attempts
 
 
 def _intent(llm: LLMRouter, advice: str | None, message: str) -> str:
