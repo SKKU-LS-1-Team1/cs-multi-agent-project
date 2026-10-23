@@ -64,6 +64,23 @@ def router(writer=None, judge=None):
     )
 
 
+def test_progress_notice_removes_internal_markers_and_preserves_public_ticket_id():
+    writer, judge = Writer(ENGLISH + " [POL-SERVICE#4]"), Judge()
+    assert progress.generate_notice([FACT], router(writer, judge)) == ENGLISH
+    assert len(writer.prompts) == len(judge.prompts) == 1
+    candidate = json.loads(judge.prompts[0].split("# INPUT\n", 1)[1])["candidate"]
+    assert candidate == ENGLISH
+
+
+def test_progress_translation_cleans_legacy_and_generated_citations():
+    writer = Writer(FRENCH + " [POL-SERVICE#4]")
+    assert (
+        progress.prepare_notice(ENGLISH + " [POL-SERVICE#4]", "fr", [FACT], router(writer))
+        == FRENCH
+    )
+    assert "POL-SERVICE#4" not in writer.prompts[0].split("# INPUT", 1)[-1]
+
+
 def test_generation_whitelists_server_facts_and_keeps_structured_roles():
     writer, judge = Writer(), Judge()
     fact = {

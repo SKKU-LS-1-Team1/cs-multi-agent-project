@@ -567,6 +567,7 @@ class TicketService:
             raise InvalidAction("상담원 검토 대기 상태에서만 변환할 수 있습니다")
         state = snapshot.values
         previous = state.get("reply_preview") or {}
+        text = drafting.customer_text(text, [drafting._ref(e) for e in state.get("evidence", [])])
         if valid_preview(state, text, previous.get("preview_id")):
             return previous
         if not info_request.in_language(text, "en"):
@@ -742,6 +743,13 @@ class TicketService:
         classification = v.get("classification")
         extraction = v.get("extraction")
         specialist_requests = self.records.specialist_requests(ticket_id)
+        draft = v.get("draft")
+        references = [drafting._ref(e) for e in v.get("evidence", [])]
+        if draft:
+            references += draft.cited
+            draft = draft.model_copy(
+                update={"text": drafting.customer_text(draft.text, references)}
+            )
         return TicketOut(
             ticket_id=ticket_id,
             inquiry=v.get("inquiry"),
@@ -765,13 +773,17 @@ class TicketService:
                 if rules
                 else None
             ),
-            draft=v.get("draft"),
+            draft=draft,
             info_request=v.get("info_request"),
             escalation_request=v.get("escalation_request"),
             approval_cited=v.get("approval_cited"),
-            approval_text=v.get("approval_text"),
+            approval_text=drafting.customer_text(v["approval_text"], references)
+            if v.get("approval_text") is not None
+            else None,
             approval_error=v.get("approval_error"),
-            approved_reply=v.get("approved_reply"),
+            approved_reply=drafting.customer_text(v["approved_reply"], references)
+            if v.get("approved_reply") is not None
+            else None,
             final_reply=v.get("final_reply"),
             final_reply_language=(
                 v["inquiry"].language or (extraction and extraction.language) or "en"

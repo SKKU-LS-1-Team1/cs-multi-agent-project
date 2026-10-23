@@ -248,7 +248,55 @@ def test_allowed_document_ids_containing_product_codes_are_not_rejected(
     )
     result = write_escalation_request(state, llm)
     assert result.cited == [ref]
-    assert ref in result.text
+    assert ref not in result.text
+    assert "[근거 문서]" in result.text
+
+
+def test_internal_request_displays_actual_document_and_section_names(state, llm, writer):
+    state["evidence"] = [
+        Evidence(source="docs", doc_id="POL-WARRANTY", section="4", text="Claim procedure.")
+    ]
+    writer.output.update(
+        summary="고객이 보증 적용 여부를 문의했습니다.",
+        request="[POL-WARRANTY#4]에 따라 접수 자료의 충분성을 검토해 주세요.",
+        cited=["POL-WARRANTY#4"],
+        evidence_gap="",
+    )
+    result = write_escalation_request(state, llm, "QA_CLAIM")
+    name = "「Warranty and RMA Policy」의 ‘4. Claim procedure’"
+    assert f"{name}에 따라" in result.text
+    assert f"- {name}" in result.text
+    assert "POL-WARRANTY" not in result.text
+    assert result.cited == ["POL-WARRANTY#4"]
+    assert "display_name" in writer.prompts[0]
+
+
+def test_missing_document_title_is_not_invented(state, llm, writer):
+    writer.output.update(
+        summary="고객이 [DOC-A#2]의 내용을 문의했습니다.",
+        cited=["DOC-A#2"],
+        evidence_gap="",
+    )
+    result = write_escalation_request(state, llm)
+    assert "참고 문서 1 (문서명 미확인)의 ‘2절 (절 제목 미확인)’" in result.summary
+    assert "DOC-A#2" not in result.text
+    assert result.cited == ["DOC-A#2"]
+
+
+def test_source_titles_from_metadata_when_raw_document_is_absent(state, llm, writer):
+    state["evidence"][0].metadata = {
+        "document_title": "Installation Guide",
+        "title": "2. Clearances",
+    }
+    writer.output.update(
+        request="문서 DOC-A#2를 검토해 주세요. [attachment: 6 photos]도 확인 바랍니다.",
+        cited=["DOC-A#2"],
+        evidence_gap="",
+    )
+    result = write_escalation_request(state, llm)
+    assert "「Installation Guide」의 ‘2. Clearances’" in result.text
+    assert "[attachment: 6 photos]" in result.text
+    assert "DOC-A#2" not in result.text
 
 
 def test_explicit_inline_reference_is_retained_when_list_omits_it(state, llm, writer):

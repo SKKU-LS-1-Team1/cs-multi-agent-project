@@ -95,6 +95,7 @@ def test_reply_is_separate_source_with_request_only_as_unconfirmed_context():
     assert all(not e["reference"].startswith("specialist:") for e in context["official_documents"])
     assert "specialist:reply-one" in context["allowed_citations"]
     assert result.cited == ["specialist:reply-one"]
+    assert "[specialist:" not in result.text
     assert "# ROLE" in writer.prompts[0] and "# SOURCE RULES" in writer.prompts[0]
     evidence = drafting.prepare_evidence(
         Category.MANUAL, extraction(), drafting.specialist_evidence([REPLY])

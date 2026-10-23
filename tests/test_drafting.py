@@ -64,6 +64,7 @@ def test_every_category_has_usable_template_and_one_writer_call(category):
     assert result.model == writer.name
     assert all(result.slots.get(k) for k in d.required_slots(category))
     assert result.cited == [writer.contexts[0]["allowed_citations"][0]]
+    assert result.text == "Requested guidance."
 
 
 @pytest.mark.parametrize("language", ["fr", "ar", "zh", "en"])
@@ -96,13 +97,11 @@ class TranslationWriter:
     [
         (
             "ko",
-            "S100에서 케이블과 모터를 1,000 V에서 절연 시험하십시오 [TG-INV-LSLV0075-S100#3.2]. "
-            "정격 7.5kW, 40 °C에서.",
+            "S100에서 케이블과 모터를 1,000 V에서 절연 시험하십시오. 정격 7.5kW, 40 °C에서.",
         ),
         (
             "ja",
-            "S100で、ケーブルとモーターを1,000 Vで絶縁試験してください [TG-INV-LSLV0075-S100#3.2]。"
-            "定格7.5kW、40 °Cで。",
+            "S100で、ケーブルとモーターを1,000 Vで絶縁試験してください。定格7.5kW、40 °Cで。",
         ),
     ],
 )
@@ -115,12 +114,16 @@ def test_translation_with_particles_attached_to_units_and_codes_is_accepted(lang
     assert d.translate_reply(source, "en", language, router(TranslationWriter(target))) == target
 
 
-def test_translation_preserves_approved_numbers_codes_and_citations():
+def test_translation_preserves_numbers_and_codes_without_internal_citations():
     source = "S100 warranty: 24 months; price 260.00 USD [POL-WARRANTY#1]."
     target = "Garantie S100 : 24 mois ; prix 260.00 USD [POL-WARRANTY#1]."
     writer = TranslationWriter(target)
-    assert d.translate_reply(source, "en", "fr", router(writer)) == target
-    assert json.loads(writer.calls[0].split("\n\n", 1)[1])["approved_reply"] == source
+    assert d.translate_reply(source, "en", "fr", router(writer)) == (
+        "Garantie S100 : 24 mois ; prix 260.00 USD."
+    )
+    assert json.loads(writer.calls[0].split("\n\n", 1)[1])["approved_reply"] == (
+        "S100 warranty: 24 months; price 260.00 USD."
+    )
 
 
 @pytest.mark.parametrize(
@@ -128,8 +131,8 @@ def test_translation_preserves_approved_numbers_codes_and_citations():
     [
         "Garantie S100 : 36 mois [POL-WARRANTY#1].",
         "Garantie S200 : 24 mois [POL-WARRANTY#1].",
-        "Garantie S100 : 24 mois [POL-WARRANTY#2].",
-        "Garantie S100 : 24 mois.",
+        "Garantie S100 : 24 mois, 48 mois.",
+        "Garantie S100.",
         "",
     ],
 )
@@ -150,6 +153,29 @@ def test_english_customer_uses_exact_approved_text_without_model_call():
     assert not writer.calls
 
 
+def test_customer_text_preserves_bracketed_content_and_separates_internal_sources():
+    source = (
+        "Warranty: 18 months [POL-WARRANTY#1, POL-WARRANTY#2].\n"
+        "Check the unit [specialist:reply-one].\n"
+        "See notice [NOTICE]. Keep [DS-100], [E.OC] and [attachment: 6 photos]."
+    )
+    assert d.customer_text(source, ["NOTICE"]) == (
+        "Warranty: 18 months.\nCheck the unit.\n"
+        "See notice. Keep [DS-100], [E.OC] and [attachment: 6 photos]."
+    )
+
+
+def test_english_customer_never_receives_internal_references():
+    writer = TranslationWriter(error=AssertionError("Must not call"))
+    assert (
+        d.translate_reply(
+            "Please check the unit [specialist:reply-one].", "en", "en", router(writer)
+        )
+        == "Please check the unit."
+    )
+    assert not writer.calls
+
+
 def test_translation_api_error_is_reported_without_fallback_to_english():
     with pytest.raises(d.TranslationError, match="번역 호출"):
         d.translate_reply(
@@ -164,8 +190,8 @@ def test_rejected_translation_cache_is_expired_and_success_is_reused():
     with pytest.raises(d.TranslationError, match="수치"):
         d.translate_reply(source, "en", "es", llm)
     writer.text = "La garantía de S100 es de 24 meses [POL-WARRANTY#1]."
-    assert d.translate_reply(source, "en", "es", llm) == writer.text
-    assert d.translate_reply(source, "en", "es", llm) == writer.text
+    assert d.translate_reply(source, "en", "es", llm) == "La garantía de S100 es de 24 meses."
+    assert d.translate_reply(source, "en", "es", llm) == "La garantía de S100 es de 24 meses."
     assert len(writer.calls) == 2
 
 
@@ -394,6 +420,18 @@ def test_grouped_citations_are_all_preserved():
     writer = Writer(response="Lead time and validity [POL-ORDER#1, POL-ORDER#5].")
     draft = d.write_draft(Category.QUOTE, extraction(Category.QUOTE), [], "Quote?", router(writer))
     assert draft.cited == ["POL-ORDER#1", "POL-ORDER#5"]
+    assert draft.text == "Lead time and validity."
+
+
+def test_citations_alone_are_not_a_customer_answer():
+    with pytest.raises(d.DraftingError, match="본문이 비어"):
+        d.write_draft(
+            Category.QUOTE,
+            extraction(Category.QUOTE),
+            [],
+            "Quote?",
+            router(Writer(response="[POL-ORDER#1]")),
+        )
 
 
 @pytest.mark.parametrize("separator", ["،", "؛", ",", ";", "、", "，"])
@@ -612,5 +650,6 @@ def test_draft_is_plain_text_for_email_and_customer_screen():
 
     draft = d.write_draft(Category.DEFECT, item, [], "E.OC", router(writer))
 
-    assert draft.text == "Next steps\n1. Megger test at 1,000 V [TG-INV-LSLV0075-S100#3.2]."
+    assert draft.text == "Next steps\n1. Megger test at 1,000 V."
+    assert draft.cited == ["TG-INV-LSLV0075-S100#3.2"]
     assert "마크다운" in d.COMMON_INSTRUCTIONS

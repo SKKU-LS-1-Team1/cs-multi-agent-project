@@ -37,6 +37,44 @@ def test_health(client):
     assert client.get("/api/health").json()["status"] == "ok"
 
 
+def test_old_draft_read_and_preview_hide_internal_citations_but_keep_metadata(client):
+    from cs_agent.schemas import Evidence
+
+    row = client.post("/api/tickets", json=INQUIRY).json()
+    tid = row["ticket_id"]
+    service = client.app.state.tickets
+    old = service._state(tid).values["draft"]
+    text = "Please consult the installation guide [DOC#one]."
+    service.graph.update_state(
+        service._config(tid),
+        {
+            "draft": old.model_copy(update={"text": text, "cited": ["DOC#one"]}),
+            "evidence": [Evidence(source="docs", doc_id="DOC", section="one", text="Guide.")],
+        },
+        as_node="ready",
+    )
+    shown = client.get(f"/api/tickets/{tid}").json()
+    assert shown["draft"]["text"] == "Please consult the installation guide."
+    assert shown["draft"]["cited"] == ["DOC#one"]
+    assert service._state(tid).values["draft"].text == text  # GET does not rewrite history.
+    preview = client.post(
+        f"/api/tickets/{tid}/reply-preview", json={"text": shown["draft"]["text"]}
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["final_text"] == shown["draft"]["text"]
+    from cs_agent.schemas import ReviewIn
+    from cs_agent.services.reply_preview import review_text, valid_preview
+
+    state = service._state(tid).values
+    assert valid_preview(
+        state, review_text(state, ReviewIn(action="approve")), preview.json()["preview_id"]
+    )
+    state = {**state, "reply_preview": {**state["reply_preview"], "final_text": text}}
+    assert not valid_preview(
+        state, review_text(state, ReviewIn(action="approve")), preview.json()["preview_id"]
+    )
+
+
 def test_submit_review_approve_resolve(client):
     res = client.post("/api/tickets", json=INQUIRY)
     assert res.status_code == 201

@@ -5,7 +5,6 @@ import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, us
 import { toast } from "sonner";
 import { ChevronDown, GripVertical } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
-import { Progress } from "@admin/components/ui/progress";
 import { Mono, NativeSelect, PersonAvatar, PriorityTag, Tag, useGo } from "@admin/components/admin/common";
 import { checkAssign, departmentRisk, openTickets, ownedTickets, canAssign, people, recommend, resource, teamLead } from "@admin/lib/logic";
 import { moveTicket } from "@admin/lib/actions";
@@ -87,8 +86,8 @@ function Column({ id, title, tickets, person, sub, dragging, verdict, recommende
         </div>
         {person && r ? (
           <>
-            <div className="flex items-baseline justify-between text-xs text-muted-foreground"><span>미완료</span><span className="tabular-nums"><b className="text-foreground">{r.count}</b> / {r.capacity}건</span></div>
-            <Progress value={Math.min(100, r.ratio * 100)} className="h-1.5" />
+            <div className="flex items-baseline justify-between text-xs text-muted-foreground"><span>미완료</span><span className="tabular-nums"><b className="text-foreground">{r.count}</b>건</span></div>
+            <span className="block h-1.5 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full bg-info" style={{ width: `${(r.count / Math.max(1, ...people.map((x) => resource(x).count))) * 100}%` }} /></span>
           </>
         ) : sub}
         {dragging && !verdict.ok && verdict.reason && <p className="rounded bg-card px-2 py-1 text-xs text-destructive ring-1 ring-destructive/30">{verdict.reason}</p>}

@@ -5,7 +5,7 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 
-from cs_agent.agents.drafting import TranslationError, plain_text, translate_reply
+from cs_agent.agents.drafting import TranslationError, customer_text, plain_text, translate_reply
 from cs_agent.agents.info_request import LANGUAGE_NAMES, in_language
 from cs_agent.llm.clients import FakeJudge, FakeWriter
 from cs_agent.llm.router import LLMRouter
@@ -14,7 +14,7 @@ MAX_ATTEMPTS = 2
 MAX_TICKETS = 20
 MAX_NOTICE_CHARS = 8_000
 MIN_GROUNDING_CONFIDENCE = 0.5
-_PROMPT_VERSION = "progress-notice-v1"
+_PROMPT_VERSION = "progress-notice-v2-customer-text"
 _STATUSES = frozenset(
     {
         "ANALYSIS_PENDING",
@@ -60,6 +60,8 @@ Write concise English for staff review. Use plain text, not JSON or Markdown for
 Do not diagnose, speculate about delays, promise dates/ETAs, invent next steps or actions,
 claim dispatch/delivery, disclose internal metrics, or invent a resolved outcome.
 Do not add ticket IDs, product codes, numbers, or dates absent from the selected facts.
+Do not include internal source IDs or citation markers such as [POL-SERVICE#1].
+Preserve the actual public ticket IDs and product codes supplied in the facts.
 Avoid repeating technical details that are irrelevant to a progress notice.
 # OUTPUT
 Return only a courteous English progress notice, with the exact ticket ID for each item.
@@ -195,7 +197,7 @@ def generate_notice(facts: list[dict], llm: LLMRouter) -> str:
             )
         )
         try:
-            text = plain_text(llm.write("progress_notice", prompt)).strip()
+            text = customer_text(plain_text(llm.write("progress_notice", prompt)).strip())
         except Exception as exc:
             raise ProgressError("진행 안내문 작성 모델 호출에 실패했습니다.") from exc
         try:
@@ -214,6 +216,7 @@ def prepare_notice(text: str, target_language: str, facts: list[dict], llm: LLMR
     if target not in LANGUAGE_NAMES:
         raise ProgressError("고객의 지원되는 회신 언어를 확인해 주세요.")
     clean = _facts(facts)
+    text = customer_text(text)
     _validate(text, clean, llm)
     try:
         return translate_reply(text, "en", target_language, llm)
