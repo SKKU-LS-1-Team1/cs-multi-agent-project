@@ -1,18 +1,19 @@
 // 제품 고르기 화면 (CSA-36 · 조수빈): 중분류 11개를 3D 회전 캐러셀로 고르고, 소분류(모델)를 고른다.
 // 대분류(전력·자동화·에너지)는 칩과 이름 아래에 표시한다. 자동 회전 없음 — 사용자가 조작할 때만 움직인다.
-import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { familyImage, familyName } from "./productFamilies";
 import { useProductTree } from "./useProductTree";
 import "./product-select.css";
 
-type Props = { selected: string | null; onSelect: (code: string) => void };
+// focus: 왼쪽 제품 목록에서 누른 제품군. 바뀔 때마다(같은 제품군을 다시 눌러도 n 이 바뀐다) 그쪽으로 돌린다.
+type Props = { selected: string | null; onSelect: (code: string) => void; focus?: { family: string; n: number } | null };
 type Item = { family: string; name: string; division: string; products: { code: string; name: string }[] };
 
 const RX = 400; // 궤도 가로 반지름
 const RZ = 300; // 궤도 앞뒤 깊이
 const DRAG_PX = 110; // 이만큼 끌면 한 칸
 
-export default function ProductPicker({ selected, onSelect }: Props) {
+export default function ProductPicker({ selected, onSelect, focus }: Props) {
   const { tree, loading, error, reload } = useProductTree();
   const items = useMemo<Item[]>(
     () => tree.flatMap((d) => d.families.map((f) => ({ family: f.family, name: familyName(f.family, f.label), division: d.label, products: f.products }))),
@@ -25,6 +26,14 @@ export default function ProductPicker({ selected, onSelect }: Props) {
   const down = useRef<{ x: number; id: number } | null>(null);
   const moved = useRef(false);
   const n = items.length;
+
+  useEffect(() => {
+    if (!focus) return;
+    const at = items.findIndex((i) => i.family === focus.family);
+    if (at < 0) return;
+    setIndex(at);
+    setChosen(null); // 모델 목록을 보고 있었으면 캐러셀로 돌아간다
+  }, [focus, items]);
 
   if (loading) return <p className="ps-note">제품 목록을 불러오는 중이에요…</p>;
   if (error || n === 0) {
@@ -69,7 +78,6 @@ export default function ProductPicker({ selected, onSelect }: Props) {
           {chosenItem.products.map((p) => (
             <button key={p.code} type="button" className={`ps-opt${p.code === selected ? " is-sel" : ""}`} onClick={() => onSelect(p.code)}>
               <b>{p.name}</b>
-              <small>{p.code}</small>
             </button>
           ))}
         </div>
