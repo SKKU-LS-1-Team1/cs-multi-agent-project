@@ -43,15 +43,18 @@
 .ps-arrow:hover { background: var(--ps-g50); color: var(--ps-blue); }
 .ps-l { left: 4px; } .ps-r { right: 4px; }
 .ps-info { text-align: center; padding: 8px 0; }
-.ps-info.is-top { padding: 0 0 4px; } /* 이름·선택 버튼은 사진 위 */
 .ps-info small { font-size: 13px; font-weight: 700; color: var(--ps-blue-light); }
 .ps-info h3 { font-size: 26px; line-height: 36px; font-weight: 700; color: var(--ps-g900); }
 .ps-info p { margin-top: 2px; font-size: 14px; color: var(--ps-g500); }
 .ps-primary { margin-top: 16px; height: 52px; padding: 0 32px; border: 0; border-radius: 14px; background: var(--ps-blue); color: #fff; font-size: 17px; font-weight: 600; }
 .ps-primary:hover { background: var(--ps-blue-mid); }
 .ps-jump { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--ps-g100); display: grid; gap: 10px; }
+.ps-jump.is-top { margin: 4px 0 8px; padding: 0 0 20px; border-top: 0; border-bottom: 1px solid var(--ps-g100); } /* 제품군 버튼 11개는 사진 위 */
 .ps-jgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ps-jgroup > span { width: 52px; font-size: 12px; font-weight: 800; color: var(--ps-g500); }
+/* 제품 고르기 첫 화면: 제목·제품군 버튼 가운데 정렬 */
+.ps-picker > h2 { text-align: center; margin-bottom: 20px; }
+.ps-jump.is-top .ps-jgroup { justify-content: center; }
 .ps-jump button { height: 38px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--ps-g100); color: var(--ps-g700); font-size: 14px; font-weight: 600; }
 .ps-jump button:hover { background: var(--ps-g200); }
 .ps-jump button.is-sel { background: var(--ps-blue); color: #fff; }
