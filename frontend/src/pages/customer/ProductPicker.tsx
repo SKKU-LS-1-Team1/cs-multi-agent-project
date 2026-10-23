@@ -88,7 +88,7 @@ export default function ProductPicker({ selected, onSelect, focus }: Props) {
   const frac = drag / DRAG_PX;
   return (
     <section className="ps ps-picker" aria-label="제품군 고르기" onKeyDown={onKey}>
-      <h2>어떤 제품에 대해 알고 싶으세요?</h2>
+      <h2>어떤 제품에 문제가 있나요?</h2>
       <div className="ps-car" role="group" aria-roledescription="carousel" aria-label="제품군">
         <div className="ps-jump is-top" role="group" aria-label="제품군 바로 보기">
           {tree.map((d) => (
