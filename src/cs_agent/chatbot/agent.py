@@ -49,6 +49,30 @@
 #   '근거 없음'(handoff.py MIN_RETRIEVAL_SCORE)에 걸린다. 그 기준값은 실제 질문과 범위 밖 질문으로만
 #   쟀으므로, Jev 가 GENERAL 로 본 말은 근거 없음으로 넘기지 않고 무엇이 궁금한지 되묻는다.
 #   (해결 안 됨·상담원 요청·재발·결정 유형 전환은 그대로)
+# - 결정 유형(견적·납기·보증·반품)이어도 정보만 묻는 말(보증 기간, 표준 납기, 반품 정책 …)은 문서로
+#   답한다. 결정이 필요한지(이 수량 견적 발행·납기 확약·내 제품 보증 수리/교체 승인·반품 승인)는
+#   Jev 가 가른다 (DECISION_PROMPT). Jev 가 꺼져 있거나 판단이 안 되면 결정 필요로 본다
+#   (전처럼 넘긴다).
+# - 결정 유형 전환일 때도 답할 수 있는 나머지 질문(정격 용량 …)은 버리지 않는다: 문서로 그 부분을
+#   답하고, 결정이 필요한 부분은 문의서로 넘긴다고 덧붙인다 (PARTIAL_PROMPT). 문의서도 같이 연다.
+#   답변을 못 쓰면 전처럼 전환 안내만 보낸다.
+# - 근거 없음 판단 점수 (2026-10-23 운영 사고: "UPS 보증기간…" 다음 "인버터 E.OC" 가 상담원으로 감)
+#   · 최근 고객 말을 합친 검색과 지금 말만의 검색 중 높은 점수를 쓴다. 대화 중 주제가 바뀌면 합친
+#     검색어는 두 주제를 다 담은 조각이 없어 점수가 떨어진다.
+#   · 기준값은 pgvector 코사인 점수로만 쟀다. 키워드 검색(임베딩이 적재되지 않은 서버의 대체
+#     구현)은 점수 척도가 달라(calibrated=False) '찾았는지'만 본다: 지금 말, 합친 말, 지금 말 +
+#     대화의 제품 코드 중 하나라도 걸리면 근거 있음. 키워드 검색은 한국어 낱말을 못 찾으므로 제품
+#     코드를 붙여 찾는다 (근거 조각도 같은 방식으로 더 찾는다).
+# - 우리 제품 이야기(제품·제품군·고장 카탈로그 에러코드가 나옴)면 근거 없음으로 넘기지 않는다.
+#   기준값 0.70 은 긴 티켓 본문으로 쟀고, 짧은 채팅 말은 맞는 문서를 찾아도 점수가 낮다
+#   (2026-10-23 pgvector 측정: "인버터가 E.OC 에러로 멈췄어요." 0.693 TG E.OC 절, "S100 보증기간이
+#   얼마나 되나요?" 0.601 FAQ 보증 답 — 범위 밖 "XYZ-9000 위성용 배터리" 0.587, "냉장고가
+#   고장났어요" 0.541 와 겹친다). 점수로는 짧은 말의 범위를 가를 수 없으므로, 범위 안이면 문서·
+#   제품 정보·정책으로 답하고 정말 없으면 답변이 그렇다고 말한다 (고객은 '해결 안 됐어요'로 넘긴다).
+#   범위 밖 말(제품 이름이 없음)만 기준값으로 넘긴다.
+# - 답변 프롬프트에는 문서 근거 말고도 기준표의 제품 정보(보증 기간·표준 납기·최소 주문 수량·
+#   규격·인증, 가격은 빼고)와 유형별 정책 문서(보증·반품·주문, POLICY_DOCS) 전체를 넣는다.
+#   "보증기간 얼마예요?" 같은 기본 질문은 검색 결과와 상관없이 답할 수 있어야 한다.
 # - 제품군 이름(무정전전원장치·태양광·인버터 …)은 규칙 추출이 모델명만 찾아서 놓친다. 그래서
 #   FAMILY_TERMS 로 제품군을 찾아 채운다 → 화면은 FAMILY_ONLY("제품 선택" 버튼), 답변은 그 제품군
 #   제품 목록을 맥락으로 쓴다. 여러 제품군에 걸리면 가장 긴 낱말이 이기고, 같은 길이로 갈리면
@@ -63,9 +87,15 @@ from pydantic import BaseModel, Field
 from cs_agent.agents.analysis import AnalysisError, classify, extract, extract_details
 from cs_agent.agents.drafting import plain_text
 from cs_agent.agents.info_request import in_language, language_name
-from cs_agent.agents.retrieval import Retriever, finalize_evidence, first_pass
+from cs_agent.agents.retrieval import (
+    Retriever,
+    doc_sections,
+    finalize_evidence,
+    find_error_codes,
+    first_pass,
+)
 from cs_agent.chatbot.form_filler import InquiryDraftForm, fill_form
-from cs_agent.chatbot.handoff import HandoffDecision, should_handoff
+from cs_agent.chatbot.handoff import DECISION_CATEGORIES, HandoffDecision, should_handoff
 from cs_agent.chatbot.navigation import Navigation, decide
 from cs_agent.domain import BUNDLE_OF, Bundle
 from cs_agent.llm.router import LLMRouter, RateLimited
@@ -85,6 +115,17 @@ EXTRACT_GRACE_S = 2.0  # 답변을 다 쓴 뒤 LLM 추출을 더 기다리는 �
 HANDOFF_TRANSLATE_ATTEMPTS = 3
 
 _POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="chat-extract")
+
+# 유형별로 늘 함께 보는 정책 문서 (data/raw/docs/policy, 각 2KB 안팎)
+POLICY_DOCS = {
+    "WARRANTY": "POL-WARRANTY",
+    "RETURN": "POL-RETURN",
+    "ORDER_LEAD": "POL-ORDER",
+    "QUOTE": "POL-ORDER",
+}
+FAMILY_FACTS_MAX = 4  # 제품군만 알 때 제품 정보를 넣는 제품 수
+# 답변 근거 절 수. 한 말에 질문이 둘이면(보증 기간 + 정격 용량) 3개로는 한쪽 절이 잘린다.
+CHAT_EVIDENCE_K = 5
 
 RECURRENCE, REQUEST_AGENT, GENERAL, OTHER = "RECURRENCE", "REQUEST_AGENT", "GENERAL", "OTHER"
 INTENT_OPTIONS = [RECURRENCE, REQUEST_AGENT, GENERAL, OTHER]
@@ -234,6 +275,29 @@ Customer's latest message:
 {message}
 """
 
+DECISION, INFO = "DECISION", "INFO"
+DECISION_PROMPT = """A customer of an industrial electrical equipment maker wrote the message below.
+Does it ask the company to make a decision or a commitment that a chatbot must not make?
+
+DECISION: asks to issue a quotation or price for specific items or quantities, to confirm or
+promise a delivery date, to approve warranty service (repair, replacement, refund) for their
+unit, or to approve a return.
+INFO: only asks for general information the documents can answer, such as the warranty period,
+the standard lead time, the return policy or specifications, possibly with other questions.
+
+Customer's message:
+{message}
+"""
+
+PARTIAL_PROMPT = """
+
+Part of this message needs a decision by our team: {reason}
+- Answer only the OTHER questions in the message, from the reference documents, as usual.
+- Then add one sentence saying that the part needing a decision will be handled by our team
+  through the inquiry form, which you are opening now. Do not decide or promise it yourself.
+- If there is no other question, write only that sentence.
+"""
+
 TRANSLATE_PROMPT = """Translate the text into {language}. Output only the translation.
 
 {text}
@@ -325,21 +389,46 @@ def respond(
     )
 
     query = "\n".join([*customer[-(QUERY_MESSAGES - 1) :], chat.message])
-    best_score = _best_score(docs, query)
+    scope = " ".join(_scope_codes(quick, tables))  # 키워드 검색 보조 (위 메모)
+    best_score = _best_score(docs, query, chat.message, scope)
     current, attempts = _intent_signals(chat, customer, advice, category, llm)
     decision = should_handoff(
-        category, best_score, current == REQUEST_AGENT or chat.unresolved, attempts
+        category,
+        best_score,
+        current == REQUEST_AGENT or chat.unresolved,
+        attempts,
+        decision_requested=_decision_requested(llm, chat.message)
+        if category in DECISION_CATEGORIES
+        else True,
     )
-    if decision.code == "no_evidence" and current == GENERAL:
-        decision = HandoffDecision(
-            handoff=False
-        )  # 아직 질문 전이다 → 무엇이 궁금한지 묻는다 (위 메모)
+    in_scope = bool(quick.product_code or quick.product_family or find_error_codes(chat.message))
+    if decision.code == "no_evidence" and (current == GENERAL or in_scope):
+        # 질문 전이거나 우리 제품 이야기다 → 근거 없음으로 넘기지 않고 답한다 (위 메모)
+        decision = HandoffDecision(handoff=False)
 
     candidates = first_pass(docs, None, query) if docs is not None else []
-    evidence = finalize_evidence(candidates, quick, category=category)
+    if docs is not None and scope and not getattr(docs, "calibrated", False):
+        candidates += first_pass(docs, None, f"{chat.message} {scope}")
+    evidence = finalize_evidence(candidates, quick, k=CHAT_EVIDENCE_K, category=category)
+    policy = doc_sections(POLICY_DOCS[category]) if category in POLICY_DOCS else []
+
+    product_context = _product_context(quick, tables)
+    prompt = CHAT_PROMPT.format(
+        language=language_name(language),
+        product=product_context,
+        category=category or "unknown",
+        evidence=_evidence_block(evidence, _product_facts(quick, tables), policy),
+        conversation=_conversation(history) or "(first message)",
+        message=chat.message,
+    )
 
     if decision.handoff:
-        answer = _handoff_answer(decision.reason, language, llm)  # 추출을 기다리는 동안 옮긴다
+        # 추출을 기다리는 동안 안내를 쓴다. 결정 유형이면 답할 수 있는 나머지도 답한다 (위 메모)
+        answer = (
+            _partial_answer(prompt, decision.reason, llm)
+            if decision.code.startswith("decision_")
+            else None
+        ) or _handoff_answer(decision.reason, language, llm)
         extraction = _with_family(_with_viewing(_joined(full, quick), viewing, tables), said)
         form = (
             fill_form(classification, extraction, [*history, chat.message], llm, tables)
@@ -355,14 +444,6 @@ def respond(
             form=form,
         )
 
-    prompt = CHAT_PROMPT.format(
-        language=language_name(language),
-        product=_product_context(quick, tables),
-        category=category or "unknown",
-        evidence=_evidence_block(evidence),
-        conversation=_conversation(history) or "(first message)",
-        message=chat.message,
-    )
     answer = plain_text(llm.write("chat_answer", prompt))
     extraction = _with_family(
         _with_viewing(_joined(full, quick, EXTRACT_GRACE_S), viewing, tables), said
@@ -506,12 +587,57 @@ def _navigation(
     return decide(extraction, classification, tables) if classification else Navigation()
 
 
-def _best_score(docs: Retriever | None, query: str) -> float:
-    """제품 필터 없이 찾은 docs 1등 점수. 검색기가 없거나 못 찾으면 0.0 (근거 없음)."""
+def _best_score(docs: Retriever | None, query: str, message: str, scope: str = "") -> float:
+    """제품 필터 없이 찾은 docs 1등 점수. 검색기가 없거나 못 찾으면 0.0 (근거 없음).
+
+    합친 최근 말(query)과 지금 말(message) 중 높은 점수. 기준값과 척도가 다른 검색기
+    (calibrated=False)는 제품 코드(scope)를 붙여서도 찾고, 하나라도 걸리면 1.0 이다 (위 메모).
+    """
     if docs is None:
         return 0.0
-    top = docs.search(query, 1)
-    return top[0].score if top else 0.0
+    calibrated = getattr(docs, "calibrated", False)
+    queries = [query, message] + ([f"{message} {scope}"] if scope and not calibrated else [])
+    best = 0.0
+    for q in dict.fromkeys(queries):  # 같은 검색어는 한 번만
+        top = docs.search(q, 1)
+        if top:
+            best = max(best, top[0].score)
+    return best if calibrated or best == 0.0 else 1.0
+
+
+def _scope_codes(extraction: Extraction, tables: RefTables) -> list[str]:
+    """대화의 제품 코드 (제품, 제품군만 알면 그 제품군 제품들)."""
+    if extraction.product_code in tables.products:
+        return [extraction.product_code]
+    family = extraction.product_family
+    return [code for code, p in tables.products.items() if family and p.family == family]
+
+
+def _product_facts(extraction: Extraction, tables: RefTables) -> list[str]:
+    """기준표의 제품 정보 (가격은 넣지 않는다 — 견적은 결정 사항)."""
+    lines = []
+    for code in _scope_codes(extraction, tables)[:FAMILY_FACTS_MAX]:
+        p = tables.products[code]
+        facts = [
+            (
+                "Warranty",
+                f"{p.warranty_months} months (start date: see POL-WARRANTY)"
+                if p.warranty_months
+                else "",
+            ),
+            (
+                "Standard lead time",
+                f"{p.std_lead_time_weeks} weeks (standard, not a confirmed delivery date)"
+                if p.std_lead_time_weeks
+                else "",
+            ),
+            ("Minimum order quantity", p.moq),
+            ("Standards", p.standards.replace(";", ", ")),
+            ("Certifications", p.certifications.replace(";", ", ")),
+        ]
+        body = "\n".join(f"- {name}: {value}" for name, value in facts if value)
+        lines.append(f"[Product data · {code}] {p.name}\n{body}")
+    return lines
 
 
 def _intent_signals(
@@ -537,6 +663,29 @@ def _intent(llm: LLMRouter, advice: str | None, message: str) -> str:
         _LOGGER.warning("챗봇 대화 의도 판단 실패: %s", e)
         return OTHER
     return OTHER if judgement.model == "fake" else judgement.answer
+
+
+def _decision_requested(llm: LLMRouter, message: str) -> bool:
+    """결정 유형 말이 실제로 결정을 요구하는지. 판단이 안 되면 요구한다고 본다 (넘기는 쪽)."""
+    try:
+        judgement = llm.judge(
+            "chat_decision", DECISION_PROMPT.format(message=message), [DECISION, INFO]
+        )
+    except Exception as e:
+        _LOGGER.warning("챗봇 결정 필요 판단 실패: %s", e)
+        return True
+    return judgement.model == "fake" or judgement.answer != INFO
+
+
+def _partial_answer(prompt: str, reason: str, llm: LLMRouter) -> str | None:
+    """결정 유형 전환: 답할 수 있는 부분 + 문의서로 넘긴다는 한 줄. 못 쓰면 None."""
+    if not llm.enabled:
+        return None
+    try:
+        return plain_text(llm.write("chat_partial", prompt + PARTIAL_PROMPT.format(reason=reason)))
+    except Exception as e:  # RateLimited 포함 — 전환 안내로 대신한다
+        _LOGGER.warning("결정 유형 부분 답변 실패: %s", type(e).__name__)
+        return None
 
 
 def _handoff_answer(reason: str, language: str, llm: LLMRouter) -> str:
@@ -585,13 +734,19 @@ def _ask_fields(
     return missing[:ASK_FIELDS_MAX]
 
 
-def _evidence_block(evidence: list[Evidence]) -> str:
-    if not evidence:
-        return "(none)"
-    return "\n\n".join(
-        f"[{e.doc_id}{' · ' + e.section if e.section else ''}]\n{e.text[:EVIDENCE_CHARS]}"
-        for e in evidence
-    )
+def _evidence_block(
+    evidence: list[Evidence], facts: list[str] | None = None, policy: list[Evidence] | None = None
+) -> str:
+    seen = {(e.doc_id, e.section) for e in evidence}
+    extra = [e for e in policy or [] if (e.doc_id, e.section) not in seen]
+    blocks = [
+        *(facts or []),
+        *(
+            f"[{e.doc_id}{' · ' + e.section if e.section else ''}]\n{e.text[:EVIDENCE_CHARS]}"
+            for e in [*evidence, *extra]
+        ),
+    ]
+    return "\n\n".join(blocks) if blocks else "(none)"
 
 
 def _conversation(history: list[str]) -> str:

@@ -49,6 +49,10 @@ class IntentJudge:
         self.calls: list[str] = []
 
     def judge(self, prompt, options):
+        if "Customer's message:\n" in prompt:  # 결정 필요 판단 (DECISION_PROMPT)
+            message = prompt.rsplit("Customer's message:\n", 1)[1]
+            self.calls.append(("decision", message.strip()))
+            return Judgement("INFO" if "INFO" in message else "DECISION", 0.95, self.name)
         message = prompt.rsplit("Customer's latest message:\n", 1)[1]
         self.calls.append(message.strip())
         if "AGAIN" in message:
@@ -62,6 +66,8 @@ class IntentJudge:
 
 class FakeDocs:
     """검색 호출을 기록하고 정해 둔 근거를 돌려준다."""
+
+    calibrated = True  # pgvector 처럼 점수를 기준값과 비교한다
 
     def __init__(self, evidence):
         self.evidence = evidence
@@ -218,16 +224,174 @@ def test_decision_categories_hand_off(analysis):
     assert out.form.category == "QUOTE"
 
 
+OUT_OF_SCOPE = "오늘 서울 날씨 어때요?"  # 제품·제품군·에러코드가 없는 말
+
+
 @pytest.mark.parametrize("docs", [None, FakeDocs([])])
 def test_no_evidence_hands_off(analysis, docs):
-    out = respond(say(), [], docs, live(), TABLES)
+    out = respond(say(OUT_OF_SCOPE), [], docs, live(), TABLES)
 
     assert out.handoff is True
     assert "couldn't find this" in out.handoff_reason
 
 
 def test_weak_evidence_hands_off(analysis):
-    out = respond(say(), [], FakeDocs([tg(score=0.5)]), live(), TABLES)
+    out = respond(say(OUT_OF_SCOPE), [], FakeDocs([tg(score=0.5)]), live(), TABLES)
+
+    assert out.handoff is True
+
+
+# 근거 없음 판단 점수 (2026-10-23 운영 사고: "UPS 보증기간…" 다음 "인버터 E.OC" 가 상담원으로 감)
+
+
+class ScoredDocs(FakeDocs):
+    """검색어에 따라 점수가 다른 검색기. hit(query) 가 None 이면 못 찾음."""
+
+    def __init__(self, hit, calibrated=True):
+        super().__init__([])
+        self.hit = hit
+        self.calibrated = calibrated
+
+    def search(self, query, k=5, where=None):
+        self.calls.append((query, k, where))
+        score = self.hit(query)
+        return [] if score is None else [tg(score=score)][:k]
+
+
+def test_topic_change_in_the_conversation_does_not_hide_the_evidence(analysis):
+    # 합친 최근 말(두 주제)은 점수가 낮아도 지금 말만으로 찾으면 근거가 있다
+    docs = ScoredDocs(lambda q: 0.57 if "UPS" in q else 0.82)
+    history = ["UPS 보증기간이랑 정격용량 알려줘", "보증 기간은 24개월입니다."]
+
+    out = respond(say("인버터가 E.OC 에러로 멈췄어요."), history, docs, live(), TABLES)
+
+    assert out.handoff is False
+    assert [q for q, _, _ in docs.calls[:2]] == [
+        "UPS 보증기간이랑 정격용량 알려줘\n인버터가 E.OC 에러로 멈췄어요.",
+        "인버터가 E.OC 에러로 멈췄어요.",
+    ]
+
+
+def test_keyword_scores_are_not_compared_with_the_threshold(analysis):
+    # 키워드 검색 점수 0.3 은 코사인 0.3 이 아니다 — 찾았으면 근거 있음
+    out = respond(say(), [], ScoredDocs(lambda q: 0.3, calibrated=False), live(), TABLES)
+    assert out.handoff is False
+
+    out = respond(
+        say(OUT_OF_SCOPE), [], ScoredDocs(lambda q: None, calibrated=False), live(), TABLES
+    )
+    assert out.handoff is True and "couldn't find this" in out.handoff_reason
+
+
+def test_keyword_search_also_looks_with_the_product_codes(analysis):
+    # 키워드 검색은 한국어 낱말을 못 찾는다 → 대화의 제품 코드를 붙여 찾는다
+    analysis["extraction"] = Extraction(language="ko")
+    docs = ScoredDocs(lambda q: 0.4 if "INV-LSLV0075-S100" in q else None, calibrated=False)
+
+    out = respond(say("인버터 과전류 트립"), [], docs, live(), TABLES)
+
+    assert out.handoff is False
+    assert any("INV-LSLV0075-S100" in q for q, _, _ in docs.calls)
+
+
+def test_calibrated_search_does_not_get_product_codes_added(analysis):
+    docs = ScoredDocs(lambda q: 0.8)
+    respond(say("인버터 과전류 트립"), [], docs, live(), TABLES)
+
+    assert not any("INV-" in q for q, _, _ in docs.calls)  # 기준값을 잰 검색어 그대로
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "인버터가 E.OC 에러로 멈췄어요.",
+        "S100 보증기간이 얼마나 되나요?",
+        "E.OC 떴어요",
+        "무정전전원장치 배터리 교체 주기",
+    ],
+)
+def test_our_product_is_answered_even_with_a_low_score(analysis, message):
+    # 짧은 채팅 말은 맞는 문서를 찾아도 점수가 기준값 아래다 (pgvector 0.60~0.69)
+    analysis["extraction"] = Extraction(language="ko")
+    out = respond(say(message), [], FakeDocs([tg(score=0.62)]), live(), TABLES)
+
+    assert out.handoff is False
+
+
+def test_answer_prompt_has_product_data_without_prices(analysis):
+    writer = ScriptedWriter()
+    respond(say("S100 보증기간이랑 정격 용량"), [], FakeDocs([tg()]), live(writer), TABLES)
+
+    prompt = writer.prompts[0]
+    assert "[Product data · INV-LSLV0075-S100]" in prompt
+    assert "- Warranty: 24 months" in prompt
+    assert "Standard lead time" in prompt and "not a confirmed delivery date" in prompt
+    assert "price" not in prompt.lower().split("reference documents:")[1]  # 견적은 결정 사항
+
+
+def test_answer_prompt_has_the_policy_for_the_inquiry_type(analysis):
+    analysis["classification"] = Classification(category=Category.RETURN, confidence=0.9)
+    writer = ScriptedWriter()
+    respond(say("MCCB 100AF 반품 정책 INFO"), [], FakeDocs([tg()]), live(writer), TABLES)
+
+    assert "[POL-RETURN · 1]" in writer.prompts[0]
+
+
+# 결정 유형: 정보만 묻는 말은 답하고, 결정이 필요하면 답할 수 있는 부분 + 문의서
+
+
+def test_decision_type_asking_only_for_information_is_answered(analysis):
+    # 실제 사례: "S100 보증기간이 얼마나 되나요?" → 보증 승인으로 보고 바로 넘어갔다
+    analysis["classification"] = Classification(category=Category.WARRANTY, confidence=0.9)
+    writer = ScriptedWriter("보증 기간은 24개월입니다.")
+    out = respond(say("S100 보증기간 INFO"), [], FakeDocs([tg()]), live(writer), TABLES)
+
+    assert out.handoff is False and out.form is None
+    assert out.answer == "보증 기간은 24개월입니다."
+
+
+def test_decision_with_other_questions_answers_them_and_opens_the_form(analysis):
+    analysis["classification"] = Classification(category=Category.WARRANTY, confidence=0.9)
+    writer = ScriptedWriter("정격 전류는 16 A입니다. 보증 수리는 문의서로 담당 팀이 처리합니다.")
+    out = respond(
+        say("S100 보증 수리 되나요? 정격 전류는요?"), [], FakeDocs([tg()]), live(writer), TABLES
+    )
+
+    assert out.handoff is True and out.form is not None and out.form.category == "WARRANTY"
+    assert out.answer.startswith("정격 전류는 16 A")  # 답할 수 있는 부분을 버리지 않는다
+    prompt = writer.prompts[0]
+    assert "Warranty approval has to be decided" in prompt  # 결정 부분은 문의서로
+    assert "E.OC: overcurrent" in prompt  # 나머지는 문서 근거로 답한다
+    assert "Answer only the OTHER questions" in prompt
+
+
+def test_partial_answer_failure_falls_back_to_the_handoff_notice(analysis):
+    analysis["classification"] = Classification(category=Category.QUOTE, confidence=0.9)
+    writer = ScriptedWriter(RuntimeError("down"), HANDOFF_KO)
+    out = respond(say("PCS 20대 견적"), [], FakeDocs([tg()]), live(writer), TABLES)
+
+    assert out.handoff is True and out.answer == HANDOFF_KO
+
+
+def test_decision_judgement_is_only_asked_for_decision_categories(analysis):
+    judge = IntentJudge()
+    respond(say(), [], FakeDocs([tg()]), live(judge=judge), TABLES)  # DEFECT
+    assert not [c for c in judge.calls if isinstance(c, tuple)]
+
+    analysis["classification"] = Classification(category=Category.RETURN, confidence=0.9)
+    respond(say("반품 정책 INFO"), [], FakeDocs([tg()]), live(judge=judge), TABLES)
+    assert ("decision", "반품 정책 INFO") in judge.calls
+
+
+def test_decision_judgement_failure_hands_off_as_before(analysis):
+    class Broken(IntentJudge):
+        def judge(self, prompt, options):
+            if "Customer's message:" in prompt:
+                raise RuntimeError("jev down")
+            return super().judge(prompt, options)
+
+    analysis["classification"] = Classification(category=Category.WARRANTY, confidence=0.9)
+    out = respond(say("보증 INFO"), [], FakeDocs([tg()]), live(judge=Broken()), TABLES)
 
     assert out.handoff is True
 

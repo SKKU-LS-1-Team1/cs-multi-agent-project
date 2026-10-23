@@ -101,6 +101,32 @@ def test_write_uses_writer():
     assert router.write("draft", "문의 요약") == "답변: 문의 요약"
 
 
+def test_chat_tasks_use_the_low_thinking_writer(monkeypatch):
+    # 기본 thinking 은 짧은 챗봇 답에도 수천 토큰을 생각하다 504 로 끝났다 (router.py 메모)
+    from cs_agent.llm import router as router_module
+
+    made = []
+
+    class Gemini(StubWriter):
+        def __init__(self, api_key, model, *, json_mode=False, thinking_level=None):
+            super().__init__()
+            self.json_mode, self.thinking_level = json_mode, thinking_level
+            made.append(self)
+
+    monkeypatch.setattr(router_module, "GeminiClient", Gemini)
+    router = LLMRouter(settings(llm_provider="live", gemini_api_key="k"), kv=MemoryKV())
+    for task in ("chat_answer", "chat_partial", "chat_handoff", "draft"):
+        router.write(task, "p")
+
+    chat = next(m for m in made if m.thinking_level == "low")
+    draft = next(m for m in made if not m.json_mode and m.thinking_level is None)
+    assert (chat.calls, draft.calls) == (3, 1)  # 답변 초안은 기본 thinking 그대로
+
+    router.invalidate_write("chat_handoff", "p")  # 같은 키를 지운다 → 다시 부른다
+    router.write("chat_handoff", "p")
+    assert chat.calls == 4
+
+
 # --- clients ------------------------------------------------------------------------------
 
 

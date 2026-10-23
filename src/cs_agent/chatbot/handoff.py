@@ -83,12 +83,15 @@ def should_handoff(
     best_score: float,
     customer_unresolved: bool = False,
     remote_attempts: int = 0,
+    decision_requested: bool = True,
 ) -> HandoffDecision:
     """위 전환 조건을 순서대로 본다.
 
     best_score 는 **제품 필터 없이** 검색한 docs 1등 점수(근거가 없으면 0.0). 기준값을 그렇게
     쟀기 때문에, where={"product_code": …} 로 거른 결과의 점수를 넘기면 안 된다 (CSA-32).
     remote_attempts 는 챗봇이 안내한 원격 조치가 실패(재발)한 횟수.
+    decision_requested=False 면 결정 유형이어도 정보만 묻는 말이다 (보증 기간·표준 납기 …) → 결정
+    조건으로 넘기지 않는다. 챗봇이 Jev 로 가른다 (chatbot/agent.py).
     """
     if customer_unresolved:
         return _handoff("customer_unresolved")
@@ -99,7 +102,7 @@ def should_handoff(
         and remote_attempts >= MAX_REMOTE_RETRIES
     ):
         return _handoff("remote_retries")
-    if category in DECISION_CATEGORIES:
+    if category in DECISION_CATEGORIES and decision_requested:
         return _handoff(category)
     if MIN_RETRIEVAL_SCORE is not None and best_score < MIN_RETRIEVAL_SCORE:
         return _handoff("no_evidence")

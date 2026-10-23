@@ -152,10 +152,19 @@ class JevClient:
 
 
 class GeminiClient:
-    def __init__(self, api_key: str, model: str, *, json_mode: bool = False) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        *,
+        json_mode: bool = False,
+        thinking_level: str | None = None,
+    ) -> None:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         self.name = model
+        self.thinking_level = thinking_level
+        extra = {"thinking_level": thinking_level} if thinking_level else {}
         self._chat = ChatGoogleGenerativeAI(
             model=model,
             google_api_key=api_key,
@@ -163,6 +172,7 @@ class GeminiClient:
             timeout=GEMINI_JUDGE_TIMEOUT_S if json_mode else GEMINI_WRITE_TIMEOUT_S,
             max_retries=GEMINI_MAX_RETRIES,
             response_mime_type="application/json" if json_mode else None,
+            **extra,
         )
 
     def _invoke(self, prompt: str) -> Completion:

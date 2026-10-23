@@ -71,3 +71,11 @@ def test_summarize_finds_gap_between_groups() -> None:
     assert summary.separates(MIN_RETRIEVAL_SCORE)
     assert not summary.separates(0.64)
     assert summary.hit_rate == 0.75
+
+
+def test_decision_category_asking_only_for_information_is_not_handed_off():
+    from cs_agent.chatbot.handoff import should_handoff as decide
+
+    assert decide(Category.WARRANTY, 0.9, decision_requested=False).handoff is False
+    assert decide(Category.WARRANTY, 0.5, decision_requested=False).code == "no_evidence"
+    assert decide(Category.WARRANTY, 0.9).code == "decision_warranty"  # 기본은 전처럼
