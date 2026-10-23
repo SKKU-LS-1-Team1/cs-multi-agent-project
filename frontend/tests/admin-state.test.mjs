@@ -494,6 +494,34 @@ test('prototype event hooks cannot change server waiting/closed states', () => {
   const logic = fullLogicFixture([t]); logic.synchronizeCustomerEvents();
   assert.equal(t.customerRequestStatus, 'waiting');
 });
+
+test('held inquiry can generate an information request with missing field IDs', async () => {
+  const { mod, state, calls } = apiFixture();
+  const t = mod.apply(undefined, analysisRow({ status: 'ON_HOLD' }));
+  state.reply = analysisRow({ info_request: 'Please provide serial number.' });
+  assert.equal(await mod.infoRequestViaApi(t), true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args[1].action, 'info_request');
+  assert.deepEqual(Array.from(calls[0].args[1].info_items), ['serial_no']);
+  assert.equal(t.purpose, 'request');
+  assert.equal(t.draft, 'Please provide serial number.');
+});
+
+test('information request generation keeps manual and non-review states blocked', async () => {
+  for (const overrides of [
+    { status: 'ON_HOLD', manual_reply: true },
+    { status: 'READY_FOR_REVIEW', manual_reply: true },
+    ...['HUMAN_QUEUE', 'WAITING_CUSTOMER', 'APPROVED', 'RESOLVED', 'ANALYSIS_PENDING', 'ESCALATED', 'REJECTED']
+      .map(status => ({ status })),
+  ]) {
+    const { mod, calls } = apiFixture();
+    const t = mod.apply(undefined, analysisRow(overrides));
+    const before = t.draft;
+    assert.equal(await mod.infoRequestViaApi(t), false);
+    assert.equal(calls.length, 0);
+    assert.equal(t.draft, before);
+  }
+});
 test('actual retrieved cases appear in existing context without invented cause or matching score', () => {
   const { mod } = apiFixture(); const logic = fullLogicFixture();
   const t = mod.apply(undefined, analysisRow({ evidence: [{ source: 'cases', doc_id: 'CASE-1', section: null,
