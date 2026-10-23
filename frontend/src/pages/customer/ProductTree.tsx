@@ -39,7 +39,6 @@ export default function ProductTree({ id, selected, onSelect, onFamily }: Props)
                     onClick={() => onSelect(p.code)}
                   >
                     <span>{p.name}</span>
-                    <small>{p.code}</small>
                   </button>
                 ))}
               </details>

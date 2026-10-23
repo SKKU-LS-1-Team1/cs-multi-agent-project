@@ -78,7 +78,6 @@ export default function ProductPicker({ selected, onSelect, focus }: Props) {
           {chosenItem.products.map((p) => (
             <button key={p.code} type="button" className={`ps-opt${p.code === selected ? " is-sel" : ""}`} onClick={() => onSelect(p.code)}>
               <b>{p.name}</b>
-              <small>{p.code}</small>
             </button>
           ))}
         </div>
