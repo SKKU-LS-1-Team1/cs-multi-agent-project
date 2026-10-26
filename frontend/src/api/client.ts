@@ -1,3 +1,8 @@
+export type CustomerQc = {
+  decision: "PASS" | "BLOCK" | "REVIEW" | "ERROR";
+  issues: { paragraph_id: string; category: "ABUSE" | "CREDENTIAL" | "CONFIDENTIAL"; source_id: string | null; reason: string; suggestion: string }[];
+  message: string; text_hash: string;
+};
 // 백엔드 API 타입과 호출 함수. 스키마는 src/cs_agent/schemas.py 와 맞춘다.
 
 export type Evidence = { source: string; doc_id: string; section: string | null; text: string; score: number; metadata?: Record<string, string> };
@@ -51,6 +56,7 @@ export type ProgressNotice = {
   approved_text: string | null; final_text: string | null; reviewer: string | null;
   created_at: string; approved_at: string | null; error: string | null;
   source_facts: ProgressFact[];
+  customer_qc?: CustomerQc | null;
 };
 export type Ticket = {
   ticket_id: string;
@@ -73,6 +79,7 @@ export type Ticket = {
   approval_text?: string | null;
   approval_cited?: string[] | null;
   approval_error?: string | null;
+  customer_qc?: CustomerQc | null;
   resolution?: Resolution | null;
   final_reply: string | null; // 고객에게 보낸 글 (고객 언어)
   escalation_request: EscalationRequest | null; // 전문부서 이관 요청서 초안 (CSA-55)

@@ -49,7 +49,7 @@ from langgraph.types import interrupt
 
 import cs_agent.agents.translation as translation
 from cs_agent import domain, schemas
-from cs_agent.agents import analysis, drafting, escalation, retrieval, verification
+from cs_agent.agents import analysis, customer_qc, drafting, escalation, retrieval, verification
 from cs_agent.agents import info_request as info_request_agent
 from cs_agent.agents.analysis import AnalysisError
 from cs_agent.agents.drafting import DraftingError, TranslationError
@@ -78,6 +78,7 @@ class GraphDeps:
     finalize_evidence: Callable = retrieval.finalize_evidence
     write_draft: Callable = drafting.write_draft
     verify: Callable = verification.verify
+    check_customer_qc: Callable = customer_qc.check_final
     write_info_request: Callable = info_request_agent.write_info_request
     localize_info_request: Callable = info_request_agent.localize_request  # 보낼 때 고객 언어로
     translate_reply: Callable = drafting.translate_reply
@@ -169,6 +170,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "approved_reply": None,
             "approval_text": None,
             "approval_error": None,
+            "customer_qc": None,
             "approval_checks_key": None,
             "approval_review": None,
             "approval_cited": None,
@@ -288,6 +290,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "approved_reply": None,
             "approval_text": None,
             "approval_error": None,
+            "customer_qc": None,
             "approval_checks_key": None,
             "approval_review": None,
             "approval_cited": None,
@@ -462,7 +465,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 "status": state.get("status"),
             }
         )
-        return {"review": ReviewIn.model_validate(value)}
+        return {"review": ReviewIn.model_validate(value), "customer_qc": None}
 
     def after_review(state: TicketState) -> str:
         review = state["review"]
@@ -491,6 +494,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "approved_reply": None,
             "approval_text": None,
             "approval_error": None,
+            "customer_qc": None,
             "approval_checks_key": None,
             "approval_review": None,
             "approval_cited": None,
@@ -531,6 +535,29 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             ),
         )
 
+    def final_qc(state: TicketState, final_reply: str, text: str) -> dict:
+        try:
+            result = deps.check_customer_qc(
+                final_reply,
+                _language(state),
+                deps.llm,
+                restricted_context=customer_qc.restricted_sources(state.get("evidence", [])),
+            )
+        except Exception:
+            result = customer_qc.error_result(final_reply)
+        update = {"customer_qc": result.model_dump(mode="json")}
+        if result.decision != "PASS":
+            update.update(
+                status=TicketStatus.ON_HOLD,
+                final_reply=None,
+                approved_reply=text,
+                approval_text=text,
+                translation_error=None,
+                approval_error=result.message
+                or "발송 전 QC에서 수정 또는 공개 범위 확인이 필요합니다.",
+            )
+        return update
+
     def finish(state: TicketState) -> dict:
         review = state["review"]
         if review.action == ReviewAction.REJECT:
@@ -541,6 +568,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 "approved_reply": None,
                 "approval_text": None,
                 "approval_error": None,
+                "customer_qc": None,
                 "approval_checks_key": None,
                 "approval_review": None,
                 "approval_cited": None,
@@ -561,7 +589,9 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             # 번역 실패로 보류된 뒤 다시 승인하면, 직전에 상담원이 수정 승인한 글을 그대로 쓴다
             if review.action == ReviewAction.EDIT_APPROVE and review.edited_text:
                 text = review.edited_text
-            elif state.get("translation_error") and state.get("approved_reply"):
+            elif (state.get("translation_error") or state.get("approval_error")) and state.get(
+                "approved_reply"
+            ):
                 text = state["approved_reply"]
             else:
                 text = state.get("info_request")
@@ -580,7 +610,12 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                     "final_reply": None,
                     "translation_error": str(error),
                 }
+            qc = final_qc(state, final_reply, text)
+            if qc.get("approval_error"):
+                return qc
             return {
+                **qc,
+                "approval_error": None,
                 "status": TicketStatus.WAITING_CUSTOMER,
                 "processing_history": sent_history(state, text, final_reply, "request"),
                 "final_reply": final_reply,
@@ -679,6 +714,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "approval_cited": candidate.cited,
             "approval_checks_key": key,
             "approval_error": None,
+            "customer_qc": None,
             "approval_review": approval_review,
         }
         if not checks or any(not c.passed for c in checks):
@@ -711,8 +747,12 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 "final_reply": None,
                 "translation_error": str(error),
             }
+        qc = final_qc(state, final_reply, text)
+        if qc.get("approval_error"):
+            return {**validation, **qc}
         return {
             **validation,
+            **qc,
             "status": TicketStatus.APPROVED,
             "processing_history": sent_history(state, text, final_reply, "answer"),
             "approved_reply": text,

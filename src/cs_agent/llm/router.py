@@ -94,9 +94,11 @@ class LLMRouter:
             self.jev, self.gemini_judge = jev, gemini_judge
             self.writer: Writer = writer or FakeWriter()
             self.chat_writer: Writer = self.writer
+            self.qc_writer: Writer = self.writer
         elif not self.enabled:
             self.jev, self.gemini_judge, self.writer = FakeJudge(), None, FakeWriter()
             self.chat_writer = self.writer
+            self.qc_writer = self.writer
         else:
             if not settings.gemini_api_key:
                 raise ValueError("LLM_PROVIDER=live 인데 GEMINI_API_KEY 가 비어 있다")
@@ -111,6 +113,15 @@ class LLMRouter:
             self.writer = GeminiClient(settings.gemini_api_key, settings.gemini_model_writer)
             self.chat_writer = GeminiClient(
                 settings.gemini_api_key, settings.gemini_model_writer, thinking_level="low"
+            )
+
+            self.qc_writer = GeminiClient(
+                settings.gemini_api_key,
+                settings.gemini_model_fast,
+                json_mode=True,
+                thinking_level="low",
+                timeout=20,
+                max_retries=0,
             )
 
     # --- 캐시·호출 제한 (CSA-45) ------------------------------------------------------------
@@ -230,6 +241,17 @@ class LLMRouter:
             _LOGGER.warning("검증 실패 응답의 캐시 만료 실패: %s", type(e).__name__)
 
     def write(self, task: str, prompt: str) -> str:
+        if task == "customer_send_qc":
+            # QC may receive secrets. Neither cache nor tracing stores raw inputs/outputs.
+            self._wait_turn("gemini")
+            with trace(task, self.qc_writer.name, "[QC input omitted]") as span:
+                try:
+                    out = self.qc_writer.write(prompt)
+                except Exception:
+                    raise RuntimeError("Customer QC model call failed") from None
+                span.output = "[QC output omitted]"
+                span.usage = out.usage
+            return out.text
         key = self._write_key(task, prompt)
         if (hit := self._cache_get(key)) is not None:
             with trace(task, hit["model"], prompt, cache_hit=True) as span:

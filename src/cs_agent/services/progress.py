@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
+from cs_agent.agents import customer_qc
 from cs_agent.agents import progress as progress_agent
 from cs_agent.domain import TicketStatus
 from cs_agent.llm.router import LLMRouter
@@ -24,11 +25,13 @@ class ProgressService:
         *,
         generate: Callable | None = None,
         prepare: Callable | None = None,
+        check_customer_qc: Callable = customer_qc.check_final,
     ) -> None:
         self.tickets = tickets
         self.llm = llm
         self.generate = generate or progress_agent.generate_notice
         self.prepare = prepare or progress_agent.prepare_notice
+        self.check_customer_qc = check_customer_qc
 
     @contextmanager
     def _locks(self, ticket_ids: list[str]) -> Iterator[None]:
@@ -182,9 +185,20 @@ class ProgressService:
             if version != notice.source_version:
                 raise InvalidAction("문의 정보가 변경되었습니다. 새 진행 안내를 생성해 주세요")
             if notice.status == "prepared":
-                if notice.approved_text == body.edited_text and notice.reviewer == body.reviewer:
+                if notice.approved_text != body.edited_text or notice.reviewer != body.reviewer:
+                    raise InvalidAction(
+                        "이미 승인된 안내입니다. 변경하려면 새 안내를 생성해 주세요"
+                    )
+                previous_qc = notice.customer_qc or {}
+                if (
+                    previous_qc.get("decision") == "PASS"
+                    and previous_qc.get("text_hash")
+                    == hashlib.sha256((notice.final_text or "").encode()).hexdigest()
+                ):
                     return notice
-                raise InvalidAction("이미 승인된 안내입니다. 변경하려면 새 안내를 생성해 주세요")
+                # Old prepared notices have no QC. They must be checked before reuse.
+                notice.status = "draft"
+                notice.approved_at = None
             if not notice.draft_text:
                 raise InvalidAction("영어 진행 안내 초안을 생성한 뒤 승인해 주세요")
             # Preserve the exact staff candidate if validation or translation fails.
@@ -194,6 +208,26 @@ class ProgressService:
                 notice.final_text = self.prepare(
                     body.edited_text, notice.target_language, facts, self.llm
                 )
+                try:
+                    result = self.check_customer_qc(
+                        notice.final_text, notice.target_language, self.llm
+                    )
+                except Exception:
+                    result = customer_qc.error_result(notice.final_text)
+                notice.customer_qc = result.model_dump(mode="json")
+                if result.decision != "PASS":
+                    notice.final_text = None
+                    notice.error = (
+                        result.message or "발송 문구 QC에서 수정 또는 공개 범위 확인이 필요합니다."
+                    )
+                    if result.issues:
+                        notice.error += " " + " / ".join(
+                            f"{i.get('paragraph_id', '')}: {i.get('reason', '')} "
+                            f"{i.get('suggestion', '')}"
+                            for i in result.issues
+                        )
+                    self._save(anchor, notice)
+                    return notice
                 notice.status = "prepared"
                 notice.approved_at = datetime.now(UTC)
                 notice.error = None

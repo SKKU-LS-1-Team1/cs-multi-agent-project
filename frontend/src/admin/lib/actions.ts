@@ -183,9 +183,13 @@ export function canSend(t: Ticket) {
   if (t.purpose !== "request" && (waitingReviews(t).length || t.legacyReviewPending)) return false; // 전문부서 회신을 기다리는 동안은 고객 답변을 발송하지 않는다
   return t.reviewed && (!isNew || t.ignoredContextKey === contextKey(answerContext(t)));
 }
-export async function confirmSend(t: Ticket, options: { acknowledgedFailures?: boolean } = {}) {
-  if (isApiTicket(t)) { if (await sendViaApi(t, options)) closeModal(); return; } // 백엔드로 승인·발송 (CSA-61)
-  if (!canSend(t)) return;
+export async function confirmSend(t: Ticket, options: { acknowledgedFailures?: boolean; keepModalOpen?: boolean } = {}) {
+  if (isApiTicket(t)) {
+    const sent = await sendViaApi(t, options);
+    if (sent && !options.keepModalOpen) closeModal();
+    return sent;
+  } // 백엔드로 승인·발송 (CSA-61)
+  if (!canSend(t)) return false;
   // 화면에서 확인한 변환본 그대로 기록한다.
   const sentText = t.replyPreview.final_text;
   record(t, "sent", sentText, {
@@ -200,7 +204,10 @@ export async function confirmSend(t: Ticket, options: { acknowledgedFailures?: b
   delete t.composerDrafts?.[composerKey(t.purpose || "answer", composerLanguage(t))];
   t.draft = ""; t.draftOriginal = ""; t.draftRequests = []; t.composerOpen = false; t.reviewed = false;
   if (t.purpose !== "request") t.sent = true;
-  closeModal(); commit(); toast("로컬 발송 이력에 기록했습니다.");
+  if (!options.keepModalOpen) closeModal();
+  commit();
+  if (!options.keepModalOpen) toast("발송 완료");
+  return true;
 }
 
 /* ───────── 폼 제출 ───────── */

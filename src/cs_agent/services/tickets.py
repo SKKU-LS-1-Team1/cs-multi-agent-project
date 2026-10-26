@@ -781,6 +781,7 @@ class TicketService:
             if v.get("approval_text") is not None
             else None,
             approval_error=v.get("approval_error"),
+            customer_qc=v.get("customer_qc"),
             approved_reply=drafting.customer_text(v["approved_reply"], references)
             if v.get("approved_reply") is not None
             else None,

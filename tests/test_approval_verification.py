@@ -1,6 +1,7 @@
 """Final staff text is checked before sending; an old checkbox cannot approve a new failure."""
 
 from langgraph.types import Command
+from stubs import pass_customer_qc
 
 from cs_agent.agents import verification
 from cs_agent.agents.drafting import TranslationError
@@ -14,7 +15,12 @@ ORIGINAL = "For MCCB-ABS-103c, please refer to the installation guide."
 
 
 def setup_graph(
-    check=None, language="en", translate=None, category=Category.MANUAL, secondary=None
+    check=None,
+    language="en",
+    translate=None,
+    category=Category.MANUAL,
+    secondary=None,
+    qc=pass_customer_qc,
 ):
     checks, translations = [], []
 
@@ -30,6 +36,7 @@ def setup_graph(
         GraphDeps(
             llm=LLMRouter(Settings(_env_file=None)),
             max_retries=0,
+            check_customer_qc=qc,
             classify=lambda *args: Classification(category=category, secondary_category=secondary),
             extract=lambda *args, **kwargs: Extraction(
                 product_code="MCCB-ABS-103c",

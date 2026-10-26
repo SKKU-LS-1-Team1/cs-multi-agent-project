@@ -61,7 +61,11 @@ def review_text(state: dict, review: ReviewIn) -> str:
         text = review.edited_text or ""
     elif state.get("pending") == "info_request":
         text = (
-            (state.get("approved_reply") if state.get("translation_error") else None)
+            (
+                state.get("approved_reply")
+                if state.get("translation_error") or state.get("approval_error")
+                else None
+            )
             or state.get("info_request")
             or ""
         )

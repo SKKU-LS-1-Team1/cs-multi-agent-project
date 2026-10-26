@@ -66,6 +66,7 @@ class TicketState(TypedDict, total=False):
     approval_cited: list[str] | None  # 최종 승인 후보 본문의 실제 인용
     reply_preview: dict | None  # 명시적으로 변환해 확인한 발송용 문구
     approval_text: str | None  # 최종 점검 실패 시 담당자 수정본 보존
+    customer_qc: dict | None  # 최종 고객 문구 QC; 체크포인트에 저장
     approval_error: str | None
     approval_checks_key: str | None  # 최종 점검한 본문·근거의 지문
     final_reply: str | None
