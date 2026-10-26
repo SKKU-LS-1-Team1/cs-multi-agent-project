@@ -10,7 +10,6 @@ from cs_agent.agents.retrieval import (
     find_error_codes,
     first_pass,
     k3_hit,
-    keyword_cases,
     keyword_docs,
     measure_k3,
 )
@@ -69,15 +68,17 @@ def test_keyword_retriever_scores_and_filters() -> None:
     assert docs.search("완전히 다른 언어", k=5) == []
 
 
-def test_keyword_cases_exclude_non_train_tickets() -> None:
-    cases = keyword_cases()
-    case_ids = {e.doc_id for e, _ in cases.items}
-    tickets = {e.metadata["ticket_id"] for e, _ in cases.items}
+def test_local_case_patterns_learn_only_train_tickets() -> None:
+    from cs_agent.agents.case_patterns import train_cases
 
+    cases = train_cases()
+    path = get_settings().raw_data_dir / "resolution_cases.csv"
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        ticket_of = {r["case_id"]: r["ticket_id"] for r in csv.DictReader(f)}
     path = get_settings().raw_data_dir / "tickets.csv"
     with path.open(encoding="utf-8-sig", newline="") as f:
         split = {r["ticket_id"]: r["data_split"] for r in csv.DictReader(f)}
-    assert case_ids and {split[t] for t in tickets} == {"train"}
+    assert cases and {split[ticket_of[c["case_id"]]] for c in cases} == {"train"}
 
 
 def test_find_error_codes_matches_whole_code() -> None:

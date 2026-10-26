@@ -275,11 +275,14 @@ class ResolutionCase(_Timestamps, Base):
     source_fix_needed: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)  # 재문의로 다시 열리면 False
     data_split: Mapped[str] = mapped_column(String(8), default="live")  # train | live
+    pattern_id: Mapped[str | None] = mapped_column(String(64))  # case_patterns (CSA-28)
     text_hash: Mapped[str | None] = mapped_column(String(64))  # 글이 그대로면 임베딩 생략
+    # 검색에는 쓰지 않는다 (사례는 패턴으로 찾는다, agents/case_patterns.py). 예전 적재분 호환용
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 
     __table_args__ = (
         Index("ix_resolution_cases_category_product", "category", "product_code"),
+        Index("ix_resolution_cases_pattern", "pattern_id", "active"),
         Index(
             "ix_resolution_cases_embedding",
             "embedding",
@@ -287,6 +290,29 @@ class ResolutionCase(_Timestamps, Base):
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
     )
+
+
+class CasePattern(_Timestamps, Base):
+    """해결 사례 패턴 (CSA-28, agents/case_patterns.py).
+
+    패턴 하나 = 같은 고장(원인·조치). 고장 카탈로그 행(source=catalog, pattern_id=fault_id) 또는
+    카탈로그에 없는 원인으로 해결된 운영 사례(source=live, LIVE-…). 몇 번 해결됐는지·대표 사례는
+    resolution_cases.pattern_id 로 센다 (active 사례만 — 재문의로 열리면 빠진다).
+    임베딩은 패턴 설명(text: 증상·원인·진단·조치)에만 한다 — 지난 문의 글은 임베딩해서 찾지 않는다.
+    """
+
+    __tablename__ = "case_patterns"
+
+    pattern_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    family: Mapped[str] = mapped_column(String(32))
+    error_code: Mapped[str | None] = mapped_column(String(32))
+    applies_to: Mapped[list] = mapped_column(JSONB, default=list)  # 제품 코드 (비면 제품군 전체)
+    text: Mapped[str] = mapped_column(Text)  # 패턴 설명 (임베딩하는 글)
+    source: Mapped[str] = mapped_column(String(8), default="catalog")  # catalog | live
+    text_hash: Mapped[str | None] = mapped_column(String(64))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+
+    __table_args__ = (Index("ix_case_patterns_family", "family"),)
 
 
 class DocChunk(_Timestamps, Base):

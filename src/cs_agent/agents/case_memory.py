@@ -26,23 +26,25 @@
 #   앞 절반 vs 뒤 절반의 approve 비율로 피드백 루프 효과를 보인다 (evaluation/run_eval.py, CSA-50).
 #
 # 피드백 루프 (해결 → 다음 문의의 근거)
-#   resolve() → build_case() → records.save_case()(resolution_cases + embedding)
-#   → 다음 문의의 retrieval.first_pass/finalize_evidence 가 cases 로 찾는다 → drafting 이 문장
-#   본보기로 쓴다 (값은 docs·기준표). 모델을 다시 학습시키는 것이 아니라 검색 대상이 늘어난다.
-#   - 저장 (할 일 4): services/records.py save_case. 임베딩이 실패했거나 LLM 이 꺼져 있을 때 저장한
-#     사례는 벡터가 없어 pgvector 검색에 안 잡힌다 → records.embed_missing_cases() 가 채운다
+#   resolve() → build_case()(pattern_id) → records.save_case()(resolution_cases + 패턴)
+#   → 다음 문의의 retrieval.first_pass/finalize_evidence 가 패턴 DB 로 찾는다 → drafting 이 문장
+#   본보기로 쓴다 (값은 docs·기준표). 모델을 다시 학습시키는 것이 아니라 패턴의 해결 건수·대표
+#   사례가 늘고, 카탈로그에 없던 원인이면 새 패턴이 생긴다 (agents/case_patterns.py, CSA-28).
+#   - 저장 (할 일 4): services/records.py save_case. 사례 글은 임베딩하지 않는다 (패턴 설명만).
+#     새 패턴 설명의 임베딩이 실패했으면 records.embed_missing_cases() 가 채운다
 #     (main.py 가 case_embed_interval_s 마다, live 일 때).
-#   - 키워드 검색(DB·키 없는 로컬, agents/retrieval.keyword_cases)은 train 사례 CSV 만 읽는다 →
-#     LiveCasesRetriever 가 운영 중 해결 사례(records.live_cases)를 같이 찾는다 (main.py 가 감싼다).
+#   - DB·키 없는 로컬은 case_patterns.MemoryPatternRetriever 가 train 사례 CSV 와 운영 중 해결
+#     사례(records.live_cases)를 패턴으로 묶어 찾는다 (main.py 가 with_live_cases 로 붙인다).
 #   - 재문의 제외 (할 일 5): records.deactivate_case → active=false (검색은 active 만).
 #   - 할 일 6 은 사례에 표시(source_fix_needed)만 한다 (원천을 고치라는 알림은 아직 없다).
 #   - 사례 답변은 고객에게 나간 final_reply(고객 언어 번역본, CSA-27·29)다 (tests/test_api.py 고정).
 #
 # 참고: 기획서 v10 7장·7.1
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
+from cs_agent.agents.case_patterns import assign_pattern
 from cs_agent.domain import FeedbackReason, ReviewAction
 from cs_agent.schemas import Evidence
 
@@ -161,6 +163,9 @@ def build_case(state: dict) -> dict:
                 ]
             )
         ),
+        # 학습: 확정 원인으로 패턴을 정한다 (카탈로그 원인과 같으면 fault_id, 아니면 LIVE-…)
+        # 원인 없는 예전 방식 해결(평가 시연)은 문의 요약으로 묶는다
+        "pattern_id": assign_pattern(extraction.get("product_family"), cause or summary),
         "resolved_by_dept": state.get("escalated_to") or rules.get("assigned_dept"),
         "review_action": review.get("action"),
         "edited": review.get("action") == ReviewAction.EDIT_APPROVE,
@@ -204,32 +209,11 @@ def case_evidence(case: Mapping[str, Any]) -> Evidence:
     )
 
 
-class LiveCasesRetriever:
-    """train 사례 키워드 검색 + 운영 중 해결 사례(records.live_cases). 검색할 때마다 새 사례를 본다.
-
-    같은 case_id 가 양쪽에 있으면 운영 사례를 쓴다. 점수는 한 색인(idf)에서 매겨 서로 비교된다.
-    """
-
-    def __init__(self, base: Any, records: Any) -> None:
-        self.base = base  # retrieval.KeywordRetriever
-        self.records = records
-
-    def search(
-        self, query: str, k: int = 5, where: dict[str, str] | None = None
-    ) -> Sequence[Evidence]:
-        from cs_agent.agents.retrieval import KeywordRetriever
-
-        live = [case_evidence(c) for c in self.records.live_cases()]
-        if not live:
-            return self.base.search(query, k, where)
-        live_ids = {e.doc_id for e in live}
-        items = [(e, " ".join(tokens)) for e, tokens in self.base.items if e.doc_id not in live_ids]
-        items += [(e, e.text) for e in live]
-        return KeywordRetriever(items).search(query, k, where)
-
-
 def with_live_cases(cases: Any, records: Any) -> Any:
-    """사례 검색기가 키워드 검색이면 운영 중 해결 사례도 찾게 감싼다. pgvector·None 은 그대로."""
-    from cs_agent.agents.retrieval import KeywordRetriever
+    """로컬 패턴 검색기(DB·임베딩 없음)에 운영 중 해결 사례를 붙인다. pgvector 패턴·None 은 그대로
+    (pgvector 패턴 검색은 resolution_cases.pattern_id 로 운영 사례를 바로 센다)."""
+    from cs_agent.agents.case_patterns import MemoryPatternRetriever
 
-    return LiveCasesRetriever(cases, records) if isinstance(cases, KeywordRetriever) else cases
+    if isinstance(cases, MemoryPatternRetriever):
+        cases.records = records
+    return cases

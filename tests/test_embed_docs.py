@@ -70,6 +70,7 @@ def conn():
                 "review_action",
                 "feedback",
                 "feedback_reason",
+                "pattern_id",
             )
         ),
         *(

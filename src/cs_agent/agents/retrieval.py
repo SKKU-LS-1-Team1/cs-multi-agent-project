@@ -4,8 +4,11 @@
 # ChromaDB 대신). 검색 대상 2개:
 # - `docs` = doc_chunks 테이블: 공식 문서·FAQ·정책을 절 단위로 (CSA-18에서 적재). 값·절차·정책의
 #     근거. 값이 충돌하면 이쪽.
-# - `cases` = resolution_cases 테이블(embedding 열): 해결 사례 (train 연결 + 운영 중 해결 건,
-#     active=true 인 것만). 비슷한 문의를 어떻게 풀었는지, 문장 본보기. 참고로만.
+# - `cases` = 해결 사례 패턴 DB (case_patterns + resolution_cases.pattern_id,
+#     agents/case_patterns.py):
+#     처리된 문의를 같은 고장(원인·조치) 패턴으로 묶어 배우고, 새 문의를 패턴 설명과 비교해 찾는다.
+#     지난 문의 글을 임베딩해서 찾지 않는다 (CSA-28 피드백 — 근거는 case_patterns.py 머리말).
+#     비슷한 문의를 어떻게 풀었는지, 문장 본보기. 참고로만.
 #
 # 할 일
 # 1. Retriever 규약: search(query, k, where) → list[Evidence]. where 는 메타데이터 필터
@@ -17,7 +20,7 @@
 # 3. default_retrievers(): DB 에 연결되고 doc_chunks 가 비어 있지 않으면 pgvector 2개, 아니면 로컬
 #    개발용 대체 구현(data/raw/docs 를 pipeline/chunking.py 로 읽어 키워드 검색)을 돌려준다.
 # 4. first_pass(): 유형이 정해지기 전에 원문으로 넓게 가져온다 (분류·추출과 병렬, N-01).
-#    docs top-8 + cases top-3 정도.
+#    docs top-8 + 패턴 top-8 (패턴은 근거 확정에서 제품군·적용 제품·에러코드로 거른 뒤 2개).
 # 5. finalize_evidence(): 추출된 제품으로 거르고, 유형별로 문서 종류 가중치(사양→DS, 설치→IG,
 #    불량→TG, 펌웨어→RN …)를 줘서 재정렬한다. docs 3개 + cases 2개 정도.
 # 6. 사양값·보증기간·에러코드처럼 정확히 맞아야 하는 값은 벡터 검색이 아니라 기준표 조회로 한다
@@ -40,7 +43,8 @@
 #   따로 더 찾고, finalize 는 절 제목이 그 코드인 TG 절을 맨 위로 올린다 (TG 절 제목이
 #   "3.1 E.OC — ..." 형식이라 정확히 맞출 수 있다). 진단형 유형(불량·설치·펌웨어)이거나 유형을
 #   모를 때만 올린다 — tickets 의 에러코드 문의 234건은 모두 DEFECT·TG 정답이다.
-# - 키워드 대체 구현의 cases 는 data/raw 의 사례 중 train 티켓에 연결된 것만 쓴다 (완료 기준 2).
+# - 키워드 대체 구현의 cases 는 data/raw 의 사례 중 train 티켓에 연결된 것만 패턴으로 묶는다
+#   (완료 기준 2, case_patterns.train_cases).
 # - K3 측정: uv run python -m cs_agent.agents.retrieval --split valid
 import argparse
 import csv
@@ -57,7 +61,7 @@ from cs_agent.domain import BUNDLE_OF, Bundle, Category
 from cs_agent.schemas import Evidence, Extraction
 
 DOCS_K = 8
-CASES_K = 3
+CASES_K = 8  # 패턴 후보 (근거 확정에서 거르므로 넉넉히)
 FINAL_CASES_K = 2
 ERROR_CODE_K = 3
 TYPE_BONUS = 0.3  # 유형에 맞는 문서 종류
@@ -183,31 +187,23 @@ def case_text(case: dict[str, str], final_reply: str) -> str:
     return "\n".join(f"{label}: {value.strip()}" for label, value in parts if value.strip())
 
 
-def keyword_cases(raw_dir: Path | None = None) -> KeywordRetriever:
-    """data/raw 의 해결 사례 중 train 티켓에 연결된 것만 (test·valid 사례는 검색 대상이 아니다)."""
-    raw_dir = raw_dir or get_settings().raw_data_dir
-    tickets = {t["ticket_id"]: t for t in _read_csv(raw_dir / "tickets.csv")}
-    items = []
-    for case in _read_csv(raw_dir / "resolution_cases.csv"):
-        ticket = tickets.get(case["ticket_id"])
-        if not ticket or ticket["data_split"] != "train":
-            continue
-        text = case_text(case, ticket.get("final_reply", ""))
-        evidence = Evidence(
-            source="cases",
-            doc_id=case["case_id"],
-            text=text,
-            metadata={
-                "category": case["category_code"],
-                "product_code": case["product_code"],
-                "family": case["product_family"],
-                "error_code": case["error_code"],
-                "ticket_id": case["ticket_id"],
-                "reference_doc_id": case["reference_doc_id"],
-            },
-        )
-        items.append((evidence, text))
-    return KeywordRetriever(items)
+def _db_patterns() -> Retriever:
+    """해결된 적 있는 패턴이 임베딩돼 있으면 pgvector 패턴 검색, 아니면 로컬 패턴 검색."""
+    import sqlalchemy as sa
+
+    from cs_agent.agents.case_patterns import PgPatternRetriever
+
+    try:
+        with _engine().connect() as conn:
+            ready = conn.execute(
+                sa.text(
+                    "SELECT EXISTS (SELECT 1 FROM case_patterns p JOIN resolution_cases c "
+                    "USING (pattern_id) WHERE p.embedding IS NOT NULL AND c.active)"
+                )
+            ).scalar()
+    except Exception:  # case_patterns 가 아직 없음 (마이그레이션 전)
+        ready = False
+    return PgPatternRetriever() if ready else _memory_patterns()
 
 
 # pgvector -----------------------------------------------------------------------------------
@@ -219,6 +215,8 @@ _TABLES = {
         "extra_where": "embedding IS NOT NULL",
         "source": "docs",
     },
+    # 바꾸기 전 사례 검색 (지난 문의 글 임베딩). 운영은 패턴 DB 를 쓰고, 이것은
+    # evaluation/case_retrieval.py 의 비교 기준으로만 남긴다.
     "resolution_cases": {
         "columns": "case_id, ticket_id, category, product_code, product_family, error_code, "
         "summary, cause, action, final_reply, cited",
@@ -324,10 +322,16 @@ def default_retrievers() -> tuple[Retriever, Retriever]:
                     sa.text("SELECT EXISTS (SELECT 1 FROM doc_chunks WHERE embedding IS NOT NULL)")
                 ).scalar()
             if has_docs:
-                return PgVectorRetriever("doc_chunks"), PgVectorRetriever("resolution_cases")
+                return PgVectorRetriever("doc_chunks"), _db_patterns()
     except Exception:  # DB 가 없거나 테이블이 아직 없음 → 로컬 대체 구현
         pass
-    return keyword_docs(), keyword_cases()
+    return keyword_docs(), _memory_patterns()
+
+
+def _memory_patterns() -> Retriever:
+    from cs_agent.agents.case_patterns import MemoryPatternRetriever, train_cases
+
+    return MemoryPatternRetriever(train_cases())
 
 
 # ④ 1차 검색 · ⑧ 근거 확정 ---------------------------------------------------------------------
@@ -381,6 +385,16 @@ def _matches_product(evidence: Evidence, extraction: Extraction) -> bool:
     return not (extraction.product_family and family and family != extraction.product_family)
 
 
+def _matches_pattern(evidence: Evidence, extraction: Extraction, codes: set[str]) -> bool:
+    """패턴 근거: 적용 제품이 정해져 있으면 그 안에, 문의 에러코드가 후보에 있으면 같은 코드만."""
+    applies = [p for p in evidence.metadata.get("applies_to", "").split(";") if p]
+    if extraction.product_code and applies and extraction.product_code not in applies:
+        return False
+    code = (extraction.error_code or "").upper()
+    own = evidence.metadata.get("error_code", "").upper()
+    return not (code in codes and own and own != code)
+
+
 def _is_preferred(evidence: Evidence, category: Category | None) -> bool:
     for preferred in PREFERRED_DOCS.get(category, ()) if category else ():
         if "-" in preferred and evidence.doc_id == preferred:
@@ -419,6 +433,8 @@ def finalize_evidence(
             docs[key] = evidence.model_copy(update={"score": round(score, 4)})
 
     cases = [e for e in candidates if e.source == "cases" and _matches_product(e, extraction)]
+    codes = {e.metadata.get("error_code", "").upper() for e in cases} - {""}
+    cases = [e for e in cases if _matches_pattern(e, extraction, codes)]
     if category:  # 같은 유형 사례를 먼저
         cases.sort(key=lambda e: (e.metadata.get("category") == category, e.score), reverse=True)
     ranked = sorted(docs.values(), key=lambda e: e.score, reverse=True)

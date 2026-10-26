@@ -25,6 +25,10 @@
 #    doc_id·section·doc_type·product_code·family 열(검색 필터용).
 # 3. cases: data/processed/cases_seed.parquet (CSA-17 결과, train 연결 568건)을 resolution_cases 에
 #    upsert. 임베딩할 글 = 문의 요약 + 원인 + 조치 + 최종 답변. data_split = "train".
+#    사례마다 pattern_id(= fault_id, 해결 사례 패턴 DB) 를 붙인다 (CSA-28).
+# 3-1. patterns: 고장 카탈로그 97건을 case_patterns 에 upsert (패턴 설명 = 증상·원인·진단·조치를
+#    임베딩). 사례 검색은 이 패턴으로 한다 — 사례 글 임베딩은 검색에 쓰지 않는다
+#    (agents/case_patterns.py 머리말의 근거). --target all 은 docs·cases·patterns 모두.
 # 4. 문서가 개정되면 다시 돌려도 되도록 upsert 로 (중복 없음). 글이 안 바뀐 행은 임베딩을 다시
 #    부르지 않는다 (text 해시 비교) — 비용·시간 절약.
 #
@@ -56,6 +60,7 @@ from cs_agent.pipeline.chunking import Chunk, iter_doc_chunks
 
 DOC_TABLE = "doc_chunks"
 CASE_TABLE = "resolution_cases"
+PATTERN_TABLE = "case_patterns"
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 MAX_RETRIES = 5
 REQUEST_TIMEOUT_MS = 45_000
@@ -221,6 +226,7 @@ def case_rows(cases: Iterable[Row], final_replies: dict[str, str]) -> list[Row]:
             "source_fix_needed": False,
             "data_split": "train",
             "active": True,
+            "pattern_id": _text(case.get("fault_id")) or None,  # 해결 사례 패턴 (CSA-28)
         }
         row["text"] = case_text(row)
         row["text_hash"] = _embedding_hash(
@@ -233,7 +239,10 @@ def case_rows(cases: Iterable[Row], final_replies: dict[str, str]) -> list[Row]:
 def _reflect(conn: Any, name: str, dimensions: int) -> Any:
     import sqlalchemy as sa
 
-    if name not in (DOC_TABLE, CASE_TABLE) or conn.dialect.name not in ("postgresql", "sqlite"):
+    if name not in (DOC_TABLE, CASE_TABLE, PATTERN_TABLE) or conn.dialect.name not in (
+        "postgresql",
+        "sqlite",
+    ):
         raise ValueError("지원하지 않는 적재 테이블 또는 DB입니다")
     if not sa.inspect(conn).has_table(name):
         raise RuntimeError(f"{name} 테이블이 없습니다. CSA-24 마이그레이션(alembic upgrade)부터")
@@ -250,9 +259,12 @@ def _reflect(conn: Any, name: str, dimensions: int) -> Any:
                 "pgvector 의존성이 없습니다. uv sync --extra rag 실행이 필요합니다"
             ) from None
     table = sa.Table(name, sa.MetaData(), autoload_with=conn)
-    required = {"text_hash", "embedding", "id" if name == DOC_TABLE else "case_id"}
+    key = {DOC_TABLE: "id", CASE_TABLE: "case_id", PATTERN_TABLE: "pattern_id"}[name]
+    required = {"text_hash", "embedding", key}
     if name == DOC_TABLE:
         required |= {"doc_id", "section", "title", "text"}
+    elif name == PATTERN_TABLE:
+        required |= {"family", "error_code", "applies_to", "text", "source"}
     else:
         required |= {
             "text",
@@ -410,7 +422,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     import sqlalchemy as sa
 
     parser = argparse.ArgumentParser(description="문서·학습 사례를 PostgreSQL(pgvector)에 적재")
-    parser.add_argument("--target", choices=("docs", "cases", "all"), default="all")
+    parser.add_argument("--target", choices=("docs", "cases", "patterns", "all"), default="all")
     parser.add_argument("--dry-run", action="store_true", help="API·DB 변경 없이 적재 대상 점검")
     parser.add_argument("--prune", action="store_true", help="전체 문서 목록에서 사라진 조각 삭제")
     args = parser.parse_args(argv)
@@ -428,6 +440,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.target in ("cases", "all"):
         cases = case_rows(*load_case_inputs())
         jobs.append((CASE_TABLE, "case_id", cases, [r["text"] for r in cases]))
+    if args.target in ("patterns", "all"):
+        from cs_agent.agents.case_patterns import catalog_rows
+
+        patterns = catalog_rows()
+        jobs.append((PATTERN_TABLE, "pattern_id", patterns, [r["text"] for r in patterns]))
     connect_args = (
         {"connect_timeout": 5}
         if sa.engine.make_url(settings.database_url).get_backend_name() == "postgresql"
