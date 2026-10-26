@@ -8,6 +8,7 @@ from cs_agent.config import Settings
 from cs_agent.db.models import (
     EMBEDDING_DIM,
     Base,
+    CasePattern,
     ChatMessageRow,
     ChatSession,
     DocChunk,
@@ -304,30 +305,36 @@ def test_sql_records_keep_assignee_and_history(db):
 
 
 @needs_db
-def test_cases_saved_without_vector_are_embedded_later(db):
-    """벡터 없이 저장된 운영 사례(LLM 꺼짐·임베딩 장애)는 embed_missing_cases 가 채운다."""
+def test_patterns_saved_without_vector_are_embedded_later(db):
+    """해결 사례 = 패턴 학습 (CSA-28). 새 패턴 설명 벡터가 없으면(LLM 꺼짐·임베딩 장애)
+    embed_missing_cases 가 채운다. 사례 글 자체는 임베딩하지 않는다."""
     from cs_agent.services.records import SqlRecords
 
     engine, Session = db
 
-    def case(ticket_id: str) -> dict:
+    def case(ticket_id: str, cause: str) -> dict:
         return build_case(
             {
                 "ticket_id": ticket_id,
                 "inquiry": InquiryIn(channel="email", subject=f"q {ticket_id}", body="b"),
-                "classification": Classification(category=Category.TECH_SPEC),
-                "extraction": Extraction(product_code="TRF-OIL-1000"),
-                "draft": Draft(text="reply"),
+                "classification": Classification(category=Category.DEFECT),
+                "extraction": Extraction(product_code="INV-LSLV0075-S100", product_family="DRIVE"),
+                "draft": Draft(text="reply", slots={"cause": cause}),
                 "review": ReviewIn(action=ReviewAction.APPROVE),
             }
         )
 
     offline = SqlRecords(Session)  # embed_fn 없음 = 벡터 없이 저장
-    for tid in ("T-1", "T-2", "T-3"):
-        offline.save_case(case(tid))
-    offline.deactivate_case("T-3")  # 재문의로 다시 열린 사례는 채우지 않는다
+    offline.save_case(case("T-1", "Acceleration time too short for load inertia"))  # FLT-001
+    offline.save_case(case("T-2", "Loose terminal on the braking resistor"))  # 새 원인
+    offline.save_case(case("T-3", "Acceleration time too short for load inertia"))  # 같은 패턴
+    offline.deactivate_case("T-3")
 
-    assert [c["case_id"] for c in offline.live_cases()] == ["CASE-T-1", "CASE-T-2"]
+    assert [c["pattern_id"] for c in offline.live_cases()] == [
+        "FLT-001",
+        case("T-2", "Loose terminal on the braking resistor")["pattern_id"],
+    ]
+    assert offline.live_cases()[1]["pattern_id"].startswith("LIVE-DRIVE-")
     assert offline.embed_missing_cases() == 0  # 임베딩 함수가 없으면 아무것도 안 한다
 
     calls = []
@@ -344,15 +351,12 @@ def test_cases_saved_without_vector_are_embedded_later(db):
     assert online.embed_missing_cases() == 0
 
     with engine.connect() as conn:
-        rows = dict(
-            conn.execute(
-                text(
-                    "SELECT case_id, embedding IS NOT NULL AND text_hash IS NOT NULL "
-                    "FROM resolution_cases"
-                )
-            ).all()
+        patterns = dict(
+            conn.execute(text("SELECT pattern_id, embedding IS NOT NULL FROM case_patterns")).all()
         )
-    assert rows == {"CASE-T-1": True, "CASE-T-2": True, "CASE-T-3": False}
+        cases = conn.execute(text("SELECT count(embedding) FROM resolution_cases")).scalar()
+    assert len(patterns) == 2 and all(patterns.values())  # 같은 고장 T-1·T-3 은 패턴 하나
+    assert cases == 0
 
 
 @needs_db
@@ -411,7 +415,10 @@ def test_service_records_rows_and_survives_restart(db, customer_language):
                 case = s.get(ResolutionCase, f"CASE-{tid}")
                 assert case.final_reply == approved.final_reply
                 assert (case.active, case.data_split) == (True, "live")
-                assert case.embedding is not None and case.text_hash
+                # 사례 글은 임베딩하지 않고 패턴으로 배운다 (CSA-28): 패턴 행과 설명 벡터가 생긴다
+                assert case.embedding is None and case.pattern_id
+                pattern = s.get(CasePattern, case.pattern_id)
+                assert pattern is not None and pattern.embedding is not None
 
             # 같은 메일 스레드의 고객 회신 → 같은 티켓을 다시 연다
             again = service.submit(

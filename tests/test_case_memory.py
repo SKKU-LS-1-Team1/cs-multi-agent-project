@@ -89,36 +89,63 @@ def test_case_evidence_matches_keyword_case_shape():
     }
 
 
-def test_live_cases_retriever_adds_resolved_cases_to_keyword_search():
-    from cs_agent.agents.case_memory import LiveCasesRetriever, case_evidence
-    from cs_agent.agents.retrieval import KeywordRetriever
+E_OC_CAUSE = "Acceleration time too short for load inertia"  # fault_catalog FLT-001 의 원인
 
-    seed = case_evidence(
-        _live_case("CASE-SEED", "Breaker trips at startup", final_reply="Reset the relay.")
+
+def test_resolved_cases_are_learned_as_patterns_and_found_by_pattern():
+    """해결 사례는 패턴으로 묶여 배운다: 카탈로그 원인이면 그 고장 패턴, 새 원인이면 새 패턴."""
+    from cs_agent.agents.case_patterns import MemoryPatternRetriever
+
+    seed = _live_case(
+        "RC-SEED",
+        "Inverter trips at acceleration",
+        product_code="INV-LSLV0075-S100",
+        product_family="DRIVE",
+        error_code="E.OC",
+        cause=E_OC_CAUSE,
+        data_split="train",
+        final_reply="Increase ACC time.",
     )
-    base = KeywordRetriever([(seed, seed.text)])
     records = _Records(
-        [_live_case("CASE-T-1", "Zebra transformer dimensions", final_reply="See sheet.")]
+        [_live_case("CASE-T-1", "Zebra transformer dimensions", cause="Datasheet question")]
     )
-    retriever = LiveCasesRetriever(base, records)
+    retriever = MemoryPatternRetriever([seed], records)
 
-    assert [e.doc_id for e in retriever.search("zebra dimensions", 3)] == ["CASE-T-1"]
-    assert [e.doc_id for e in retriever.search("breaker trips", 3)] == ["CASE-SEED"]
-    # 다시 열린 문의(active=False)는 검색에서 빠진다
+    hit = retriever.search("zebra transformer dimensions", 3)
+    assert [e.doc_id for e in hit] == ["CASE-T-1"]
+    assert hit[0].metadata["pattern_id"].startswith("LIVE-OIL_TRF-")  # 카탈로그에 없는 원인
+    hit = retriever.search("acceleration time load inertia", 3)
+    assert [(e.doc_id, e.metadata["pattern_id"]) for e in hit] == [("RC-SEED", "FLT-001")]
+    assert "Symptom: Over-current trip during acceleration" in hit[0].text  # 패턴 설명
+
+    # 다시 열린 문의(active=False)는 패턴에서 빠진다
     records.cases[0]["active"] = False
-    assert retriever.search("zebra dimensions", 3) == []
-    # 같은 case_id 면 운영 사례가 이긴다 (seed 를 덮는다)
-    records.cases = [_live_case("CASE-SEED", "Zebra breaker answer updated", final_reply="")]
-    hits = retriever.search("breaker", 3)
-    assert [h.doc_id for h in hits] == ["CASE-SEED"] and "updated" in hits[0].text
+    assert retriever.search("zebra transformer dimensions", 3) == []
+
+    # 같은 고장으로 운영 중 해결되면 같은 패턴에 쌓이고, 운영 사례가 대표가 된다
+    records.cases = [
+        _live_case(
+            "CASE-T-2",
+            "S100 trips E.OC",
+            product_family="DRIVE",
+            cause=E_OC_CAUSE,
+            final_reply="Raised ACC time to 12 s, fixed.",
+        )
+    ]
+    hit = retriever.search("acceleration time load inertia", 3)
+    assert [(e.doc_id, e.metadata["pattern_id"]) for e in hit] == [("CASE-T-2", "FLT-001")]
+    assert hit[0].metadata["case_count"] == "2"
+    assert "Resolved 2 time(s), 1 in operation" in hit[0].text
+    assert "Raised ACC time to 12 s" in hit[0].text
 
 
-def test_with_live_cases_wraps_only_keyword_search():
-    from cs_agent.agents.case_memory import LiveCasesRetriever, with_live_cases
-    from cs_agent.agents.retrieval import KeywordRetriever
+def test_with_live_cases_attaches_records_to_local_pattern_search():
+    from cs_agent.agents.case_memory import with_live_cases
+    from cs_agent.agents.case_patterns import MemoryPatternRetriever
 
     records = _Records([])
-    assert isinstance(with_live_cases(KeywordRetriever([]), records), LiveCasesRetriever)
+    local = MemoryPatternRetriever([])
+    assert with_live_cases(local, records) is local and local.records is records
     pgvector_like = object()
     assert with_live_cases(pgvector_like, records) is pgvector_like
     assert with_live_cases(None, records) is None
@@ -129,7 +156,7 @@ def test_resolved_ticket_becomes_evidence_for_next_inquiry():
     from fastapi.testclient import TestClient
     from stubs import ANALYSIS
 
-    from cs_agent.agents.retrieval import KeywordRetriever
+    from cs_agent.agents.case_patterns import MemoryPatternRetriever
     from cs_agent.config import Settings
     from cs_agent.llm.router import LLMRouter
     from cs_agent.main import create_app
@@ -148,7 +175,7 @@ def test_resolved_ticket_becomes_evidence_for_next_inquiry():
             llm=LLMRouter(Settings(_env_file=None)),
             agents=ANALYSIS,
             storage="memory",
-            retrievers=(None, KeywordRetriever([])),  # 사례 seed 없음 → 운영 사례만
+            retrievers=(None, MemoryPatternRetriever([])),  # 사례 seed 없음 → 운영 사례만
         )
     ) as client:
         first = client.post("/api/tickets", json=inquiry).json()

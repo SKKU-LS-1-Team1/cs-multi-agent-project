@@ -12,10 +12,12 @@
 #   요청문이 이전 버전과 다르면 drafts 에 새 버전을 쌓는다. 한 번 실행 안에서 자동 점검 재작성이
 #   여러 번 일어나면 마지막 버전만 남는다 (중간본은 체크포인트 기록에 있다).
 # - add_review(): 상담원 버튼 한 번 = reviews 한 행. 그때 보고 있던 최신 버전(draft_id)에 붙인다.
-# - save_case(): 해결 확정 사례 (agents/case_memory.build_case). 임베딩을 같이 넣어야 사례 검색
-#   (agents/retrieval.py)에 잡힌다. LLM_PROVIDER=live 가 아니거나 임베딩이 실패하면 벡터 없이
+# - save_case(): 해결 확정 사례 (agents/case_memory.build_case) = 패턴 학습 (CSA-28). 사례에
+#   pattern_id 를 붙여 저장하고, 새 원인이면 case_patterns 에 패턴을 만든다. 사례 글은 임베딩하지
+#   않고 패턴 설명만 임베딩한다. LLM_PROVIDER=live 가 아니거나 임베딩이 실패하면 벡터 없이
 #   남기고, embed_missing_cases() 가 나중에 채운다 (main.py 주기 작업, CSA-15).
-# - live_cases(): 운영 중 해결된 사례 (active 만). 키워드 검색(case_memory.LiveCasesRetriever)용.
+# - live_cases(): 운영 중 해결된 사례 (active 만). 로컬 패턴 검색
+#   (case_patterns.MemoryPatternRetriever)용.
 # - deactivate_case(): 재문의로 다시 열린 문의의 사례를 검색에서 뺀다 (active=false).
 # - set_assignee(): 담당자 배정·재배정 (CSA-53). tickets.assignee 를 바꾸고 assignments 에 이력을
 #   한 행 남긴다. assignee 는 그래프 상태에 없어서 save_state() 가 덮어쓰지 않는다.
@@ -73,7 +75,7 @@ class Records(Protocol):
         ...
 
     def embed_missing_cases(self, limit: int = 50) -> int:
-        """벡터 없이 저장된 운영 사례를 임베딩한다. 채운 건수."""
+        """패턴이 없는 사례에 패턴을 붙이고, 설명 벡터가 없는 패턴을 임베딩한다. 채운 건수."""
         ...
 
     def deactivate_case(self, ticket_id: str) -> None: ...
@@ -278,7 +280,7 @@ class MemoryRecords(MemorySpecialists):
         return [dict(c) for c in self.cases if c.get("active", True)]
 
     def embed_missing_cases(self, limit: int = 50) -> int:
-        return 0  # 메모리 모드는 벡터 검색이 없다 (LiveCasesRetriever 가 키워드로 찾는다)
+        return 0  # 메모리 모드는 벡터 검색이 없다 (MemoryPatternRetriever 가 키워드로 찾는다)
 
     def deactivate_case(self, ticket_id: str) -> None:
         for case in self.cases:
@@ -436,19 +438,12 @@ class SqlRecords(SqlSpecialists):
             )
 
     def save_case(self, case: dict) -> None:
+        """사례 저장 = 패턴 학습 (case_patterns 를 같이 채운다). 사례 글은 임베딩하지 않는다."""
         from sqlalchemy.dialects.postgresql import insert
 
-        from cs_agent.config import get_settings
         from cs_agent.db.models import ResolutionCase
-        from cs_agent.pipeline.embed_docs import _embedding_hash
 
-        settings = get_settings()
-        values = {**case, "data_split": "live"}
-        values["embedding"] = self._embed(case["text"])
-        if values["embedding"] is not None:
-            values["text_hash"] = _embedding_hash(
-                case["text"], settings.embedding_model, settings.embedding_dim
-            )
+        values = {**case, "data_split": "live", "embedding": None, "text_hash": None}
         stmt = insert(ResolutionCase).values(**values)
         stmt = stmt.on_conflict_do_update(
             index_elements=[ResolutionCase.case_id],
@@ -456,6 +451,39 @@ class SqlRecords(SqlSpecialists):
         )
         with self.sessionmaker.begin() as s:
             s.execute(stmt)
+        self._ensure_pattern(case)
+
+    def _ensure_pattern(self, case: dict) -> None:
+        """사례의 패턴 행이 없으면 만든다 (새 원인 = 새 패턴).
+
+        설명 임베딩이 실패하면 벡터 없이 두고 embed_missing_cases 가 나중에 채운다.
+        """
+        from sqlalchemy.dialects.postgresql import insert
+
+        from cs_agent.agents.case_patterns import pattern_row
+        from cs_agent.config import get_settings
+        from cs_agent.db.models import CasePattern
+        from cs_agent.pipeline.embed_docs import _embedding_hash
+
+        row = pattern_row(case)
+        if row is None:
+            return
+        with self.sessionmaker() as s:
+            if s.get(CasePattern, row["pattern_id"]) is not None:
+                return
+        settings = get_settings()
+        vector = self._embed(row["text"])
+        values = {
+            **row,
+            "embedding": vector,
+            "text_hash": _embedding_hash(
+                row["text"], settings.embedding_model, settings.embedding_dim
+            )
+            if vector is not None
+            else None,
+        }
+        with self.sessionmaker.begin() as s:
+            s.execute(insert(CasePattern).values(**values).on_conflict_do_nothing())
 
     def live_cases(self) -> list[dict]:
         import sqlalchemy as sa
@@ -464,7 +492,7 @@ class SqlRecords(SqlSpecialists):
 
         columns = (
             "case_id ticket_id text summary product_code product_family category error_code "
-            "cause action final_reply cited active"
+            "cause action final_reply cited active pattern_id"
         ).split()
         query = (
             sa.select(*(getattr(ResolutionCase, c) for c in columns))
@@ -475,37 +503,68 @@ class SqlRecords(SqlSpecialists):
             return [dict(row) for row in s.execute(query).mappings()]
 
     def embed_missing_cases(self, limit: int = 50) -> int:
-        """벡터 없는 운영 사례(active)를 limit 건까지 임베딩한다. 한 건이 실패하면 거기서 멈춘다."""
+        """패턴 DB 를 채운다. 채운(임베딩한) 패턴 수.
+
+        pattern_id 없는 사례(예전 저장분)에 패턴을 붙이고, 설명 벡터가 없는 패턴을 limit 건까지
+        임베딩한다. 임베딩이 한 건 실패하면 거기서 멈춘다 (다음 주기에 다시).
+        """
         import sqlalchemy as sa
 
+        from cs_agent.agents.case_patterns import assign_pattern
         from cs_agent.config import get_settings
-        from cs_agent.db.models import ResolutionCase
+        from cs_agent.db.models import CasePattern, ResolutionCase
         from cs_agent.pipeline.embed_docs import _embedding_hash
+
+        with self.sessionmaker() as s:
+            orphans = [
+                dict(r)
+                for r in s.execute(
+                    sa.select(
+                        ResolutionCase.case_id,
+                        ResolutionCase.product_family,
+                        ResolutionCase.product_code,
+                        ResolutionCase.error_code,
+                        ResolutionCase.summary,
+                        ResolutionCase.cause,
+                        ResolutionCase.action,
+                    )
+                    .where(ResolutionCase.active, ResolutionCase.pattern_id.is_(None))
+                    .limit(limit)
+                ).mappings()
+            ]
+        for case in orphans:
+            case["pattern_id"] = assign_pattern(case["product_family"], case["cause"])
+            if case["pattern_id"] is None:
+                continue
+            with self.sessionmaker.begin() as s:
+                s.execute(
+                    sa.update(ResolutionCase)
+                    .where(ResolutionCase.case_id == case["case_id"])
+                    .values(pattern_id=case["pattern_id"])
+                )
+            self._ensure_pattern(case)
 
         if self.embed_fn is None:
             return 0
         settings = get_settings()
-        query = (
-            sa.select(ResolutionCase.case_id, ResolutionCase.text)
-            .where(
-                ResolutionCase.data_split == "live",
-                ResolutionCase.active,
-                ResolutionCase.embedding.is_(None),
-            )
-            .order_by(ResolutionCase.case_id)
-            .limit(limit)
-        )
         with self.sessionmaker() as s:
-            pending = list(s.execute(query))
+            pending = list(
+                s.execute(
+                    sa.select(CasePattern.pattern_id, CasePattern.text)
+                    .where(CasePattern.embedding.is_(None))
+                    .order_by(CasePattern.pattern_id)
+                    .limit(limit)
+                )
+            )
         filled = 0
-        for case_id, text in pending:
+        for pattern_id, text in pending:
             vector = self._embed(text)
             if vector is None:
                 break  # 임베딩 장애 — 다음 주기에 다시
             with self.sessionmaker.begin() as s:
                 s.execute(
-                    sa.update(ResolutionCase)
-                    .where(ResolutionCase.case_id == case_id)
+                    sa.update(CasePattern)
+                    .where(CasePattern.pattern_id == pattern_id)
                     .values(
                         embedding=vector,
                         text_hash=_embedding_hash(
