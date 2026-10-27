@@ -131,7 +131,7 @@ export default function ChatPanel({ viewingProduct, tab, onNavigate, onHandoff, 
       {confirm && (
         <div className="cp-pop" role="alertdialog" aria-labelledby="cp-pop-t" onKeyDown={(e) => e.key === "Escape" && setConfirm(false)}>
           <b id="cp-pop-t">대화를 초기화할까요?</b>
-          <p>지금까지의 대화가 지워지고, 처음 인사와 추천 질문이 다시 나와요. 화면에서 고른 제품은 그대로예요.</p>
+          <p>대화가 지워져요. 보고 있는 제품은 유지돼요.</p>
           <div>
             <button type="button" className="cp-cancel" autoFocus onClick={() => setConfirm(false)}>취소</button>
             <button type="button" className="cp-ok" onClick={reset}>초기화</button>
