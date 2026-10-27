@@ -3,14 +3,16 @@
 // 사용자가 직접 고른 언어는 자동 감지 결과보다 우선하고, 나중에 국가 감지가 끝나도 덮어쓰지 않는다.
 import { useSyncExternalStore } from "react";
 
-// 지원 국가 20개. 이름은 영어 고정 — 언어를 바꿔도 국가 표기는 그대로여야 한다.
-export const COUNTRIES = ["TH", "JP", "BR", "FR", "GB", "SA", "IN", "RU", "AE", "AU", "IT", "US", "DE", "ID", "MX", "ES", "CN", "VN", "TR", "PL"] as const;
+// 지원 국가 21개 (KR 포함). 이름은 영어 고정 — 언어를 바꿔도 국가 표기는 그대로여야 한다.
+export const COUNTRIES = ["KR", "TH", "JP", "BR", "FR", "GB", "SA", "IN", "RU", "AE", "AU", "IT", "US", "DE", "ID", "MX", "ES", "CN", "VN", "TR", "PL"] as const;
 const REGION = new Intl.DisplayNames(["en"], { type: "region" });
 export const countryName = (code: string): string => REGION.of(code) ?? code;
 
-// 지원 언어 15개. 이름은 각 언어의 자국어 표기.
+// 지원 언어 16개 (서버 drafting._CUSTOMER_LANGUAGES 와 같다). 이름은 각 언어의 자국어 표기.
+// 한국어가 빠지면 한국어 브라우저가 영어로 정해져, 고른 언어를 항상 보내는 챗봇이 한국어 질문에도
+// 영어로 답한다 (서버의 본문 언어 감지보다 고른 언어가 우선).
 export const LANGUAGES: [string, string][] = [
-  ["en", "English"], ["ja", "日本語"], ["zh", "中文"], ["es", "Español"], ["pt", "Português"],
+  ["en", "English"], ["ko", "한국어"], ["ja", "日本語"], ["zh", "中文"], ["es", "Español"], ["pt", "Português"],
   ["fr", "Français"], ["de", "Deutsch"], ["it", "Italiano"], ["ar", "العربية"], ["ru", "Русский"],
   ["th", "ไทย"], ["id", "Bahasa Indonesia"], ["vi", "Tiếng Việt"], ["tr", "Türkçe"], ["pl", "Polski"],
 ];
@@ -19,7 +21,7 @@ export const RTL = new Set(["ar"]);
 
 // 국가별 기본 언어 (이 저장소에 기존 매핑이 없어 요청 명세의 매핑을 쓴다)
 export const COUNTRY_LANG: Record<string, string> = {
-  TH: "th", JP: "ja", BR: "pt", FR: "fr", GB: "en", IN: "en", AU: "en", US: "en", SA: "ar", AE: "ar", RU: "ru",
+  KR: "ko", TH: "th", JP: "ja", BR: "pt", FR: "fr", GB: "en", IN: "en", AU: "en", US: "en", SA: "ar", AE: "ar", RU: "ru",
   IT: "it", DE: "de", ID: "id", MX: "es", ES: "es", CN: "zh", VN: "vi", TR: "tr", PL: "pl",
 };
 
