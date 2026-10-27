@@ -1,8 +1,8 @@
 // 모든 모달 모음. 열림 상태는 store 의 ui.modal 하나로 관리한다.
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@admin/lib/utils";
-import { ArrowRight, Building2, ChevronDown, CircleCheck, Clock, Paperclip } from "lucide-react";
+import { ArrowRight, Building2, ChevronDown, CircleCheck, Clock, LoaderCircle, ShieldAlert, Paperclip } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { Checkbox } from "@admin/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@admin/components/ui/dialog";
@@ -21,6 +21,8 @@ import {
 import { closeModal, findTicket, openModal, tickets, ui, useStore } from "@admin/lib/store";
 import { kindLabel, rememberProgressNotice, type CareKind } from "@admin/lib/care";
 import { NoticeSession, noticeTickets, preparedNotice, type NoticeState } from "@admin/lib/progress-notice";
+import { checkBeforeSend, SendQcSession, type QcState } from "@admin/lib/send-qc";
+import { isApiTicket, replyPreviewKey } from "@admin/lib/api-sync";
 import { AI_STYLE } from "./CareButtons";
 import { SEGMENT_KO, STATUS_KO, useCustomers, type Customer } from "@admin/lib/customers";
 import type { Ticket } from "@admin/lib/types";
@@ -34,14 +36,15 @@ const WIDE = ["care", "new-ticket", "review-customer", "answer-comparison", "dep
 
 export default function ModalHost() {
   useStore();
+  const [sendBusy, setSendBusy] = useState(false);
   const m = ui.modal;
   const t = findTicket(m?.props?.id);
   return (
-    <Dialog open={!!m} onOpenChange={(o) => !o && closeModal()}>
+    <Dialog open={!!m} onOpenChange={(o) => !o && !sendBusy && closeModal()}>
       {m && (
-        <DialogContent className={cn(MODAL, WIDE.includes(m.type) ? "sm:max-w-2xl" : "sm:max-w-lg")}>
+        <DialogContent showCloseButton={!sendBusy} className={cn(MODAL, WIDE.includes(m.type) ? "sm:max-w-2xl" : "sm:max-w-lg")}>
           <DialogHeader className="pr-8"><DialogTitle className="text-[22px] font-semibold">{m.type === "send" && t ? (t.purpose === "request" ? "고객 질의서 발송" : "고객 답변 발송") : m.type === "care" ? kindLabel(m.props?.kind) : TITLES[m.type] || "알림"}</DialogTitle></DialogHeader>
-          <Body type={m.type} props={m.props || {}} t={t} />
+          {m.type === "send" && t ? <Send key={t.id} t={t} onBusy={setSendBusy} /> : <Body type={m.type} props={m.props || {}} t={t} />}
         </DialogContent>
       )}
     </Dialog>
@@ -52,7 +55,6 @@ function Body({ type, props, t }: { type: string; props: Record<string, any>; t?
   switch (type) {
     case "new-ticket": return <NewTicket />;
     case "assign": return t ? <Assign t={t} /> : null;
-    case "send": return t ? <Send t={t} /> : null;
     case "answer-comparison": return t ? <Comparison t={t} /> : null;
     case "review-customer": return t ? <ReviewCustomer t={t} /> : null;
     case "expert-receive": return t ? <ExpertReceive t={t} requestId={props.requestId} /> : null;
@@ -129,16 +131,79 @@ function Assign({ t }: { t: Ticket }) {
   );
 }
 
-function Send({ t }: { t: Ticket }) {
+function Send({ t, onBusy }: { t: Ticket; onBusy: (busy: boolean) => void }) {
   const checks = runChecks(t), pending = checks.some((c) => c.pending);
   const failed = checks.filter((c) => !c.passed && !c.pending);
   const signature = JSON.stringify([t.draft, t.body, t.specialistRevision, t.customerRevision, t.informationReviewedAt, t.apiEvidence, t.approvalError, checks]);
   const [ackFor, setAckFor] = useState("");
-  const ack = ackFor === signature, busy = Boolean(t.sending);
+  const [qc, setQc] = useState<QcState>({ phase: "idle" });
+  const session = useRef<SendQcSession | null>(null);
+  useEffect(() => {
+    const active = new SendQcSession(setQc);
+    session.current = active;
+    return () => { active.cancel(); onBusy(false); };
+  }, [onBusy]);
+  const ack = ackFor === signature, busy = Boolean(t.sending) || qc.phase === "checking" || qc.phase === "sending";
+  useEffect(() => { onBusy(busy); }, [busy, onBusy]);
+  const demo = !isApiTicket(t);
+  const start = () => {
+    if (busy || !canSend(t) || (failed.length > 0 && !ack)) return;
+    if (!demo) {
+      void session.current?.runServer(async () => {
+        const sent = await confirmSend(t, { acknowledgedFailures: failed.length > 0 && ack, keepModalOpen: true });
+        return { sent, qc: t.customerQc, error: t.approvalError };
+      });
+      return;
+    }
+    const key = replyPreviewKey(t), preview = t.replyPreview?.final_text;
+    void session.current?.run({
+      input: { sourceText: t.draft, finalText: preview || "", language: customerLanguage(t) },
+      check: (input) => checkBeforeSend(input, demo),
+      isCurrent: () => key === replyPreviewKey(t) && preview === t.replyPreview?.final_text && canSend(t),
+      send: () => confirmSend(t, { acknowledgedFailures: failed.length > 0 && ack, keepModalOpen: true }),
+    });
+  };
+  useEffect(() => {
+    // 편집 화면의 발송하기에서 바로 검증을 시작한다. 기존 점검 실패는 먼저 확인받는다.
+    if (failed.length === 0) start();
+  }, [t.id]);
+  if (qc.phase === "checking" || qc.phase === "sending") return (
+    <div role="status" aria-live="polite" aria-busy="true" className="grid justify-items-center gap-4 py-10 text-center">
+      <LoaderCircle aria-hidden="true" className="size-9 animate-spin text-primary" />
+      <strong className="text-lg">{qc.phase === "checking" ? "발송 전 내용을 검증하고 있습니다" : "검증 완료 · 발송 처리 중입니다"}</strong>
+      <p className="text-sm text-muted-foreground">욕설·모욕·위협 표현과 회사 중요 정보 유출 여부를 확인합니다.</p>
+    </div>
+  );
+  if (qc.phase === "sent") return (
+    <>
+      <div role="status" aria-live="polite" className="grid justify-items-center gap-4 py-8 text-center">
+        <CircleCheck aria-hidden="true" className="size-12 text-emerald-600" />
+        <strong className="text-xl">발송 완료</strong>
+        <p className="text-sm text-muted-foreground">{`${t.company}에 ${t.purpose === "request" ? "고객 질의서" : "답변"} 발송이 완료되었습니다.`}</p>
+      </div>
+      <Footer><Button onClick={closeModal}>확인</Button></Footer>
+    </>
+  );
+  if (qc.phase === "blocked" || qc.phase === "error") return (
+    <>
+      <section role="alert" className="grid gap-3 rounded-xl bg-destructive/10 p-5">
+        <strong className="flex items-center gap-2 text-destructive"><ShieldAlert className="size-5" />{qc.phase === "blocked" ? "수정이 필요하여 발송하지 않았습니다" : "검증을 완료하지 못했습니다"}</strong>
+        {qc.phase === "error" ? <p className="text-sm">{qc.message}</p> : <ul className="grid gap-4">
+          {qc.issues.map((issue, index) => <li key={index} className="grid gap-1 text-sm">
+            <b>{issue.category === "abuse" ? "부적절한 표현" : "회사 중요 정보"}</b>
+            <blockquote dir="auto" className="whitespace-pre-wrap rounded-lg bg-background p-3">{issue.excerpt}</blockquote>
+            <p>{issue.reason}</p>
+          </li>)}
+        </ul>}
+      </section>
+      <Footer><Button variant="outline" onClick={closeModal}>돌아가서 수정</Button>{qc.phase === "error" && <Button disabled={!canSend(t)} onClick={start}>다시 검증</Button>}</Footer>
+    </>
+  );
   return (
     <>
       <p className="text-sm">{t.company}에 {t.purpose === "request" ? "고객 질의서를" : "답변을"} 발송하고 처리 이력에 기록합니다. 영어 원문과 아래의 고객 언어 문구를 함께 기록합니다.</p>
       <p dir="auto" className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl bg-muted px-5 py-4">{t.replyPreview?.final_text}</p>
+      <p className="text-sm text-muted-foreground">발송하기를 누르면 욕설·모욕·위협 표현과 회사 중요 정보 유출 여부를 검증합니다. 검증을 통과한 문구만 발송합니다.</p>
       {pending && <p role="status" className="text-sm text-muted-foreground">본문이 변경되어 최종 점검이 필요합니다. 발송 요청 시 현재 내용을 점검하며, 새 오류가 발견되면 발송을 보류합니다.</p>}
       {t.approvalError && <p role="alert" className="text-sm text-destructive">{t.approvalError}</p>}
       {failed.length > 0 && (
@@ -148,7 +213,7 @@ function Send({ t }: { t: Ticket }) {
           <label className="flex items-center gap-2 text-sm"><Checkbox disabled={busy} checked={ack} onCheckedChange={(v) => setAckFor(v === true ? signature : "")} />확인했고, 그대로 발송합니다.</label>
         </section>
       )}
-      <Footer><Button variant="outline" disabled={busy} onClick={closeModal}>계속 수정</Button><Button disabled={busy || !canSend(t) || (failed.length > 0 && !ack)} onClick={() => confirmSend(t, { acknowledgedFailures: failed.length > 0 && ack })}>{busy ? "처리 중…" : "발송하기"}</Button></Footer>
+      <Footer><Button variant="outline" disabled={busy} onClick={closeModal}>계속 수정</Button><Button disabled={busy || !canSend(t) || (failed.length > 0 && !ack)} onClick={start}>{busy ? "처리 중…" : "발송하기"}</Button></Footer>
     </>
   );
 }

@@ -159,6 +159,8 @@ class GeminiClient:
         *,
         json_mode: bool = False,
         thinking_level: str | None = None,
+        timeout: float | None = None,
+        max_retries: int = GEMINI_MAX_RETRIES,
     ) -> None:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -169,8 +171,8 @@ class GeminiClient:
             model=model,
             google_api_key=api_key,
             temperature=0 if json_mode else 0.3,
-            timeout=GEMINI_JUDGE_TIMEOUT_S if json_mode else GEMINI_WRITE_TIMEOUT_S,
-            max_retries=GEMINI_MAX_RETRIES,
+            timeout=timeout or (GEMINI_JUDGE_TIMEOUT_S if json_mode else GEMINI_WRITE_TIMEOUT_S),
+            max_retries=max_retries,
             response_mime_type="application/json" if json_mode else None,
             **extra,
         )

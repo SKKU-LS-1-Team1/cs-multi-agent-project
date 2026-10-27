@@ -162,7 +162,9 @@ def create_app(
                 roster,
                 escalation_writer=partial(deps.write_escalation_request, llm=deps.llm),
             )
-            app.state.progress = ProgressService(app.state.tickets, app.state.llm)
+            app.state.progress = ProgressService(
+                app.state.tickets, app.state.llm, check_customer_qc=deps.check_customer_qc
+            )
             interval = settings.analysis_retry_interval_s
             retry = (
                 asyncio.create_task(_retry_pending_loop(app.state.tickets, interval))

@@ -5,6 +5,7 @@ from copy import deepcopy
 from uuid import uuid4
 
 import pytest
+from stubs import pass_customer_qc
 from test_api import INQUIRY
 from test_api import client as client
 from test_db import TEST_DATABASE_URL, _db_service, needs_db
@@ -347,6 +348,7 @@ def test_notice_checkpoint_survives_postgres_service_restart(db):
             LLMRouter(Settings(_env_file=None)),
             generate=lambda facts, llm: "English progress draft.",
             prepare=lambda text, language, facts, llm: text,
+            check_customer_qc=pass_customer_qc,
         )
         notice = progress.create(
             ticket.ticket_id,
@@ -367,6 +369,8 @@ def test_notice_checkpoint_survives_postgres_service_restart(db):
     with postgres_checkpointer(TEST_DATABASE_URL) as checkpointer:
         tickets = _db_service(Session, checkpointer)
         restored = ProgressService(tickets, LLMRouter(Settings(_env_file=None)))
+        assert approved.status == "prepared"
+        assert approved.customer_qc["decision"] == "PASS"
         assert restored.list(ticket.ticket_id) == [approved]
         assert tickets._state(ticket.ticket_id).next == before.next == ("review",)
         assert tickets.get(ticket.ticket_id).final_reply is None

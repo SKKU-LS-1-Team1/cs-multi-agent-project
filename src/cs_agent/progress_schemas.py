@@ -43,3 +43,4 @@ class ProgressNotice(BaseModel):
     created_at: datetime
     approved_at: datetime | None = None
     error: str | None = None
+    customer_qc: dict | None = None

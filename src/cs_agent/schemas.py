@@ -280,6 +280,7 @@ class TicketOut(BaseModel):
     approval_cited: list[str] | None = None
     approval_text: str | None = None
     approval_error: str | None = None
+    customer_qc: dict | None = None
     approved_reply: str | None = None
     final_reply: str | None = None
     final_reply_language: str | None = None
