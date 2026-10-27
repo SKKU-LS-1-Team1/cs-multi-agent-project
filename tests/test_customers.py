@@ -2,6 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from test_db import db as db
+from test_db import needs_db
 
 from cs_agent.api.customers import router
 from cs_agent.services.customers import summarize_customers
@@ -93,21 +95,16 @@ def test_customer_api_without_database_returns_503_not_sample_data():
         assert client.get("/api/customers").status_code == 503
 
 
-def test_postgres_customer_api_reads_current_rows_without_writing_history():
-    import os
+@needs_db
+def test_postgres_customer_api_reads_current_rows_without_writing_history(db):
     from uuid import uuid4
 
-    import pytest
-    from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
 
     from cs_agent.api.deps import _db
     from cs_agent.db.models import Ticket
 
-    url = os.getenv("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL 없음")
-    engine = create_engine(url)
+    engine, _ = db
     cid = f"customer-test-{uuid4().hex[:12]}"
     app = FastAPI()
     app.include_router(router, prefix="/api")
