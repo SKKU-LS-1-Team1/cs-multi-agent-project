@@ -2,7 +2,7 @@
 // 국가와 언어는 따로 움직인다: 언어를 바꿔도 국가·국기는 그대로고, 직접 고른 언어는 나중에 끝난 국가 감지가 덮어쓰지 않는다.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import logo from "../../admin/assets/ls-electric-logo-reverse.png";
-import { LANGUAGES, RTL, countryName, detectCountry, initialLang, langStore, savedChoice, type CountryState } from "../../lib/lang";
+import { LANGUAGES, RTL, countryName, detectCountry, initialLang, langStore, savedChoice, shownCountry, type CountryState } from "../../lib/lang";
 import { t } from "../../lib/onboardingText";
 import FlagIcon from "./FlagIcon";
 import "./onboarding.css";
@@ -50,7 +50,9 @@ export default function Onboarding() {
   };
 
   const ok = country.status === "ok" && country.code !== null;
-  const label = country.status === "loading" ? t(lang, "detecting") : ok ? countryName(country.code as string) : t(lang, "unknown");
+  // 국기·국가명은 고른 언어를 따라간다. 문의에 보내는 국가는 실제 접속 국가 그대로 (complete 참고)
+  const shown = shownCountry(lang, ok ? country.code : null);
+  const label = country.status === "loading" ? t(lang, "detecting") : shown ? countryName(shown) : t(lang, "unknown");
 
   return (
     <main className="ob" dir={RTL.has(lang) ? "rtl" : "ltr"} lang={lang}>
@@ -65,11 +67,11 @@ export default function Onboarding() {
 
         <div className="ob-country" role="status" aria-live="polite" aria-label={`${t(lang, "country")}: ${label}`}>
           <span className={`ob-badge${country.status === "loading" ? " is-loading" : ""}`} aria-hidden="true">
-            {country.status !== "loading" && <FlagIcon code={ok ? country.code : null} size={52} />}
+            {country.status !== "loading" && <FlagIcon code={shown} size={52} />}
           </span>
           <span className="ob-cname">
             <small>{t(lang, "country")}</small>
-            <b className={ok ? "" : "is-weak"}>{label}</b>
+            <b className={shown ? "" : "is-weak"}>{label}</b>
           </span>
         </div>
 

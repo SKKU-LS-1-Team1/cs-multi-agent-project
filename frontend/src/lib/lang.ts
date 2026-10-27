@@ -25,6 +25,16 @@ export const COUNTRY_LANG: Record<string, string> = {
   IT: "it", DE: "de", ID: "id", MX: "es", ES: "es", CN: "zh", VN: "vi", TR: "tr", PL: "pl",
 };
 
+// 언어별 대표 국가 — 첫 화면 국기·국가명이 고른 언어를 따라간다 (접속 국가 언어를 고르면 접속 국가).
+export const LANG_COUNTRY: Record<string, string> = {
+  en: "US", ko: "KR", ja: "JP", zh: "CN", es: "ES", pt: "BR", fr: "FR", de: "DE", it: "IT", ar: "SA",
+  ru: "RU", th: "TH", id: "ID", vi: "VN", tr: "TR", pl: "PL",
+};
+
+/** 첫 화면에 보일 국가: 고른 언어가 접속 국가의 언어면 접속 국가, 아니면 그 언어의 대표 국가. */
+export const shownCountry = (lang: string, detected: string | null): string | null =>
+  detected && COUNTRY_LANG[detected] === lang ? detected : LANG_COUNTRY[lang] ?? null;
+
 export type CountryState = { status: "loading" | "ok" | "unsupported" | "failed"; code: string | null };
 
 // 접속 IP 기준 국가 감지. 브라우저가 외부 서비스를 직접 부르므로 접속 IP가 그 서비스로 나간다.
