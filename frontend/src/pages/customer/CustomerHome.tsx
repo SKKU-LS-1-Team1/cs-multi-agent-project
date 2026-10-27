@@ -58,7 +58,7 @@ export default function CustomerHome() {
       </main>
       <div className="cs-chat" id="cs-chat">
         <button type="button" className="cs-chat-close" onClick={() => setChatOpen(false)} aria-label="상담 창 닫기">✕</button>
-        <ChatPanel viewingProduct={productCode} onNavigate={onNavigate} onHandoff={openForm} onPickProduct={(c) => { pick(c); setChatOpen(false); }} />
+        <ChatPanel viewingProduct={productCode} tab={tab} onReset={() => setForm(null)} onNavigate={onNavigate} onHandoff={openForm} onPickProduct={(c) => { pick(c); setChatOpen(false); }} />
       </div>
       <button type="button" className="cs-fab" aria-controls="cs-chat" aria-expanded={chatOpen} onClick={() => setChatOpen(true)}>
         <span aria-hidden="true">💬</span> AI 상담
