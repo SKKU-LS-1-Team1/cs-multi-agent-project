@@ -913,3 +913,49 @@ test('both views advance from translation to review to send using the current pr
   t.reviewed = true; expect('발송하기');
   t.draft += ' edited'; expect('고객 언어로 변환');
 });
+
+function customerRules() {
+  return load('lib/customers.ts', { react: {}, '../../api/client': {} });
+}
+const customerRow = (patch = {}) => ({ id: 'C-1', tier: 'STANDARD', safety: [], urgent: [], urgentN: 0, breach: 0, fam: [], ...patch });
+test('customer focus uses safety or premium overdue, not history or imminent alone', () => {
+  const { focusOf } = customerRules();
+  const late = [['T', 'Inquiry', 'P2', 24, 30, 'ON_HOLD']];
+  assert.equal(focusOf(customerRow({ tier: 'GOLD', urgent: late })), 'issue');
+  assert.equal(focusOf(customerRow({ urgent: late })), null);
+  assert.equal(focusOf(customerRow({ safety: [['T', 'Safety']] })), 'issue');
+  assert.equal(focusOf(customerRow({ tier: 'PLATINUM', urgent: [['T', '', 'P2', 24, 20, 'ON_HOLD']], breach: 8 })), null);
+});
+test('care closure cannot hide active risk; manual pin persists after automatic risk resolves', () => {
+  const { focusOf } = customerRules();
+  assert.equal(focusOf(customerRow({ safety: [['T', 'Safety']] }), { resolved: true }), 'issue');
+  assert.equal(focusOf(customerRow(), { pinned: true }), 'pinned');
+  assert.equal(focusOf(customerRow(), { resolved: true }), null);
+});
+test('unclassified actual customers handle empty family and country without fabricated data', () => {
+  const { primaryReason, flag } = customerRules();
+  assert.equal(primaryReason(customerRow()), undefined);
+  assert.equal(flag(''), '—');
+  assert.equal(flag('KR'), '🇰🇷');
+});
+
+test('customer refresh preserves last server rows on failure and never loads sample customers', async () => {
+  const slots = []; let cursor = 0, effect, refresh, cleanup, fail = false;
+  const rows = [customerRow()];
+  const mod = load('lib/customers.ts', {
+    react: {
+      useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], value => { slots[i] = value; }]; },
+      useEffect: fn => { effect ??= fn; },
+    },
+    '../../api/client': { api: { customers: async () => { if (fail) throw Error('offline'); return rows; } } },
+  }, { setInterval: fn => { refresh = fn; return 1; }, clearInterval: noop });
+  const render = () => { cursor = 0; return mod.useCustomers(); };
+  assert.equal(render().rows, null);
+  cleanup = effect(); await new Promise(setImmediate);
+  assert.equal(render().rows, rows);
+  fail = true; await refresh();
+  assert.equal(render().rows, rows);
+  assert.match(render().error, /불러오지 못했습니다/);
+  fail = false; await refresh();
+  assert.equal(render().error, ''); cleanup();
+});

@@ -1,3 +1,4 @@
+import type { Customer } from "../admin/lib/customer-types";
 export type CustomerQc = {
   decision: "PASS" | "BLOCK" | "REVIEW" | "ERROR";
   issues: { paragraph_id: string; category: "ABUSE" | "CREDENTIAL" | "CONFIDENTIAL"; source_id: string | null; reason: string; suggestion: string }[];
@@ -200,6 +201,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  customers: () => request<Customer[]>("/customers"),
   productTree: () => request<ProductTree>("/products/tree"),
   product: (code: string) => request<ProductDetail>(`/products/${code}`),
   productDocument: (code: string, docId: string) => request<ProductDocument>(`/products/${code}/docs/${docId}`),

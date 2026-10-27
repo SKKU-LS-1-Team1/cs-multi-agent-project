@@ -20,7 +20,7 @@ import {
 } from "@admin/lib/logic";
 import { closeModal, findTicket, openModal, tickets, ui, useStore } from "@admin/lib/store";
 import { kindLabel, rememberProgressNotice, type CareKind } from "@admin/lib/care";
-import { NoticeSession, noticeTickets, preparedNotice, type NoticeState } from "@admin/lib/progress-notice";
+import { NoticeSession, preparedNotice, type NoticeState } from "@admin/lib/progress-notice";
 import { checkBeforeSend, SendQcSession, type QcState } from "@admin/lib/send-qc";
 import { isApiTicket, replyPreviewKey } from "@admin/lib/api-sync";
 import { AI_STYLE } from "./CareButtons";
@@ -317,14 +317,19 @@ function CustomerReply({ t }: { t: Ticket }) {
   );
 }
 
+type NoticeTicket = { id: string; title: string; status: string; apiLanguage: string | null };
+
 /** 진행상황 안내: 영어 초안 검토 → 고객 언어 문구 준비. 발송은 하지 않는다. */
 function CareModal({ customerId, ticketId }: { customerId: string; kind: CareKind; ticketId?: string }) {
-  const known = useCustomers()?.find((x) => x.id === customerId);
-  const linked = noticeTickets(customerId, tickets);
-  const c = known || (linked.length ? { id: customerId, name: linked[0].company || customerId } : null);
-  return c ? <CareForm key={customerId} c={c} ticketId={ticketId} linked={linked} /> : <p className="text-sm text-muted-foreground">서버에 연결된 고객 문의가 없습니다.</p>;
+  const { rows, error } = useCustomers();
+  const known = rows?.find((x) => x.id === customerId);
+  const linked: NoticeTicket[] = (known?.notice_tickets || []).map((t) => ({ ...t,
+    apiLanguage: t.language, status: STATUS_KO[t.status] || t.status }));
+  const c = known;
+  return c ? <><p role={error ? "alert" : undefined} className="text-sm text-destructive">{error && `${error} 마지막 조회 정보를 표시합니다.`}</p><CareForm key={customerId} c={c} ticketId={ticketId} linked={linked} /></>
+    : <p className="text-sm text-muted-foreground">{error || (rows ? "서버에 연결된 고객 문의가 없습니다." : "고객 문의를 불러오는 중입니다.")}</p>;
 }
-function CareForm({ c, ticketId, linked }: { c: Pick<Customer, "id" | "name"> & Partial<Customer>; ticketId?: string; linked: Ticket[] }) {
+function CareForm({ c, ticketId, linked }: { c: Pick<Customer, "id" | "name"> & Partial<Customer>; ticketId?: string; linked: NoticeTicket[] }) {
   const [sel, setSel] = useState<string[]>(ticketId ? [ticketId] : linked.slice(0, 10).map((t) => t.id));
   const [state, setState] = useState<NoticeState>({ ticketIds: [], text: "", notice: null, busy: null, error: "" });
   const [session] = useState(() => new NoticeSession(setState));
@@ -335,7 +340,7 @@ function CareForm({ c, ticketId, linked }: { c: Pick<Customer, "id" | "name"> & 
     return () => session.dispose();
   }, [session, selectedKey]);
   const prepared = preparedNotice(state), busy = Boolean(state.busy);
-  const unavailable = !linked.length ? "이 화면의 예시 문의는 서버에 연결되어 있지 않습니다. 실제 고객 문의를 연결한 뒤 안내문을 작성할 수 있습니다."
+  const unavailable = !linked.length ? "진행상황을 안내할 미완료 문의가 없습니다."
     : !selected.length ? "안내할 문의를 선택하세요."
       : selected.some((t) => !t.apiLanguage) ? "고객 언어가 확인된 문의를 선택하세요."
         : new Set(selected.map((t) => t.apiLanguage)).size > 1 ? "고객 언어가 같은 문의끼리 선택하세요." : "";
@@ -361,7 +366,7 @@ function CareForm({ c, ticketId, linked }: { c: Pick<Customer, "id" | "name"> & 
             </label>
           )) : c.urgent?.map((u) => (
             <label key={u[0]} className="flex items-center gap-3 rounded-xl bg-muted/60 px-4 py-2.5 text-[15px]">
-              <Checkbox disabled checked={false} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{u[1]}</span><Mono className="text-xs text-muted-foreground">{u[0]}</Mono></span><span className="text-sm text-muted-foreground">서버 연결 필요</span>
+              <Checkbox disabled checked={false} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{u[1]}</span><Mono className="text-xs text-muted-foreground">{u[0]}</Mono></span><span className="text-sm text-muted-foreground">문의 조회 필요</span>
             </label>
           ))}
         </fieldset>
