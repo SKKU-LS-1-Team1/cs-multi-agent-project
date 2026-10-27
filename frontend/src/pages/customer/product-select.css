@@ -29,17 +29,18 @@
 .ps h2 { font-size: 30px; line-height: 40px; font-weight: 700; color: var(--ps-g900); letter-spacing: -.01em; }
 .ps-sub { margin-top: 8px; font-size: 16px; color: var(--ps-g600); }
 .ps-car { user-select: none; margin-top: 12px; }
-.ps-stage { position: relative; height: 340px; perspective: 1100px; perspective-origin: 50% 40%; touch-action: pan-y; cursor: grab; overflow: hidden; }
+/* 좌우 끝은 배경으로 서서히 사라진다. 제품 이미지 영역에만 적용 — 제품명·버튼은 이 밖에 있다. */
+.ps-view { position: relative; }
+.ps-fade { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16%, #000 84%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 16%, #000 84%, transparent 100%); }
+.ps-stage { position: relative; height: 360px; perspective: 1200px; perspective-origin: 50% 45%; touch-action: pan-y; cursor: grab; overflow: hidden; }
 .ps-stage.is-dragging { cursor: grabbing; }
-.ps-card { position: absolute; left: 50%; top: 0; width: 260px; height: 260px; margin-left: -130px; border: 0; padding: 0; background: none; border-radius: 24px;
-  transition: transform .55s cubic-bezier(.22, .8, .26, 1), opacity .55s ease, filter .55s ease; will-change: transform, opacity, filter; }
-.ps-stage.is-dragging .ps-card { transition: none; }
+.ps-card { position: absolute; left: 50%; top: 20px; width: 250px; height: 250px; margin-left: -125px; border: 0; padding: 0; background: none; border-radius: 24px; will-change: transform, opacity, filter; backface-visibility: hidden; }
 .ps-card img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; pointer-events: none;
   -webkit-mask-image: radial-gradient(closest-side, #000 82%, transparent 100%); mask-image: radial-gradient(closest-side, #000 82%, transparent 100%); }
 .ps-card:not(.is-center) { cursor: pointer; }
 .ps-card.is-center { cursor: default; }
 .ps-card:focus-visible, .ps-arrow:focus-visible, .ps-primary:focus-visible, .ps-jump button:focus-visible, .ps-opt:focus-visible, .ps-back:focus-visible, .ps-item:focus-visible { outline: 2px solid var(--ps-blue-light); outline-offset: -4px; }
-.ps-arrow { position: absolute; top: 108px; z-index: 200; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--ps-g200); background: #fff; color: var(--ps-g700); font-size: 26px; line-height: 1; padding-bottom: 3px; box-shadow: 0 2px 10px rgba(0, 23, 51, .08); }
+.ps-arrow { position: absolute; top: 118px; z-index: 200; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--ps-g200); background: #fff; color: var(--ps-g700); font-size: 26px; line-height: 1; padding-bottom: 3px; box-shadow: 0 2px 10px rgba(0, 23, 51, .08); }
 .ps-arrow:hover { background: var(--ps-g50); color: var(--ps-blue); }
 .ps-l { left: 4px; } .ps-r { right: 4px; }
 .ps-info { text-align: center; padding: 8px 0; }
@@ -48,10 +49,10 @@
 .ps-info p { margin-top: 2px; font-size: 14px; color: var(--ps-g500); }
 .ps-primary { margin-top: 16px; height: 52px; padding: 0 32px; border: 0; border-radius: 14px; background: var(--ps-blue); color: #fff; font-size: 17px; font-weight: 600; }
 .ps-primary:hover { background: var(--ps-blue-mid); }
-.ps-jump { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--ps-g100); display: grid; gap: 10px; }
+.ps-jump { margin: 20px 0 4px; display: grid; gap: 10px; }
 .ps-jgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ps-jgroup > span { width: 52px; font-size: 12px; font-weight: 800; color: var(--ps-g500); }
-.ps-jump button { height: 38px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--ps-g100); color: var(--ps-g700); font-size: 14px; font-weight: 600; }
+.ps-jump button { min-height: 44px; height: 44px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--ps-g100); color: var(--ps-g700); font-size: 14px; font-weight: 600; }
 .ps-jump button:hover { background: var(--ps-g200); }
 .ps-jump button.is-sel { background: var(--ps-blue); color: #fff; }
 
@@ -63,5 +64,4 @@
 .ps-opt b { font-size: 17px; font-weight: 600; }
 .ps-opt small { font-size: 14px; color: var(--ps-g600); }
 .ps-opt.is-sel { border-color: var(--ps-blue-light); background: var(--ps-blue-50); }
-@media (prefers-reduced-motion: reduce) { .ps-card { transition-duration: .01s; } }
-@media (max-width: 600px) { .ps-stage { height: 280px; } .ps-card { width: 200px; height: 200px; margin-left: -100px; } .ps-arrow { top: 78px; } .ps h2 { font-size: 24px; line-height: 32px; } }
+@media (max-width: 600px) { .ps-stage { height: 290px; } .ps-card { width: 190px; height: 190px; margin-left: -95px; top: 16px; } .ps-arrow { top: 112px; } .ps h2 { font-size: 24px; line-height: 32px; } }
