@@ -6,6 +6,7 @@
 //  - [해결 안 됐어요]는 바로 문의 전환(unresolved)
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api, type Evidence, type InquiryForm, type Navigation } from "../../api/client";
+import { getLang } from "../../lib/lang";
 import { fieldLabel } from "./labels";
 import "./chat-panel.css";
 
@@ -71,7 +72,7 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPic
     else push({ role: "user", text });
     setBusy(true);
     try {
-      const reply = await api.chat({ session_id: sessionId, message: text, viewing_product: viewingProduct, unresolved });
+      const reply = await api.chat({ session_id: sessionId, message: text, language: getLang(), viewing_product: viewingProduct, unresolved });
       push({
         role: "assistant", text: reply.answer, evidence: reply.evidence, askFields: reply.ask_fields,
         candidates: reply.navigation.candidates, form: reply.handoff && reply.form ? reply.form : undefined,
