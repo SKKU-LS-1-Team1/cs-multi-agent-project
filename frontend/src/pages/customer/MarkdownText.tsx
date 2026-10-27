@@ -2,7 +2,7 @@
 // 지원: 제목(#) · 문단 · 목록(- , 1.) · 체크박스(- [ ]) · 표 · 굵게 · 인용.
 import { Fragment, type ReactNode } from "react";
 
-type Block =
+export type Block =
   | { t: "h"; text: string }
   | { t: "p"; text: string }
   | { t: "quote"; text: string }
@@ -11,7 +11,7 @@ type Block =
 
 const cells = (line: string) => line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
 
-function parse(text: string): Block[] {
+export function parseBlocks(text: string): Block[] {
   const lines = text.split("\n");
   const out: Block[] = [];
   let i = 0;
@@ -52,7 +52,7 @@ const inline = (s: string): ReactNode[] =>
 export default function MarkdownText({ text }: { text: string }) {
   return (
     <div className="pd-md">
-      {parse(text).map((b, i) => {
+      {parseBlocks(text).map((b, i) => {
         switch (b.t) {
           case "h": return <h5 key={i}>{inline(b.text)}</h5>;
           case "p": return <p key={i}>{inline(b.text)}</p>;
