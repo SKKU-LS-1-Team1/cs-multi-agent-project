@@ -3,9 +3,15 @@ import logo from "./admin/assets/ls-electric-logo.png";
 import CustomerHome from "./pages/customer/CustomerHome";
 import InquirePage from "./pages/customer/InquirePage";
 import MyInquiries from "./pages/customer/MyInquiries";
+import LangMenu from "./pages/customer/LangMenu";
+import Onboarding from "./pages/customer/Onboarding";
+import { useLangState } from "./lib/lang";
 import "./pages/customer/shell.css";
+import "./pages/customer/onboarding.css";
 
 export default function App() {
+  const { onboarded } = useLangState();
+  if (!onboarded) return <Onboarding />; // 첫 방문(또는 [국가·언어 다시 고르기])에는 국가 확인과 언어 선택부터
   return (
     <>
       <header className="cs-top">
@@ -18,8 +24,8 @@ export default function App() {
           <NavLink to="/inquire">문의 남기기</NavLink>
           <NavLink to="/my">내 문의</NavLink>
         </nav>
-        {/* 오른쪽 끝: 언어 선택 자리 (다국어 작업에서 붙인다) */}
         <div className="cs-top-end">
+          <LangMenu />
           <a href="/admin/" className="cs-staff">상담원용</a>
         </div>
       </header>

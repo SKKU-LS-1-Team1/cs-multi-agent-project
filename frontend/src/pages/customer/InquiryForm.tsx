@@ -4,6 +4,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, type InquiryForm as FormDraft } from "../../api/client";
+import { getCountry, getLang } from "../../lib/lang";
 import { newThreadRef, rememberInquiry } from "../../lib/myInquiries";
 import { CATEGORY_KO, FIELD_HINT, fieldLabel } from "./labels";
 
@@ -39,6 +40,8 @@ export default function InquiryForm({ draft, onDone }: Props) {
         body,
         provided_fields: fields,
         thread_ref: threadRef,
+        language: getLang(), // 온보딩에서 고른 언어 — 상담원 답변을 이 언어로 보낸다
+        country: getCountry(), // 감지에 성공한 지원 국가만
       });
       rememberInquiry({ ticket_id: ticket.ticket_id, thread_ref: threadRef, subject: subject.trim() || draft.subject });
       setSent(ticket.ticket_id);
