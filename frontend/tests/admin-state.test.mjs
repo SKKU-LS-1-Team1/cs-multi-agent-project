@@ -959,3 +959,41 @@ test('customer refresh preserves last server rows on failure and never loads sam
   fail = false; await refresh();
   assert.equal(render().error, ''); cleanup();
 });
+
+test('ticket store excludes legacy demo rows but retains server cache', () => {
+  for (const saved of [null, [{ id: 'demo' }], [{ id: 'demo' }, { id: 'real', source: 'api' }]]) {
+    const mod = load('lib/store.ts', { react: { useSyncExternalStore: noop } }, {
+      localStorage: { getItem: () => JSON.stringify(saved) },
+    });
+    assert.deepEqual(Array.from(mod.tickets, t => t.id), saved?.length === 2 ? ['real'] : []);
+  }
+});
+
+test('ticket sync removes only confirmed 404s and retains transient failures', async () => {
+  const rows = ['gone', 'busy', 'offline'].map(id => ({ ...ticket(), id }));
+  const ui = {};
+  const mod = load('lib/api-sync.ts', {
+    sonner: { toast }, '../../api/client': { api: {
+      workList: async () => [], agents: async () => [], answered: async () => [], closed: async () => [],
+      ticket: async id => { throw Object.assign(new Error('failed'), { status: id === 'gone' ? 404 : id === 'busy' ? 500 : undefined }); },
+    } }, './logic': { people: [], answerContext: () => ({}), contextKey: JSON.stringify },
+    './store': { tickets: rows, commit: noop, setUi: patch => Object.assign(ui, patch) },
+  });
+  assert.equal(await mod.syncFromApi(), false);
+  assert.deepEqual(rows.map(t => t.id), ['busy', 'offline']);
+  assert.equal(ui.ticketSync, 'error');
+});
+
+test('failed list fetch retains cached tickets and exposes connection error', async () => {
+  const rows = [ticket()], ui = {};
+  const mod = load('lib/api-sync.ts', {
+    sonner: { toast }, '../../api/client': { api: {
+      workList: async () => { throw new Error('offline'); }, agents: async () => [], answered: async () => [], closed: async () => [],
+    } }, './logic': { people: [], answerContext: () => ({}), contextKey: JSON.stringify },
+    './store': { tickets: rows, commit: noop, setUi: patch => Object.assign(ui, patch) },
+  });
+  assert.equal(await mod.syncFromApi(), false);
+  assert.equal(rows.length, 1);
+  assert.equal(ui.ticketSync, 'error');
+  assert.match(ui.ticketSyncError, /서버 연결/);
+});
