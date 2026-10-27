@@ -155,3 +155,9 @@ export function TicketRow({ t, onOpen, lead }: { t: Ticket; onOpen: () => void; 
     </div>
   );
 }
+
+/** 화면을 열 때 카드가 차례로 살짝 떠오르며 나타난다(order = 순서). 움직임 줄이기 설정이면 바로 보인다. */
+export const rise = (order = 0) => ({
+  className: "animate-in fade-in slide-in-from-bottom-2 fill-mode-both duration-500 motion-reduce:animate-none",
+  style: { animationDelay: `${Math.min(order, 8) * 70}ms` },
+});

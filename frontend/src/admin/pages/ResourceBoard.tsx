@@ -5,7 +5,7 @@ import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, us
 import { toast } from "sonner";
 import { ChevronDown, GripVertical } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
-import { Mono, NativeSelect, PersonAvatar, PriorityTag, Tag, useGo } from "@admin/components/admin/common";
+import { Mono, NativeSelect, PersonAvatar, PriorityTag, Tag, rise, useGo } from "@admin/components/admin/common";
 import { checkAssign, departmentRisk, openTickets, ownedTickets, canAssign, people, recommend, resource, teamLead } from "@admin/lib/logic";
 import { moveTicket } from "@admin/lib/actions";
 import { openModal, useStore } from "@admin/lib/store";
@@ -51,10 +51,10 @@ export default function ResourceBoard() {
 
       <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onStart} onDragEnd={onEnd} onDragCancel={() => setActive(null)}>
         <div className="grid auto-cols-[minmax(210px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-2">
-          <Column id={UNASSIGNED} title="미배정" tickets={unassigned} dragging={!!active} verdict={verdict(UNASSIGNED)} go={go}
+          <Column id={UNASSIGNED} order={0} title="미배정" tickets={unassigned} dragging={!!active} verdict={verdict(UNASSIGNED)} go={go}
             sub={<span className="text-xs text-muted-foreground">담당자 지정 대기</span>} />
-          {team.map((p) => (
-            <Column key={p.name} id={p.name} title={p.name} tickets={ownedTickets(p.name)} dragging={!!active} verdict={verdict(p.name)} recommended={best?.name === p.name} person={p} go={go} />
+          {team.map((p, i) => (
+            <Column key={p.name} id={p.name} order={i + 1} title={p.name} tickets={ownedTickets(p.name)} dragging={!!active} verdict={verdict(p.name)} recommended={best?.name === p.name} person={p} go={go} />
           ))}
         </div>
         <DragOverlay dropAnimation={null}>{active && <Card t={active} overlay />}</DragOverlay>
@@ -63,15 +63,15 @@ export default function ResourceBoard() {
   );
 }
 
-function Column({ id, title, tickets, person, sub, dragging, verdict, recommended, go }: {
-  id: string; title: string; tickets: Ticket[]; person?: Person; sub?: React.ReactNode; dragging: boolean;
+function Column({ id, order, title, tickets, person, sub, dragging, verdict, recommended, go }: {
+  id: string; order: number; title: string; tickets: Ticket[]; person?: Person; sub?: React.ReactNode; dragging: boolean;
   verdict: { ok: boolean; reason?: string }; recommended?: boolean; go: ReturnType<typeof useGo>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const r = person ? resource(person) : null;
   return (
-    <section ref={setNodeRef} aria-label={`${title} 열`}
-      className={cn("flex min-h-[calc(100dvh-300px)] flex-col gap-3 rounded-2xl bg-muted/70 p-3 transition-colors",
+    <section ref={setNodeRef} aria-label={`${title} 열`} style={rise(order).style}
+      className={cn("flex min-h-[calc(100dvh-300px)] flex-col gap-3 rounded-2xl bg-muted/70 p-3 transition-colors", rise(order).className,
         dragging && verdict.ok && "ring-1 ring-success/60 bg-success/5",
         dragging && !verdict.ok && "opacity-45",
         isOver && verdict.ok && "ring-2 ring-success bg-success/10",
