@@ -6,10 +6,11 @@
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; word-break: keep-all;
 }
 .cp button { font-family: inherit; cursor: pointer; }
-.cp-head { height: 64px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px; background: var(--cp-g50); border-bottom: 1px solid var(--cp-g200); }
-.cp-av { width: 36px; height: 36px; border-radius: 50%; background: var(--cp-blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.cp-head { position: relative; min-height: 64px; flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 20px; background: var(--cp-g50); border-bottom: 1px solid var(--cp-g200); }
+.cp-av { flex: none; }
+.cp-ht { min-width: 0; }
 .cp-head b { display: block; font-size: 15px; line-height: 22px; color: var(--cp-g900); }
-.cp-head small { display: block; font-size: 12px; line-height: 18px; color: var(--cp-g500); }
+.cp-head small { display: block; font-size: 12px; line-height: 17px; color: var(--cp-g500); overflow-wrap: anywhere; }
 .cp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
 .cp-msg { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
 .cp-msg.user { align-items: flex-end; }
@@ -37,6 +38,44 @@
 .cp-box input::placeholder { color: var(--cp-g400); }
 .cp-box button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--cp-blue); color: #fff; font-size: 18px; }
 .cp-box button:disabled { background: var(--cp-g200); color: var(--cp-g500); cursor: default; }
-.cp-in p { font-size: 12px; color: var(--cp-g500); padding-left: 4px; }
 .cp button:focus-visible, .cp input:focus-visible { outline: 2px solid var(--cp-blue-light); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .cp-typing i { animation: none; opacity: .6; } }
+
+/* 대화 초기화 */
+.cp-reset { margin-left: auto; flex: none; white-space: nowrap; border: 0; background: none; padding: 6px 8px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--cp-g600); }
+.cp-reset:hover:not(:disabled) { background: var(--cp-g200); color: var(--cp-g900); }
+.cp-reset:disabled { color: var(--cp-g400); cursor: default; }
+.cp-pop { position: absolute; z-index: 30; top: 58px; left: 16px; right: 16px; background: #fff; border: 1px solid var(--cp-g200); border-radius: 16px; padding: 18px; box-shadow: 0 12px 32px rgba(2, 32, 71, .16); display: grid; gap: 6px; }
+.cp { position: relative; }
+.cp-pop b { font-size: 16px; color: var(--cp-g900); }
+.cp-pop p { font-size: 13px; line-height: 19px; color: var(--cp-g600); }
+.cp-pop div { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.cp-pop button { height: 38px; padding: 0 16px; border: 0; border-radius: 10px; font-size: 14px; font-weight: 600; }
+.cp-cancel { background: var(--cp-g100); color: var(--cp-g800); } .cp-cancel:hover { background: var(--cp-g200); }
+.cp-ok { background: var(--cp-blue); color: #fff; } .cp-ok:hover { background: var(--cp-blue-mid); }
+/* 휴대폰에서는 챗봇이 전체 화면 서랍이라 오른쪽 위 닫기 버튼(shell.css)과 겹치지 않게 비운다 */
+@media (max-width: 900px) { .cp-head { padding-right: 58px; } .cp-pop { top: 70px; } }
+
+/* 상담 중인 제품 카드 */
+.cp-ctx { margin: 12px 16px 0; background: #fff; border: 1px solid var(--cp-g200); border-radius: 16px; overflow: hidden; flex: none; }
+.cp-ctx-h { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px 12px 16px; border: 0; background: #fff; text-align: left; transition: background-color .15s ease; }
+.cp-ctx-h:hover { background: var(--cp-g50); } .cp-ctx-h:active { background: var(--cp-g100); }
+.cp-ctx-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cp-ctx-t small { font-size: 12px; line-height: 17px; color: var(--cp-g500); }
+.cp-ctx-t b { font-size: 15px; line-height: 21px; font-weight: 700; color: var(--cp-g900); overflow-wrap: anywhere; border-radius: 6px; }
+.cp-ctx-sum { display: block; font-size: 13px; line-height: 19px; color: var(--cp-g500); max-height: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 6px; transition: max-height .22s ease, opacity .2s ease; }
+.cp-ctx-sum.is-off { max-height: 0; opacity: 0; }
+.cp-ctx-chev { flex: none; color: var(--cp-g500); transition: transform .22s ease; }
+.cp-ctx-h[aria-expanded="true"] .cp-ctx-chev { transform: rotate(180deg); }
+.cp-ctx-wrap { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows .22s ease, opacity .2s ease, visibility 0s linear .22s; }
+.cp-ctx-wrap.is-open { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows .22s ease, opacity .2s ease, visibility 0s; }
+.cp-ctx-in { min-height: 0; overflow: hidden; }
+.cp-ctx dl { margin: 0; padding: 2px 16px 14px; display: grid; gap: 10px; }
+.cp-ctx dl > div { display: grid; grid-template-columns: 78px 1fr; gap: 8px; border-radius: 8px; margin: 0 -6px; padding: 0 6px; }
+.cp-ctx dt { font-size: 12px; line-height: 20px; color: var(--cp-g400); }
+.cp-ctx dd { margin: 0; font-size: 14px; line-height: 20px; color: var(--cp-g800); overflow-wrap: anywhere; }
+.cp-ctx dd small { display: block; font-size: 12px; line-height: 17px; color: var(--cp-g500); margin-top: 1px; }
+.cp-ctx .is-flash { animation: cp-flash 1.4s ease-out 1; }
+@keyframes cp-flash { 0%, 35% { background-color: var(--cp-blue-50); } 100% { background-color: transparent; } }
+.cp-ctx-h:focus-visible, .cp-reset:focus-visible, .cp-pop button:focus-visible { outline: 2px solid var(--cp-blue-light); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .cp-ctx-wrap, .cp-ctx-wrap.is-open, .cp-ctx-sum, .cp-ctx-chev { transition-duration: .01s; } .cp-ctx .is-flash { animation: none; } }

@@ -835,3 +835,17 @@ for (const source of ['api', 'local']) {
     assert.ok(calls.every(call => call.name === 'preview')); // conversion never sends
   });
 }
+
+test('QC transport error preserves review for unchanged preview retry; violation requires editing', async () => {
+  for (const decision of ['ERROR', 'BLOCK', 'REVIEW']) {
+    const { mod, state } = apiFixture();
+    const t = mod.apply(undefined, apiRow());
+    t.purpose = 'answer'; setPreview(mod, t); t.reviewed = true;
+    state.reply = apiRow({ status: 'ON_HOLD', approval_text: t.draft,
+      approval_error: 'QC failed', customer_qc: { decision, issues: [], message: 'QC failed' } });
+    assert.equal(await mod.sendViaApi(t), false);
+    assert.equal(t.reviewed, decision === 'ERROR');
+    assert.equal(t.customerQc.decision, decision);
+    assert.equal(t.events.some(e => e.kind === 'sent'), false);
+  }
+});

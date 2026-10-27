@@ -66,6 +66,7 @@ def run():
     def _run(inquiry: InquiryIn, calls: Calls | None = None, ticket_id: str = "T-1"):
         calls = calls or Calls()
         deps = GraphDeps(
+            check_customer_qc=stubs.pass_customer_qc,
             llm=LLMRouter(Settings(_env_file=None)),
             max_retries=2,
             classify=calls.classify,
@@ -120,6 +121,7 @@ def test_english_review_then_translate_approved_text_to_customer_language(action
         return stubs.extract(inquiry, tables, **kwargs).model_copy(update={"language": "en"})
 
     deps = GraphDeps(
+        check_customer_qc=stubs.pass_customer_qc,
         llm=LLMRouter(Settings(_env_file=None)),
         classify=stubs.classify,
         extract=extract,
@@ -155,6 +157,7 @@ def test_translation_failure_retains_edited_reply_for_retry_and_reopen_clears_it
         return "Réponse corrigée."
 
     deps = GraphDeps(
+        check_customer_qc=stubs.pass_customer_qc,
         llm=LLMRouter(Settings(_env_file=None)),
         classify=stubs.classify,
         extract=stubs.extract,
@@ -188,6 +191,7 @@ def test_nonapproval_does_not_translate(action):
         raise AssertionError("No translation before approval")
 
     deps = GraphDeps(
+        check_customer_qc=stubs.pass_customer_qc,
         llm=LLMRouter(Settings(_env_file=None)),
         classify=stubs.classify,
         extract=stubs.extract,
@@ -213,6 +217,7 @@ def test_extracted_field_values_reach_draft_and_checkpoint():
         return Draft(text="draft", slots=dict(extraction.field_values), model="stub")
 
     deps = GraphDeps(
+        check_customer_qc=stubs.pass_customer_qc,
         llm=LLMRouter(Settings(_env_file=None)),
         classify=stubs.classify,
         extract=extract,
@@ -296,6 +301,7 @@ def test_info_request_is_localized_when_sent():
         return f"[{language}] {text}"
 
     deps = GraphDeps(
+        check_customer_qc=stubs.pass_customer_qc,
         llm=LLMRouter(Settings(_env_file=None)),
         classify=calls.classify,
         extract=calls.extract,
@@ -335,6 +341,7 @@ def test_info_request_held_when_translation_fails_then_sent_on_reapproval():
         return out
 
     deps = GraphDeps(
+        check_customer_qc=stubs.pass_customer_qc,
         llm=LLMRouter(Settings(_env_file=None)),
         classify=calls.classify,
         extract=calls.extract,
@@ -380,6 +387,7 @@ def test_held_info_request_keeps_reviewer_edit_on_reapproval():
         return f"[{language}] {text}"
 
     deps = GraphDeps(
+        check_customer_qc=stubs.pass_customer_qc,
         llm=LLMRouter(Settings(_env_file=None)),
         classify=calls.classify,
         extract=calls.extract,
@@ -465,6 +473,7 @@ def test_offline_llm_never_fakes_analysis():
 
 def _service(calls: Calls) -> TicketService:
     deps = GraphDeps(
+        check_customer_qc=stubs.pass_customer_qc,
         llm=LLMRouter(Settings(_env_file=None)),
         classify=calls.classify,
         extract=calls.extract,

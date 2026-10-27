@@ -108,7 +108,16 @@ def test_chat_tasks_use_the_low_thinking_writer(monkeypatch):
     made = []
 
     class Gemini(StubWriter):
-        def __init__(self, api_key, model, *, json_mode=False, thinking_level=None):
+        def __init__(
+            self,
+            api_key,
+            model,
+            *,
+            json_mode=False,
+            thinking_level=None,
+            timeout=None,
+            max_retries=2,
+        ):
             super().__init__()
             self.json_mode, self.thinking_level = json_mode, thinking_level
             made.append(self)

@@ -33,4 +33,12 @@ def extract(inquiry: InquiryIn, tables, *, llm=None, category=None) -> Extractio
     )
 
 
-ANALYSIS = {"classify": classify, "extract": extract}
+def pass_customer_qc(text, *args, **kwargs):
+    import hashlib
+
+    from cs_agent.qc_schemas import QcResult
+
+    return QcResult(decision="PASS", text_hash=hashlib.sha256(text.encode()).hexdigest())
+
+
+ANALYSIS = {"classify": classify, "extract": extract, "check_customer_qc": pass_customer_qc}

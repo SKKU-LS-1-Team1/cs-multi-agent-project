@@ -164,6 +164,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     apiCheckedText: api.approval_text || api.draft?.text || "",
     apiApprovalText: api.approval_text,
     approvalError: api.approval_error,
+    customerQc: api.customer_qc,
     resolution: api.resolution ? { ...api.resolution, confirmedBy: api.resolution.confirmed_by, confirmedAt: api.resolution.confirmed_at } : null,
     resolutionSuperseded: api.resolution?.superseded ?? false,
     apiInfoRequest: Boolean(api.info_request), // 지금 검토할 글이 백엔드 추가정보 요청문인가
@@ -360,7 +361,8 @@ export async function sendViaApi(t: Ticket, options: SendOptions = {}): Promise<
   if (!hasCurrentReplyPreview(t)) { toast.error("먼저 고객 언어로 변환한 내용을 확인하세요."); return false; }
   const text = t.draft, purpose = t.purpose, edited = text !== String(t.aiDraft || "");
   const sendEdit = edited || Boolean(t.apiSendSource && t.apiSendSource !== text);
-  sends.add(t); t.sending = true; commit();
+  const reviewed = t.reviewed, previewKey = replyPreviewKey(t);
+  sends.add(t); t.sending = true; t.customerQc = null; commit();
   try {
     const row = await api.act(t.id, {
       action: sendEdit ? "edit_approve" : "approve", ...(sendEdit ? { edited_text: text } : {}),
@@ -371,7 +373,7 @@ export async function sendViaApi(t: Ticket, options: SendOptions = {}): Promise<
     const sent = ["APPROVED", "WAITING_CUSTOMER"].includes(row.status) && Boolean(row.final_reply?.trim());
     if (!sent) {
       apply(t, row);
-      t.reviewed = false;
+      t.reviewed = Boolean(row.customer_qc?.decision === "ERROR" && reviewed && previewKey === replyPreviewKey(t));
       toast.error(row.approval_error || (row.translation_error
         ? "고객 언어 번역을 확인하지 못해 보류했습니다. 내용을 확인하고 다시 발송해 주세요."
         : "최종 점검 결과를 확인해 주세요. 답변은 발송되지 않았으며 작성 내용은 보존했습니다."));

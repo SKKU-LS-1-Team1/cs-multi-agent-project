@@ -8,6 +8,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type ProductDetail as Detail } from "../../api/client";
 import DocViewer from "./DocViewer";
+import InstallGuide from "./InstallGuide";
+import { buildInstallSteps } from "./installSteps";
 import MarkdownText from "./MarkdownText";
 import "./product-detail.css";
 
@@ -17,8 +19,8 @@ type Props = { code: string; tab: string; anchor: string | null; onTab: (t: stri
 type Source = { docId: string; section: string | null };
 
 const TAB_LABELS: Record<string, string> = {
-  info: "📊 제품 정보", install: "🛠️ 설치 가이드", faults: "⚠️ 자주 발생하는 고장",
-  firmware: "🔄 펌웨어", faq: "❓ FAQ", docs: "📄 문서 자료실",
+  info: "제품 정보", install: "설치 가이드", faults: "자주 발생하는 고장",
+  firmware: "펌웨어", faq: "FAQ", docs: "문서 자료실",
 };
 
 function Row({ hit, children }: { hit?: boolean; children: ReactNode }) {
@@ -117,19 +119,28 @@ export default function ProductDetail({ code, tab, anchor, onTab }: Props) {
         </div>
       )}
 
-      {active === "install" && product.install && (
-        <div className="pd-pane">
-          <p className="pd-hint">{product.install.title} (Rev. {product.install.revision})</p>
-          {product.install.sections.map((s) => (
-            <Row key={s.section} hit={anchor === s.section}>
-              <button type="button" className="pd-acc" aria-expanded={openSec === s.section} onClick={() => setOpenSec(openSec === s.section ? null : s.section)}>
-                <span>{s.section}. {s.title}</span><i aria-hidden="true">{openSec === s.section ? "▲" : "▼"}</i>
-              </button>
-              {openSec === s.section && <div className="pd-accbody"><MarkdownText text={s.text} />{view(product.install?.doc_id, s.section)}</div>}
-            </Row>
-          ))}
-        </div>
-      )}
+      {active === "install" && product.install && (() => {
+        const steps = buildInstallSteps(product.install.sections);
+        const doc = product.install;
+        return (
+          <div className="pd-pane">
+            <p className="pd-hint">{doc.title} (Rev. {doc.revision})</p>
+            {steps ? (
+              <InstallGuide steps={steps} anchor={anchor} onSource={(section) => setSource({ docId: doc.doc_id, section })} />
+            ) : (
+              // 알려진 절 구성이 아니면 원문 절을 그대로 목록으로 보여 준다
+              doc.sections.map((s) => (
+                <Row key={s.section} hit={anchor === s.section}>
+                  <button type="button" className="pd-acc" aria-expanded={openSec === s.section} onClick={() => setOpenSec(openSec === s.section ? null : s.section)}>
+                    <span>{s.section}. {s.title}</span><i aria-hidden="true">{openSec === s.section ? "▲" : "▼"}</i>
+                  </button>
+                  {openSec === s.section && <div className="pd-accbody"><MarkdownText text={s.text} />{view(doc.doc_id, s.section)}</div>}
+                </Row>
+              ))
+            )}
+          </div>
+        );
+      })()}
 
       {active === "faults" && (
         <div className="pd-pane">

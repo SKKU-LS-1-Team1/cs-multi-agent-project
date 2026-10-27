@@ -6,12 +6,19 @@
 //  - [해결 안 됐어요]는 바로 문의 전환(unresolved)
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api, type Evidence, type InquiryForm, type Navigation } from "../../api/client";
+import ContextCard from "./ContextCard";
 import { getLang } from "../../lib/lang";
 import { fieldLabel } from "./labels";
+import { familyName } from "./productFamilies";
 import "./chat-panel.css";
+
+// 상세 화면 탭 이름 (ProductDetail 과 같다) — 상담 중인 제품 카드의 "보고 있는 화면"
+const TAB_KO: Record<string, string> = { info: "제품 정보", install: "설치 가이드", faults: "자주 발생하는 고장", firmware: "펌웨어", faq: "FAQ", docs: "문서 자료실" };
 
 type Props = {
   viewingProduct: string | null;
+  tab?: string; // 지금 보고 있는 상세 탭
+  onReset?: () => void; // 대화 초기화 때 화면 쪽에 남은 챗봇 임시 정보(문의서 초안)를 비운다
   onNavigate: (nav: Navigation) => void;
   onHandoff: (form: InquiryForm) => void;
   onPickProduct?: (code: string) => void;
@@ -41,13 +48,15 @@ function load(): Saved {
   return { sessionId: crypto.randomUUID(), messages: [] };
 }
 
-export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPickProduct }: Props) {
+export default function ChatPanel({ viewingProduct, tab, onNavigate, onHandoff, onPickProduct, onReset }: Props) {
   const saved = useMemo(load, []);
-  const [sessionId] = useState(saved.sessionId);
+  const [sessionId, setSessionId] = useState(saved.sessionId);
   const [messages, setMessages] = useState<Message[]>(saved.messages);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
+  const [families, setFamilies] = useState<Record<string, string>>({}); // 제품 코드 → 제품군 이름
+  const [confirm, setConfirm] = useState(false); // 대화 초기화 확인창
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -58,7 +67,11 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPic
   // "제품 선택" 버튼에 제품 이름을 보여 주려고 트리를 한 번 읽는다 (실패하면 코드로 보여 준다)
   useEffect(() => {
     api.productTree()
-      .then((tree) => setNames(Object.fromEntries(tree.flatMap((d) => d.families.flatMap((f) => f.products.map((p) => [p.code, p.name]))))))
+      .then((tree) => {
+        const products = tree.flatMap((d) => d.families.flatMap((f) => f.products.map((p) => ({ code: p.code, name: p.name, family: familyName(f.family, f.label) }))));
+        setNames(Object.fromEntries(products.map((p) => [p.code, p.name])));
+        setFamilies(Object.fromEntries(products.map((p) => [p.code, p.family])));
+      })
       .catch(() => undefined);
   }, []);
 
@@ -91,6 +104,15 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPic
     }
   };
 
+  // 대화 내역·입력·서버 쪽 대화 맥락(세션)을 비운다. 화면에서 고른 제품·탭과 이미 낸 문의는 그대로 둔다.
+  const reset = () => {
+    setSessionId(crypto.randomUUID()); // 새 세션이라 서버에 쌓인 이전 대화가 이어지지 않는다
+    setMessages([]);
+    setInput("");
+    setConfirm(false);
+    onReset?.();
+  };
+
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     // 한글 입력 중(조합 중) Enter 는 글자 확정이라 보내지 않는다
     if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); void send(input); }
@@ -99,9 +121,28 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPic
   return (
     <aside className="cp" aria-label="AI 상담">
       <header className="cp-head">
-        <span className="cp-av" aria-hidden="true">⚡</span>
-        <div><b>AI 상담</b><small>{viewingProduct ? `보고 있는 제품 · ${names[viewingProduct] ?? viewingProduct}` : "보통 바로 답해요"}</small></div>
+        <svg className="cp-av" width="30" height="30" viewBox="0 0 48 48" aria-hidden="true">
+          <path d="M24 6c10.5 0 18 6.8 18 15.5S34.5 37 24 37c-1.8 0-3.5-.2-5.1-.6L10 42l1.7-8.2C8.2 31.4 6 27.8 6 21.5 6 12.8 13.5 6 24 6z" fill="#3562A6" />
+          <circle cx="16.5" cy="21.5" r="2.6" fill="#fff" /><circle cx="24" cy="21.5" r="2.6" fill="#fff" /><circle cx="31.5" cy="21.5" r="2.6" fill="#fff" />
+        </svg>
+        <div className="cp-ht"><b>AI 상담</b><small>대화한 내용은 문의서에 자동으로 들어가요.</small></div>
+        <button type="button" className="cp-reset" disabled={messages.length === 0} aria-haspopup="dialog" aria-expanded={confirm} onClick={() => setConfirm(true)}>대화 초기화</button>
       </header>
+
+      {confirm && (
+        <div className="cp-pop" role="alertdialog" aria-labelledby="cp-pop-t" onKeyDown={(e) => e.key === "Escape" && setConfirm(false)}>
+          <b id="cp-pop-t">대화를 초기화할까요?</b>
+          <p>대화가 지워져요. 보고 있는 제품은 유지돼요.</p>
+          <div>
+            <button type="button" className="cp-cancel" autoFocus onClick={() => setConfirm(false)}>취소</button>
+            <button type="button" className="cp-ok" onClick={reset}>초기화</button>
+          </div>
+        </div>
+      )}
+
+      {viewingProduct && (
+        <ContextCard family={families[viewingProduct] ?? null} name={names[viewingProduct] ?? viewingProduct} code={viewingProduct} screen={tab ? TAB_KO[tab] ?? null : null} />
+      )}
 
       <div className="cp-body" ref={bodyRef} aria-live="polite">
         <div className="cp-bub">{WELCOME}</div>
@@ -122,7 +163,7 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPic
             {m.askFields && m.askFields.length > 0 && (
               <p className="cp-ask">💡 알려 주시면 더 정확해요: {m.askFields.map(fieldLabel).join(", ")}</p>
             )}
-            {m.form && <button type="button" className="cp-go" onClick={() => onHandoff(m.form as InquiryForm)}>📝 문의서 열기</button>}
+            {m.form && <button type="button" className="cp-go" onClick={() => onHandoff(m.form as InquiryForm)}>문의서 열기</button>}
             {m.retry && <button type="button" className="cp-go" disabled={busy} onClick={() => void send(m.retry?.text ?? "", m.retry?.unresolved, true)}>다시 시도</button>}
           </div>
         ))}
@@ -137,7 +178,6 @@ export default function ChatPanel({ viewingProduct, onNavigate, onHandoff, onPic
           <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKey} placeholder="궁금한 점을 적어 주세요" aria-label="메시지" disabled={busy} />
           <button type="button" aria-label="보내기" onClick={() => void send(input)} disabled={busy || !input.trim()}>↑</button>
         </div>
-        <p>대화한 내용은 문의서에 자동으로 들어가요.</p>
       </div>
     </aside>
   );

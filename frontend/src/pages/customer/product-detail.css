@@ -78,3 +78,40 @@
 .pd button:focus-visible { outline: 2px solid var(--pd-blue-light); outline-offset: 2px; }
 @media (max-width: 700px) { .pd-facts { grid-template-columns: 1fr; } .pd-head h2 { font-size: 22px; line-height: 30px; } }
 @media (prefers-reduced-motion: reduce) { .pd-row.is-hit, .pd-doc section.is-hit { animation: none; } }
+
+/* 설치 가이드: 위에서 아래로 읽는 단계 흐름 */
+.pd-g { list-style: none; margin: 8px 0 0; padding: 0; }
+.pd-g-item { display: block; }
+.pd-g-grp { margin: 8px 0 16px; font-size: 14px; font-weight: 700; color: var(--pd-blue-light); list-style: none; }
+.pd-g-step { list-style: none; display: grid; grid-template-columns: 32px 1fr; column-gap: 16px; position: relative; padding-bottom: 36px; opacity: 0; transform: translateY(8px); transition: opacity .24s ease, transform .24s ease; }
+.pd-g-step.is-in { opacity: 1; transform: none; }
+.pd-g-step::before { content: ""; position: absolute; left: 15px; top: 36px; bottom: 6px; width: 2px; background: var(--pd-g200); }
+.pd-g-item:last-child .pd-g-step::before { display: none; }
+.pd-g-n { width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid #becde3; background: #fff; color: var(--pd-blue); font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.pd-g-c { min-width: 0; display: grid; gap: 14px; align-content: start; }
+.pd-g-c h3 { margin: 0; font-size: 21px; line-height: 30px; font-weight: 700; color: var(--pd-g900); }
+.pd-g-lead { margin: -6px 0 0; font-size: 16px; line-height: 25px; color: var(--pd-g700); }
+.pd-g-ul, .pd-g-ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 16px; line-height: 24px; color: var(--pd-g900); }
+.pd-g-chk, .pd-g-cl, .pd-g-iss { list-style: none; margin: 0; padding: 0; display: grid; }
+.pd-g-chk { gap: 8px; }
+.pd-g-chk li { position: relative; padding-left: 26px; font-size: 16px; line-height: 24px; color: var(--pd-g900); }
+.pd-g-chk li::before { content: ""; position: absolute; left: 3px; top: 6px; width: 11px; height: 6px; border-left: 2.5px solid var(--pd-blue-light); border-bottom: 2.5px solid var(--pd-blue-light); transform: rotate(-45deg); }
+.pd-g-cl { gap: 10px; }
+.pd-g-cl label { display: flex; gap: 12px; align-items: flex-start; font-size: 16px; line-height: 24px; color: var(--pd-g900); cursor: pointer; }
+.pd-g-cl input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--pd-blue); flex: none; }
+.pd-g-iss li { display: grid; gap: 2px; padding: 12px 0; border-bottom: 1px solid var(--pd-g100); font-size: 15px; line-height: 22px; }
+.pd-g-iss b { color: var(--pd-g900); } .pd-g-iss span { color: var(--pd-g700); } .pd-g-iss small { color: var(--pd-g500); font-size: 13px; }
+.pd-g-warn { border-radius: 12px; background: #fff9e7; padding: 12px 14px; font-size: 14px; line-height: 21px; color: var(--pd-g900); }
+.pd-g-warn b { display: block; font-size: 13px; color: #dd7d02; margin-bottom: 2px; }
+.pd-g-note { border-radius: 12px; border: 1px dashed #d1d6db; padding: 12px 14px; font-size: 14px; line-height: 21px; color: var(--pd-g700); }
+.pd-g-det summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--pd-g600); list-style: none; display: inline-flex; align-items: center; gap: 4px; }
+.pd-g-det summary::-webkit-details-marker { display: none; }
+.pd-g-det summary::after { content: "›"; transition: transform .2s ease; display: inline-block; }
+.pd-g-det[open] summary::after { transform: rotate(90deg); }
+.pd-g-det .pd-g-ul { margin-top: 10px; font-size: 14px; line-height: 21px; color: var(--pd-g700); }
+.pd-g-src { justify-self: start; border: 0; background: none; padding: 2px 0; font-size: 13px; font-weight: 600; color: var(--pd-blue-light); cursor: pointer; }
+.pd-g-src:hover { text-decoration: underline; }
+.pd-g-src:focus-visible, .pd-g-det summary:focus-visible { outline: 2px solid var(--pd-blue-light); outline-offset: 2px; border-radius: 6px; }
+.pd-g-step.is-hit .pd-g-c { background: var(--pd-blue-50); border-radius: 14px; box-shadow: 0 0 0 8px var(--pd-blue-50); animation: pd-flash .9s ease; }
+@media (prefers-reduced-motion: reduce) { .pd-g-step { opacity: 1; transform: none; transition: none; } .pd-g-det summary::after { transition: none; } }
+@media (max-width: 600px) { .pd-g-c h3 { font-size: 19px; line-height: 27px; } }
