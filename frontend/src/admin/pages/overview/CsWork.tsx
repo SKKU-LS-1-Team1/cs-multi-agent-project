@@ -1,9 +1,10 @@
+import { todayTasks } from "@admin/lib/actions";
 // C/S 업무 홈(2단): 위 = 오늘 내가 할 일 | SLA 안정도, 아래 = 팀 현황 | 전문부서 협업 요약. 위쪽 버튼으로 카드를 켜고 끌 수 있다.
 import { ArrowRight, CheckCheck, ChevronRight, FilePenLine, MessageSquareReply, Plus, Send, UserPlus, type LucideIcon } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { CustomizeMenu, Ring, useWidgets } from "@admin/components/admin/charts";
 import { Mono, PageHeader, PersonAvatar, SlaTag, Tag, useGo } from "@admin/components/admin/common";
-import { departmentRank, departmentRisk, openTickets, ownedTickets, people, referralRows, canAssign, FRONTLINE, resource, signedIn, teamLead, slaMinutes, stats, todayTasks } from "@admin/lib/logic";
+import { departmentRank, departmentRisk, openTickets, ownedTickets, people, referralRows, canAssign, FRONTLINE, resource, signedIn, teamLead, slaMinutes, stats } from "@admin/lib/logic";
 import { openModal, setUi, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 

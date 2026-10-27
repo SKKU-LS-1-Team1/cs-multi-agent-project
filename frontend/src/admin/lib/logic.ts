@@ -603,23 +603,3 @@ export const isEdited = (t: Ticket) => {
   const original = t.source === "api" ? t.aiDraft : t.draftOriginal;
   return !!t.draft && !!original && (t.source === "api" ? t.draft !== String(original) : t.draft.trim() !== String(original).trim());
 };
-
-// BACKEND: 오늘 내가 할 일
-// 필요: 담당 문의마다 "지금 해야 할 행동 하나"(고객 회신 확인 · 초안 검토 · 승인·발송 · 답변 작성 · 완료 기록)와 기한. 고객·전문부서 회신을 기다리는 건은 제외.
-// 지금: 화면에서 문의 상태로 계산한다.
-/** 오늘 내가 할 일: 내 담당 문의마다 "지금 해야 할 행동 하나"를 뽑는다. 고객·전문부서 회신을 기다리는 건은 내 할 일이 아니라 제외. 급한 순. */
-export function todayTasks(owner = signedIn) {
-  const label = (t: Ticket): string | null => {
-    if (t.sent) return "처리 결과 기록하고 완료하기";
-    if (t.customerRequestStatus === "waiting") return null;
-    if (t.customerRequestStatus === "received" && unreadReplies(t) > 0) return "고객 회신 확인하기";
-    if (t.draft) return t.reviewed ? "승인하고 발송하기" : "영어 초안 검토하기";
-    if (waitingReviews(t).length || t.legacyReviewPending) return null;
-    const pick = branchChoice(t);
-    return pick === "request" ? "고객 질의서 작성하기" : pick === "expert" ? "전문부서 요청서 작성하기" : "답변 작성 시작하기";
-  };
-  return ownedTickets(owner)
-    .map((t) => ({ ticket: t, label: label(t) }))
-    .filter((x): x is { ticket: Ticket; label: string } => x.label !== null)
-    .sort((a, b) => departmentRank(a.ticket) - departmentRank(b.ticket) || (slaMinutes(a.ticket) ?? Infinity) - (slaMinutes(b.ticket) ?? Infinity));
-}

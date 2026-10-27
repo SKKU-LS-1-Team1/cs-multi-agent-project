@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import {
   answerContext, buildExpertRequest, canAssign, checkAssign, composeAnswer, composerKey, composerLanguage, contextIsNew, contextKey, customerLanguage, FRONTLINE, isEdited, needsLocalization, runChecks, translateText,
   informationAssessment, people, recommend, record, requiredInformation, resourceReason, signedIn, storeComposer, ticketProgress,
-  waitingReviews,
+  waitingReviews, latestCustomerReply, ownedTickets, departmentRank, slaMinutes,
 } from "./logic";
 import { closeModal, commit, openModal, setUi, tickets } from "./store";
 import type { Ticket } from "./types";
@@ -392,4 +392,47 @@ export function bulkAssign(ids: string[], owner: string) {
 export function markSeen(t: Ticket) {
   t.seenAt = new Date().toISOString();
   commit();
+}
+
+export type Next = { label: string; run?: () => void; waiting?: boolean; externalWaiting?: boolean };
+/** 지금 담당자가 눌러야 할 단 하나의 행동. Copilot 의 '현재 판단'과 같은 규칙을 따른다. */
+export function nextAction(t: Ticket): Next | null {
+  if (t.stage === 5) return null;
+  if (t.source === "api" && !t.analysisReady && !isManualReplyTicket(t) && !t.sent) return { label: "문의 분석 확인 대기", waiting: true };
+  if (t.sent) return { label: "처리 결과 기록 및 완료", run: () => openCompletion(t) };
+  if (t.activeComposer === "expert") return null; // 요청서를 쓰는 중에는 판단 카드가 따로 안내한다
+  if (!t.owner) return canAssign ? { label: "담당자 배정", run: () => openModal("assign", { id: t.id }) } : { label: "팀장이 배정합니다", waiting: true };
+  const reply = latestCustomerReply(t), c = answerContext(t);
+  if (t.customerRequestStatus === "waiting") return { label: "고객 회신 대기 중", waiting: true };
+  if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) };
+  if (t.draft && t.purpose !== "request" && (waitingReviews(t).length || t.legacyReviewPending)) return { label: "전문부서 회신 등록", externalWaiting: true, run: () => openModal("expert-receive", { id: t.id }) };
+  if (isManualReplyTicket(t) && (!t.draft || (t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0)
+    || (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)
+    || (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null))) {
+    return { label: "담당자 답변 작성·검토", run: () => composeFromCopilot(t, "answer") };
+  }
+  if (t.draft) {
+    if (t.source === "api" && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return {
+      label: "확인된 자료 반영해 재작성", run: () => regenerateDraft(t, "Reflect the latest staff-confirmed information and remove withdrawn facts.") };
+    if (t.source === "api" && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return {
+      label: "최신 고객 회신 반영해 재작성", run: () => regenerateDraft(t, "Reflect the latest customer reply and confirmed information in the answer.") };
+    if (t.source === "api" && t.purpose !== "request" && (t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0)) {
+      return { label: "전문부서 회신 반영해 재작성", run: () => regenerateDraft(t, "Incorporate all registered specialist replies as evidence, distinguishing confirmed findings from hypotheses.") };
+    }
+    if (!hasCurrentReplyPreview(t)) return { label: t.translatingReply ? "변환 중…" : "고객 언어로 변환", run: () => { void prepareCustomerReply(t); } };
+    if (canSend(t)) return { label: "발송하기", run: () => openModal("send", { id: t.id }) };
+    return { label: "발송 문구 검토하기", run: () => { document.getElementById("answer-editor")?.scrollIntoView({ behavior: "smooth", block: "center" }); } };
+  }
+  if (c.missingInfo.length) return { label: "고객 질의서 작성", run: () => composeFromCopilot(t, "request") };
+  if (waitingReviews(t).length || t.legacyReviewPending) return { label: "전문부서 회신 등록", externalWaiting: true, run: () => openModal("expert-receive", { id: t.id }) };
+  return { label: "답변 초안 작성", run: () => composeFromCopilot(t, "answer") };
+}
+
+/** 상세 화면과 같은 판단으로 담당자의 다음 작업을 정렬한다. 대기 중인 문의는 제외한다. */
+export function todayTasks(owner = signedIn) {
+  return ownedTickets(owner)
+    .map((ticket) => ({ ticket, next: nextAction(ticket) }))
+    .filter((item): item is { ticket: Ticket; next: Next } => Boolean(item.next && !item.next.waiting && !item.next.externalWaiting))
+    .map(({ ticket, next }) => ({ ticket, label: next.label }))
+    .sort((a, b) => departmentRank(a.ticket) - departmentRank(b.ticket) || (slaMinutes(a.ticket) ?? Infinity) - (slaMinutes(b.ticket) ?? Infinity));
 }
