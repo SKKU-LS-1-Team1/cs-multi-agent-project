@@ -66,6 +66,7 @@ export default function Tickets() {
           value={ui.filter as string}
           onChange={(v) => { exitSelect(); setUi(v === DONE_TAB ? { filter: v, kquery: "" } : { filter: v }); }} />
       </PageHeader>
+      {ui.ticketSync !== "ready" && <p role={ui.ticketSync === "error" ? "alert" : "status"} className="px-10 pb-4 text-sm text-muted-foreground">{ui.ticketSyncError || "서버 문의를 불러오는 중입니다."}{tickets.length > 0 && " 마지막 조회 정보를 표시합니다."}</p>}
       {doneTab ? <CompletedTickets /> : <>
 
       <div className="flex flex-wrap items-center gap-2 px-10 pb-4">
@@ -80,7 +81,7 @@ export default function Tickets() {
       {showFilters && (
         <div className="mx-10 mb-4 flex flex-wrap items-center gap-2 rounded-2xl bg-card p-3 shadow-card">
           <NativeSelect className="rounded-full pl-4" aria-label="전체 상태" value={ui.status} onChange={(e) => setUi({ status: e.target.value })}>{opt("전체 상태", [...new Set(tickets.map((t) => t.status))])}</NativeSelect>
-          <NativeSelect className="rounded-full pl-4" aria-label="우선순위" value={ui.priority} onChange={(e) => setUi({ priority: e.target.value })}>{opt("우선순위", ["P2", "P3", "P4"])}</NativeSelect>
+          <NativeSelect className="rounded-full pl-4" aria-label="우선순위" value={ui.priority} onChange={(e) => setUi({ priority: e.target.value })}>{opt("우선순위", ["P1", "P2", "P3", "P4"])}</NativeSelect>
           <NativeSelect className="rounded-full pl-4" aria-label="전체 제품" value={ui.product} onChange={(e) => setUi({ product: e.target.value })}>{opt("전체 제품", [...new Set(tickets.map((t) => t.product))])}</NativeSelect>
           {activeFilters > 0 && <Button size="sm" variant="ghost" onClick={() => setUi({ status: "", priority: "", product: "" })}>초기화</Button>}
         </div>
@@ -98,8 +99,8 @@ export default function Tickets() {
       <div className="grid gap-6 px-10 pb-12">
         {rows.length === 0 ? (
           <div className="grid justify-items-center gap-3 rounded-2xl bg-card px-6 py-16 text-center shadow-card">
-            <strong className="font-medium">조건에 맞는 문의가 없습니다.</strong>
-            <p className="max-w-sm text-sm text-muted-foreground">{hasFilter ? "걸어 둔 검색·필터를 풀면 더 많은 문의가 보입니다." : "이 범위에는 처리할 문의가 없습니다. 전체 범위를 보거나 새 문의를 등록하세요."}</p>
+            <strong className="font-medium">{ui.ticketSync === "loading" ? "문의 조회 중입니다." : ui.ticketSync === "error" ? "문의 조회를 완료하지 못했습니다." : "조건에 맞는 문의가 없습니다."}</strong>
+            <p className="max-w-sm text-sm text-muted-foreground">{ui.ticketSync !== "ready" ? "서버 조회가 완료되면 문의 목록을 갱신합니다." : hasFilter ? "걸어 둔 검색·필터를 풀면 더 많은 문의가 보입니다." : "이 범위에는 처리할 문의가 없습니다. 전체 범위를 보거나 새 문의를 등록하세요."}</p>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setUi({ query: "", status: "", priority: "", product: "", listOwner: "", filter: "전체" })}>검색·필터 초기화</Button>
               <Button onClick={() => openModal("new-ticket")}>새 문의 등록</Button>

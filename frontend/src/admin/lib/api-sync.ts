@@ -2,9 +2,7 @@
 // 데이터만 잇는다.
 //
 // - startApiSync(): 백엔드 작업 목록(GET /api/tickets)과 각 티켓(GET /api/tickets/{id})을 10초마다 읽어
-//   프로토타입 Ticket 모양으로 store.tickets 에 넣는다. 백엔드에 처음 닿으면 예시 티켓은 빼고
-//   실제 문의만 보이고 목록은 "전체" 탭으로 연다. 백엔드가 없으면(프로토타입만 띄움) 예시 티켓으로
-//   그대로 동작한다.
+//   서버 문의를 화면 스토어에 반영한다. 연결 실패 시 마지막 서버 데이터를 유지하고 오류를 표시한다.
 // - 백엔드 티켓(source "api")에서 API 로 보내는 동작 (actions.ts 가 여기로 넘긴다)
 //   · 승인 및 발송 → POST /action  approve (AI 초안 그대로) / edit_approve (고친 글)
 //     추가정보 요청문 초안이면 승인 후 고객 회신 대기(WAITING_CUSTOMER)가 된다.
@@ -254,7 +252,10 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
   return target;
 }
 
+let syncing = false;
 export async function syncFromApi(): Promise<boolean> {
+  if (syncing) return false;
+  syncing = true;
   try {
     const [list, roster, answered, closed] = await Promise.all([api.workList(), api.agents(), api.answered(), api.closed()]);
     agents = new Map(roster.map((a) => [a.agent_id, a]));
@@ -272,7 +273,10 @@ export async function syncFromApi(): Promise<boolean> {
     const snapshotKey = (t: Ticket | undefined) => JSON.stringify([t?.apiStatus, t?.aiDraft, t?.apiDraftSpecialistRevision, t?.specialistRevision, t?.customerRevision, t?.reviewedReplyKey, t?.informationReviewedAt]);
     const fetched = await Promise.all(ids.map(async (id) => {
       const before = snapshotKey(tickets.find((t) => t.id === id));
-      return { row: await api.ticket(id).catch(() => null), before };
+      try { return { id, row: await api.ticket(id), before, missing: false }; }
+      catch (error) {
+        return { id, row: null, before, missing: (error as { status?: number })?.status === 404 };
+      }
     }));
     if (!online) {
       tickets.splice(0, tickets.length, ...tickets.filter(isApiTicket)); // 예시 티켓은 뺀다
@@ -280,19 +284,29 @@ export async function syncFromApi(): Promise<boolean> {
       setUi({ filter: "전체", queueScope: "전체" });
     }
     online = true;
-    for (const { row, before } of fetched) {
-      if (!row) continue;
+    for (const { id, row, before, missing } of fetched) {
+      if (!row) {
+        const index = tickets.findIndex((t) => t.id === id);
+        if (missing && index >= 0 && snapshotKey(tickets[index]) === before) {
+          tickets.splice(index, 1);
+          workItems.delete(id);
+        }
+        continue;
+      }
       const existing = tickets.find((t) => t.id === row.ticket_id);
       // A mutation/rewrite completed after this poll started: retain the newer response.
       if (before !== snapshotKey(existing) || (existing && (rewrites.has(existing) || specialistWrites.has(existing) || sends.has(existing) || informationWrites.has(existing) || replyTranslations.has(existing)))) continue;
       const t = apply(existing, row);
       if (!existing) tickets.unshift(t);
     }
+    const partial = fetched.some((r) => !r.row && !r.missing);
+    setUi({ ticketSync: partial ? "error" : "ready", ticketSyncError: partial ? "일부 문의를 갱신하지 못했습니다." : "" });
     commit();
-    return true;
+    return !partial;
   } catch {
-    return false; // 백엔드가 없으면 프로토타입(예시 티켓)으로 둔다
-  }
+    setUi({ ticketSync: "error", ticketSyncError: "문의 정보를 불러오지 못했습니다. 서버 연결을 확인해 주세요." });
+    return false;
+  } finally { syncing = false; }
 }
 
 export function startApiSync() {
