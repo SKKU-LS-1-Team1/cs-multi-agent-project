@@ -849,3 +849,67 @@ test('QC transport error preserves review for unchanged preview retry; violation
     assert.equal(t.events.some(e => e.kind === 'sent'), false);
   }
 });
+
+function nextActionFixture(rows) {
+  const opened = [];
+  const { mod: api } = apiFixture();
+  const actions = load('lib/actions.ts', {
+    sonner: { toast },
+    './logic': {
+      signedIn: 'tester', canAssign: true,
+      ownedTickets: () => rows.filter(t => t.stage !== 5),
+      departmentRank: () => 0, slaMinutes: () => 60,
+      latestCustomerReply: t => t.latestReply,
+      requiredInformation: t => t.required || [],
+      answerContext: () => ({ missingInfo: [] }),
+      waitingReviews: t => t.waiting ? [{}] : [],
+      contextIsNew: () => false,
+    },
+    './store': { openModal: (...args) => opened.push(args) },
+    './api-sync': api,
+  });
+  return { actions, api, opened };
+}
+const actionableTicket = (extra = {}) => ({ ...ticket(), owner: 'tester', analysisReady: true,
+  draft: 'English draft', purpose: 'answer', customerRequestStatus: 'none', ...extra });
+
+test('dashboard and detail prioritize the same stale information/customer/specialist draft', () => {
+  for (const [extra, label] of [
+    [{ informationReviewedAt: 'new' }, '확인된 자료 반영해 재작성'],
+    [{ customerRevision: 2, draftCustomerRevision: 1 }, '최신 고객 회신 반영해 재작성'],
+    [{ specialistRevision: 2, draftSpecialistRevision: 1 }, '전문부서 회신 반영해 재작성'],
+  ]) {
+    const t = actionableTicket(extra), { actions } = nextActionFixture([t]);
+    assert.equal(actions.nextAction(t).label, label);
+    assert.equal(actions.todayTasks()[0].label, label);
+    assert.equal(t.draft, 'English draft'); // selecting a task must not regenerate or overwrite
+  }
+});
+test('waiting customer/specialist and completed tickets do not appear as draft review tasks', () => {
+  const rows = [actionableTicket({ customerRequestStatus: 'waiting' }),
+    actionableTicket({ waiting: true }), actionableTicket({ stage: 5 }),
+    actionableTicket({ analysisReady: false })];
+  const { actions, opened } = nextActionFixture(rows);
+  assert.equal(actions.todayTasks().length, 0);
+  actions.nextAction(rows[1]).run();
+  assert.equal(opened[0][0], 'expert-receive'); // detail retains manual reply registration
+});
+test('customer information review precedes draft work in both views', () => {
+  const t = actionableTicket({ customerRequestStatus: 'received', latestReply: { id: 'reply-2' }, required: ['serial_no'] });
+  const { actions, opened } = nextActionFixture([t]);
+  assert.equal(actions.todayTasks()[0].label, '수신 자료 확인');
+  actions.nextAction(t).run();
+  assert.equal(opened[0][0], 'review-customer');
+});
+test('both views advance from translation to review to send using the current preview', () => {
+  const t = actionableTicket(), { actions, api } = nextActionFixture([t]);
+  const expect = label => {
+    assert.equal(actions.nextAction(t).label, label);
+    assert.equal(actions.todayTasks()[0].label, label);
+  };
+  expect('고객 언어로 변환');
+  setPreview(api, t); t.reviewed = false;
+  expect('발송 문구 검토하기');
+  t.reviewed = true; expect('발송하기');
+  t.draft += ' edited'; expect('고객 언어로 변환');
+});
