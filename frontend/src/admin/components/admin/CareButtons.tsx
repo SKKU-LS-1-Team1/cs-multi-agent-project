@@ -12,7 +12,7 @@ export const AI_KINDS: CareKind[] = ["notice"];
 export const AI_STYLE = "border-0 bg-gradient-to-r from-[#003377] to-[#026bb4] text-white hover:opacity-90";
 
 /** 대응 버튼은 지연·임박 문의에만 있다. 지연 이력과 반복 문의는 참고 정보라 버튼이 없다. */
-const ALL: Record<Reason, CareKind[]> = { urgent: ["notice"], breach: [], repeat: [] };
+const ALL: Record<Reason, CareKind[]> = { safety: ["notice"], urgent: ["notice"], breach: [], repeat: [] };
 const day = (iso: string) => iso.slice(5, 10).replace("-", ".");
 
 export function CareButtons({ c, reason }: { c: Customer; reason?: Reason }) {

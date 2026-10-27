@@ -88,7 +88,7 @@ const DOT: Record<"severe" | "red" | "amber" | "blue", string> = { severe: "bg-d
 
 export default function Customers() {
   const go = useGo();
-  const rows = useCustomers();
+  const { rows, error } = useCustomers();
   const care = useCare();
   const [tab, setTab] = useState<Tab>("focus");
   const [page, setPage] = useState(1), [showFilters, setShowFilters] = useState(false);
@@ -128,7 +128,8 @@ export default function Customers() {
       <PageHeader title="고객 관리">
         <UnderlineTabs tabs={[["focus" as Tab, <>중점 관리<Num n={rows ? nFocus : undefined} /></>], ["all" as Tab, <>전체<Num n={rows?.length} /></>]] as const} value={tab} onChange={(v) => { setTab(v); reset(); }} />
       </PageHeader>
-      {!rows ? <p className="px-10 py-16 text-center text-sm text-muted-foreground">불러오는 중입니다.</p> : (
+      {rows && error && <p role="alert" className="px-10 py-3 text-destructive">{error} 마지막 조회 정보를 표시합니다.</p>}
+      {!rows ? <p className="px-10 py-16 text-center text-sm text-muted-foreground">{error || "불러오는 중입니다."}</p> : (
         <div className="grid gap-6 px-10 pb-14">
           <div className="grid gap-3">
             <div className="flex items-center gap-2">
@@ -158,7 +159,7 @@ export default function Customers() {
                       {x ? <span className="flex items-center gap-2 text-[15px]"><span className={cn("size-2 shrink-0 rounded-full", DOT[x.tone])} aria-hidden />{x.title}</span> : <span className="text-[15px] text-muted-foreground">직접 지정</span>}
                       <span className="grid gap-1.5">
                         <span className={cn("text-[15px]", x?.tone === "severe" ? "font-medium text-destructive" : "text-muted-foreground")}>{x?.value ?? "—"}</span>
-                        {x && (x.tone === "severe" || x.tone === "red") && <Gauge value={maxLate(c)} max={LATE_MAX} tone={x.tone === "severe" ? "bg-destructive/80" : "bg-destructive/45"} />}
+                        {r === "urgent" && x && (x.tone === "severe" || x.tone === "red") && <Gauge value={maxLate(c)} max={LATE_MAX} tone={x.tone === "severe" ? "bg-destructive/80" : "bg-destructive/45"} />}
                       </span>
                       <span><CareTag status={st(c)} /></span>
                       <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>{r && <CareButtons c={c} />}</div>
