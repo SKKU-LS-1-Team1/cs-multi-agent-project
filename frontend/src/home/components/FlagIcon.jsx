@@ -7,10 +7,17 @@ const star = (cx, cy, r, fill) => {
   }).join(' ')
   return <polygon points={pts} fill={fill} />
 }
+// 괘(☰☷☵☲)는 막대 세 줄로 단순화한다. angle 은 원 중심에서 본 위치.
+const trigram = (angle, i) => (
+  <g key={i} transform={`rotate(${angle} 24 24) translate(24 6.5)`}>
+    {[0, 2.6, 5.2].map((y) => <rect key={y} x="-5" y={y} width="10" height="1.6" rx=".4" fill="#2B2B2B" />)}
+  </g>
+)
 const H = (cols, ws) => { let y = 0; return cols.map((c, i) => { const h = ws[i]; const el = <rect key={i} x="0" y={y} width="48" height={h} fill={c} />; y += h; return el }) }
 const V = (cols, ws) => { let x = 0; return cols.map((c, i) => { const w = ws[i]; const el = <rect key={i} x={x} y="0" width={w} height="48" fill={c} />; x += w; return el }) }
 
 const FLAGS = {
+  KR: <><rect width="48" height="48" fill="#fff" /><path d="M15 24a9 9 0 0 1 18 0z" fill="#E8344A" /><path d="M15 24a9 9 0 0 0 18 0z" fill="#2A4FA8" /><circle cx="19.5" cy="24" r="4.5" fill="#E8344A" /><circle cx="28.5" cy="24" r="4.5" fill="#2A4FA8" />{[-45, 45, 135, 225].map(trigram)}</>,
   TH: <>{H(['#E4283C', '#fff', '#2A3F8F', '#fff', '#E4283C'], [8, 6, 20, 6, 8])}</>,
   JP: <><rect width="48" height="48" fill="#fff" /><circle cx="24" cy="24" r="10" fill="#E8344A" /></>,
   BR: <><rect width="48" height="48" fill="#1FA85A" /><path d="M24 7L43 24 24 41 5 24z" fill="#FFD23F" /><circle cx="24" cy="24" r="8" fill="#2A3F8F" /><path d="M16.5 22.5c5-1.5 10.5-.5 15 2" stroke="#fff" strokeWidth="1.6" fill="none" /></>,
