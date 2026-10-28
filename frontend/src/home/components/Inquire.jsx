@@ -5,10 +5,11 @@ import {
   CATEGORIES, EXAMPLES, LANGUAGES, TYPE_NAME, confOf, errorText, fieldsFor, filled, humanSize, isDate, missingOf, routeOf, typeInfo,
 } from '../lib/inquiryForm.js'
 import CuteIcon from './CuteIcon.jsx'
+import { api } from '../../api/client'
+import { newThreadRef, rememberInquiry } from '../../lib/myInquiries'
 import { FamilyStep, ModelStep, PathTags, Stepper, Title, UNKNOWN } from './common.jsx'
 
 const LABELS = ['문의 선택', '필요한 정보', '내용 · 연락처', '확인 · 제출']
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const Auto = () => <em className="autot">자동 입력</em>
 
 function start(draft = {}) {
@@ -125,15 +126,30 @@ export default function Inquire({ draft, onSubmitted, onOpenMine, onExit, onCont
     if (s.submitting || allMissing.length) return
     set({ submitting: true, error: null })
     try {
-      await sleep(700)
       const now = new Date()
-      const id = `WEB-${now.toISOString().slice(0, 10).replaceAll('-', '')}-${String(now.getTime()).slice(-5)}`
       const provided = fields.filter((f) => filled(f, s.vals, s.files))
+      const fileNames = (f) => (s.files[f.key] ?? []).map((x) => x.file.name).join(', ')
+      const valueOf = (f) => (confOf(f.key).type === 'file' ? fileNames(f) : String(s.vals[f.key] ?? ''))
       const details = provided.map((f) => `- ${f.label}: ${confOf(f.key).type === 'file' ? (s.files[f.key] ?? []).map((x) => `[attachment: ${x.file.name}]`).join(' ') : s.vals[f.key]}`).join('\n')
+      const c = s.contact
+      const contactLine = [c.company && `회사: ${c.company}`, c.email && `이메일: ${c.email}`, c.phone && `전화: ${c.phone}`, c.pref && `선호 연락: ${c.pref === 'email' ? '이메일' : '전화'}`].filter(Boolean).join(' / ')
+      const threadRef = newThreadRef() // 추가정보 요청에 회신할 때 같은 문의로 이어진다
+      const subject = s.subject.trim()
+      const sent = await api.createInquiry({
+        channel: 'WEB_FORM',
+        category: s.type === 'USAGE' ? null : s.type,
+        product_code: p?.code ?? null,
+        subject,
+        body: `${s.body.trim()}${details ? `\n\nDetails:\n${details}` : ''}${contactLine ? `\n\nContact: ${contactLine}` : ''}`,
+        provided_fields: Object.fromEntries(provided.map((f) => [f.key, valueOf(f)])),
+        thread_ref: threadRef,
+        language: c.lang || null,
+      })
+      rememberInquiry({ ticket_id: sent.ticket_id, thread_ref: threadRef, subject })
       const t = {
-        demoSubmit: true, ticket_id: id, received_at_utc: now.toISOString().slice(0, 19) + 'Z', channel: 'WEB_FORM', language: s.contact.lang, body_language: s.contact.lang, customer_tier: customer.tier,
+        demoSubmit: true, ticket_id: sent.ticket_id, received_at_utc: (sent.received_at ?? now.toISOString()).slice(0, 19) + 'Z', channel: 'WEB_FORM', language: c.lang, body_language: c.lang, customer_tier: customer.tier,
         product_code: p?.code ?? '', product_name: p?.name ?? '(모델 미확인)', product_family: s.family, category_code: s.type === 'USAGE' ? '' : s.type,
-        inquiry_subject: s.subject.trim(), inquiry_body: `${s.body.trim()}\n\nDetails:\n${details}`, error_code_reported: '', fw_version_reported: '', priority: '',
+        inquiry_subject: subject, inquiry_body: s.body.trim(), error_code_reported: '', fw_version_reported: '', priority: '',
         assigned_dept: route?.primary ?? 'GCS_L1', escalated: 'N', escalated_to: '', escalation_reason: '', required_info: fields.map((f) => f.key).join(';'),
         provided_info: provided.map((f) => f.key).join(';'), missing_info: '', missing_blocking_info: '', info_request_sent: 'N', info_request_message: '', status: 'NEW',
         first_response_at_utc: '', resolved_at_utc: '', first_response_hours: '', sla_first_response_target_h: '', sla_resolution_target_h: '', sla_elapsed_hours: '',
@@ -143,7 +159,7 @@ export default function Inquire({ draft, onSubmitted, onOpenMine, onExit, onCont
       onSubmitted(t)
       set({ submitting: false, done: t })
     } catch (e) {
-      set({ submitting: false, error: `${e.message}. 작성한 내용은 그대로 남아 있어요. 다시 시도해 주세요.` })
+      set({ submitting: false, error: '문의를 보내지 못했어요. 작성한 내용은 그대로 남아 있어요. 잠시 뒤 다시 시도해 주세요.' })
     }
   }
 

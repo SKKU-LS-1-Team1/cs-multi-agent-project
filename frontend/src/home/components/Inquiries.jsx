@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api } from '../../api/client'
+import { myInquiries } from '../../lib/myInquiries'
 import {
-  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, dept, fieldLabel, fmtTime, pauseRule, split, tickets, titleOf,
+  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, dept, fieldLabel, fmtTime, pauseRule, split, titleOf,
 } from '../lib/inquiry.js'
 
 function Long({ text, lines = 5 }) {
@@ -178,11 +180,28 @@ function Detail({ t, onBack, onSend, onAgain }) {
   )
 }
 
+// 서버의 고객용 문의 → 화면이 쓰는 문의 모양. 서버가 주지 않는 항목은 비워 둔다(만들어 내지 않는다).
+const STATUS_OF = { RECEIVED: 'NEW', IN_PROGRESS: 'IN_PROGRESS', WAITING_CUSTOMER: 'WAITING_CUSTOMER', ANSWERED: 'RESOLVED', CLOSED: 'CLOSED' }
+const fromServer = (c) => ({
+  demoSubmit: true, ticket_id: c.ticket_id, status: STATUS_OF[c.status] ?? 'NEW', channel: 'WEB_FORM',
+  received_at_utc: c.received_at ? c.received_at.slice(0, 19) + 'Z' : '', inquiry_subject: c.subject, inquiry_body: c.body,
+  final_reply: c.message ?? '', provided_info: '', missing_info: '', missing_blocking_info: '', product_code: '', product_name: '', product_family: '', category_code: '',
+})
+
 export default function Inquiries({ onNew, onSend, onAgain, extra = [], initialOpen = null }) {
   const [filter, setFilter] = useState('all')
   const [openId, setOpenId] = useState(initialOpen)
-  const all = useMemo(() => [...tickets].sort((a, b) => b.received_at_utc.localeCompare(a.received_at_utc)), [])
-  const list = [...[...extra].reverse(), ...all]
+  // 이 브라우저에서 낸 문의를 서버(GET /api/inquiries/{id})에서 가져온다. 로그인이 생기면 고객 기준 조회로 바꾼다.
+  const [real, setReal] = useState(null)
+  useEffect(() => {
+    let live = true
+    const mine = myInquiries()
+    Promise.all(mine.map((m) => api.customerInquiry(m.ticket_id).then(fromServer, () => null)))
+      .then((r) => { if (live) setReal(r.filter(Boolean).sort((a, b) => b.received_at_utc.localeCompare(a.received_at_utc))) })
+    return () => { live = false }
+  }, [])
+  const loaded = real ?? []
+  const list = [...[...extra].reverse().filter((x) => !loaded.some((r) => r.ticket_id === x.ticket_id)), ...loaded]
   const fn = FILTERS.find((f) => f[0] === filter)[2]
   const shown = list.filter(fn)
   const sel = list.find((x) => x.ticket_id === openId)
@@ -192,7 +211,7 @@ export default function Inquiries({ onNew, onSend, onAgain, extra = [], initialO
   return (
     <div className="flow inq">
       <h2 className="inq-h">내 문의</h2>
-      {list.length === 0 ? (
+      {real === null && list.length === 0 ? <p className="faqp-empty">불러오는 중…</p> : list.length === 0 ? (
         <div className="done-box"><div className="big" aria-hidden="true">📭</div><h2>아직 남긴 문의가 없어요</h2>
           <button type="button" className="pbtn" onClick={onNew}>문의 남기기</button></div>
       ) : (
