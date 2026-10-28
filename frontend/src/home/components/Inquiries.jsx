@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api } from '../../api/client'
+import { myInquiries } from '../../lib/myInquiries'
 import {
-  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, dept, fieldLabel, fmtTime, pauseRule, split, tickets, titleOf,
+  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, dept, fieldLabel, fmtTime, pauseRule, split, titleOf,
 } from '../lib/inquiry.js'
 
 function Long({ text, lines = 5 }) {
@@ -128,9 +130,10 @@ function Detail({ t, onBack, onSend, onAgain }) {
       {st.kind === 'need' ? (
         <div className="needb">
           <b>✋ 추가 정보 필요</b>
-          <ul>{miss.map((k) => <li key={k}>{fieldLabel(k)}{blocking.includes(k) && <i>꼭 필요해요</i>}</li>)}</ul>
+          {miss.length > 0 ? <ul>{miss.map((k) => <li key={k}>{fieldLabel(k)}{blocking.includes(k) && <i>꼭 필요해요</i>}</li>)}</ul>
+            : t.final_reply && <Long text={t.final_reply} />}
           {prov.length > 0 && <p className="done-info">✓ 이미 보내 주신 {prov.map(fieldLabel).join(', ')}은(는) 다시 쓰지 않아도 돼요.</p>}
-          <button type="button" className="pbtn" onClick={() => setSheet('info')}>추가 정보 보내기</button>
+          <button type="button" className="pbtn" onClick={() => setSheet(miss.length ? 'info' : 'more')}>추가 정보 보내기</button>
         </div>
       ) : (
         <div className="qnav inq-act">
@@ -143,7 +146,7 @@ function Detail({ t, onBack, onSend, onAgain }) {
 
       <div className="blk"><h4>📋 접수한 내용</h4>
         <ul className="kv">
-          <li><span>제품 · 모델</span><b>{t.product_name} · {t.product_code}</b></li>
+          {(t.product_name || t.product_code) && <li><span>제품 · 모델</span><b>{[t.product_name, t.product_code].filter(Boolean).join(' · ')}</b></li>}
           <li><span>접수 채널</span><b>{ch.emoji} {ch.label}</b></li>
           {t.error_code_reported && <li><span>에러 코드</span><b>{t.error_code_reported}</b></li>}
         </ul>
@@ -152,14 +155,14 @@ function Detail({ t, onBack, onSend, onAgain }) {
         {att.length > 0 && <p className="atts">{att.map((a) => <span key={a}>📎 {a}<em> (파일 없음 · 이름만 기록됐어요)</em></span>)}</p>}
       </div>
 
-      <div className="blk"><h4>🏢 담당 부서</h4>
+      {t.assigned_dept && <div className="blk"><h4>🏢 담당 부서</h4>
         <ul className="kv">
           <li><span>담당</span><b>{dept(t.assigned_dept)}</b></li>
           {t.escalated === 'Y' && <li><span>전문 부서 확인</span><b>{dept(t.escalated_to)}{t.escalation_reason ? ` · ${ESC_REASON[t.escalation_reason] ?? t.escalation_reason}` : ''}</b></li>}
         </ul>
-      </div>
+      </div>}
 
-      {t.final_reply && <div className="blk"><h4>💬 답변</h4><Long text={t.final_reply} /></div>}
+      {t.final_reply && st.kind !== 'need' && <div className="blk"><h4>💬 답변</h4><Long text={t.final_reply} /></div>}
 
       {done && (t.final_action || t.rma_no || t.reference_doc_id || t.resolved_at_utc) && (
         <div className="blk res"><h4>✅ 처리 결과</h4>
@@ -178,11 +181,33 @@ function Detail({ t, onBack, onSend, onAgain }) {
   )
 }
 
+// 서버의 고객용 문의 → 화면이 쓰는 문의 모양. 서버가 주지 않는 항목은 비워 둔다(만들어 내지 않는다).
+const STATUS_OF = { RECEIVED: 'NEW', IN_PROGRESS: 'IN_PROGRESS', WAITING_CUSTOMER: 'WAITING_CUSTOMER', ANSWERED: 'RESOLVED', CLOSED: 'CLOSED' }
+const fromServer = (c) => ({
+  demoSubmit: true, ticket_id: c.ticket_id, status: STATUS_OF[c.status] ?? 'NEW', channel: 'WEB_FORM',
+  received_at_utc: c.received_at ? c.received_at.slice(0, 19) + 'Z' : '', inquiry_subject: c.subject, inquiry_body: c.body,
+  final_reply: c.message ?? '', provided_info: '', missing_info: '', missing_blocking_info: '', product_code: '', product_name: '', product_family: '', category_code: '',
+})
+
 export default function Inquiries({ onNew, onSend, onAgain, extra = [], initialOpen = null }) {
   const [filter, setFilter] = useState('all')
   const [openId, setOpenId] = useState(initialOpen)
-  const all = useMemo(() => [...tickets].sort((a, b) => b.received_at_utc.localeCompare(a.received_at_utc)), [])
-  const list = [...[...extra].reverse(), ...all]
+  // 이 브라우저에서 낸 문의를 서버(GET /api/inquiries/{id})에서 가져온다. 로그인이 생기면 고객 기준 조회로 바꾼다.
+  const [real, setReal] = useState(null)
+  const [failed, setFailed] = useState(0) // 불러오지 못한 문의 수 — 서버가 안 될 때 "문의 없음"으로 보이지 않게 한다
+  useEffect(() => {
+    let live = true
+    const mine = myInquiries()
+    Promise.all(mine.map((m) => api.customerInquiry(m.ticket_id).then(fromServer, () => null)))
+      .then((r) => {
+        if (!live) return
+        setFailed(r.filter((x) => !x).length)
+        setReal(r.filter(Boolean).sort((a, b) => b.received_at_utc.localeCompare(a.received_at_utc)))
+      })
+    return () => { live = false }
+  }, [])
+  const loaded = real ?? []
+  const list = [...[...extra].reverse().filter((x) => !loaded.some((r) => r.ticket_id === x.ticket_id)), ...loaded]
   const fn = FILTERS.find((f) => f[0] === filter)[2]
   const shown = list.filter(fn)
   const sel = list.find((x) => x.ticket_id === openId)
@@ -192,7 +217,8 @@ export default function Inquiries({ onNew, onSend, onAgain, extra = [], initialO
   return (
     <div className="flow inq">
       <h2 className="inq-h">내 문의</h2>
-      {list.length === 0 ? (
+      {failed > 0 && <p className="ferr" role="alert">문의 {failed}건을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.</p>}
+      {real === null && list.length === 0 ? <p className="faqp-empty">불러오는 중…</p> : list.length === 0 ? (failed > 0 ? null :
         <div className="done-box"><div className="big" aria-hidden="true">📭</div><h2>아직 남긴 문의가 없어요</h2>
           <button type="button" className="pbtn" onClick={onNew}>문의 남기기</button></div>
       ) : (
