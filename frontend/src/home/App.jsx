@@ -128,7 +128,7 @@ export default function App() {
         ) : view === 'mine' ? (
           <Inquiries key={openMine ?? 'list'} onNew={() => openInquiry({})} onSend={(t) => send(t)} onAgain={again} extra={submitted} initialOpen={openMine} />
         ) : view === 'inquire' ? (
-          <Inquire key={JSON.stringify(draft)} draft={draft} onContext={setContext} onExit={exit}
+          <Inquire key={JSON.stringify(draft)} draft={draft} lang={lang} onContext={setContext} onExit={exit}
             onSubmitted={(t) => setSubmitted((l) => [...l, t])} onOpenMine={(id) => { setOpenMine(id); setView('mine') }} />
         ) : view === 'faq' ? (
           <FaqPage />
