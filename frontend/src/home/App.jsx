@@ -31,12 +31,14 @@ export default function App() {
   const activate = (key) => { activeRef.current = key; setActiveKey(key) }
   const messages = threads[activeKey] ?? []
   const [view, setView] = useState('home')
+  const viewRef = useRef(view); viewRef.current = view // 챗봇 답변이 늦게 와도 지금 화면을 보고 이동 여부를 정한다
   const [context, setContext] = useState([])
   const [nav, setNav] = useState(null) // 챗봇이 정한 화면 이동 (제품 정보)
   const [chatFocus, setChatFocus] = useState(0) // 올라갈 때마다 AI 상담 입력창에 커서를 둔다
   const [cards, setCards] = useState([]) // 상담 중인 제품 카드들 (본 제품이 쌓인다. 최근 것이 위)
   const [dismissed, setDismissed] = useState(null) // 지운 카드의 키 — 같은 제품을 계속 보는 동안 다시 만들지 않는다
   const epoch = useRef(0) // 대화 초기화 때마다 올라간다 — 초기화 전에 요청한 답변은 버린다
+  const sessions = useRef({}) // 대화(thread) 키 → 서버 챗봇 세션. 대화가 다른 키로 옮겨 가면 세션도 같이 옮긴다
   const [draft, setDraft] = useState(null)
   const [submitted, setSubmitted] = useState([])
   const [openMine, setOpenMine] = useState(null)
@@ -74,6 +76,12 @@ export default function App() {
     if (dismissed && dismissed !== key) setDismissed(null)
     if (dismissed === key) return
     // 제품을 정하기 전에 나눈 대화는 처음 만든 제품 대화로 옮기고, 화면에서 고른 제품의 대화를 연다
+    // 서버 세션도 같이 옮겨야 챗봇이 앞의 대화를 기억한다 (옮겨 갈 대화에 이미 세션이 있으면 그것을 쓴다)
+    const ss = sessions.current
+    const carried = ss[key] ?? ss._ ?? (code ? ss[`fam:${fam}`] : undefined)
+    delete ss._
+    if (code) delete ss[`fam:${fam}`]
+    if (carried) ss[key] = carried
     setThreads((p) => {
       const old = code && p[`fam:${fam}`] // 제품군만 알던 대화는 모델이 정해지면 그 모델 대화로 잇는다
       const carry = [...(p._ ?? []), ...(old || [])]
@@ -102,7 +110,6 @@ export default function App() {
 
   // 고객 말은 실제 챗봇(POST /api/chat)으로 보낸다. 답변의 이동 지시(navigation)는 제품 정보 화면으로, 문의서 전환(form)은 문의 남기기로 이어진다.
   // 제품마다 대화가 따로라서 서버 세션도 대화(thread)마다 따로 둔다.
-  const sessions = useRef({})
   const langRef = useRef(lang); langRef.current = lang
   const TAB_OF = { info: 'spec', docs: 'docs', firmware: 'fw' }
   const send = useCallback((content, opts) => {
@@ -127,8 +134,14 @@ export default function App() {
           if (to === from) return { ...p, [from]: [...src, reply] }
           return { ...p, [from]: src, [to]: [...(p[to] ?? []), { id: uid, role: 'user', content }, reply] }
         })
-        if (code) { activate(code); setNav({ family: getProduct(code).family, model: code, tab: TAB_OF[n.tab] ?? 'spec', attr: n.anchor, n: Date.now() }); setView('info') }
-        if (form) openInquiry({ type: form.category ?? undefined, family: form.product_code ? getProduct(form.product_code)?.family : undefined, model: form.product_code ?? undefined, vals: form.fields, subject: form.subject, body: form.body })
+        if (to !== from && !sessions.current[to]) sessions.current[to] = sid // 옮겨 간 대화가 이 세션을 이어 쓴다
+        if (code) activate(code)
+        // 문의서를 쓰는 중에는 화면을 옮기지 않는다 (옮기면 작성 중인 문의서가 사라진다)
+        const where = viewRef.current
+        if (code && where !== 'inquire') {
+          setNav({ family: getProduct(code).family, model: code, tab: TAB_OF[n.tab] ?? 'spec', attr: n.anchor, n: Date.now() }); setView('info')
+        }
+        if (form && where !== 'inquire') openInquiry({ type: form.category ?? undefined, family: form.product_code ? getProduct(form.product_code)?.family : undefined, model: form.product_code ?? undefined, vals: form.fields, subject: form.subject, body: form.body })
       })
   }, []) // eslint-disable-line
   // 해결 화면의 [AI 상담에서 이어서 말하기]: 고객 말풍선이 아니라 챗봇이 먼저 "어느 제품으로 이어서 도울지"만 말하고, 말풍선 테두리가 잠깐 반응한다.
