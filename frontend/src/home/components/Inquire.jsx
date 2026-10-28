@@ -12,7 +12,7 @@ import { FamilyStep, ModelStep, PathTags, Stepper, Title, UNKNOWN } from './comm
 const LABELS = ['문의 선택', '필요한 정보', '내용 · 연락처', '확인 · 제출']
 const Auto = () => <em className="autot">자동 입력</em>
 
-function start(draft = {}) {
+function start(draft = {}, lang) {
   const vals = { ...(draft.vals ?? {}) }
   const s = {
     stage: 1, hl: draft.family ?? null, type: draft.type ?? null, catId: draft.type ? typeInfo(draft.type)?.cat : null,
@@ -20,7 +20,8 @@ function start(draft = {}) {
     auto: Object.fromEntries(Object.keys(vals).map((k) => [k, true])),
     snap: null, page: 0, editing: {}, attempted: false, touched: {}, help: {}, focusKey: null,
     subject: draft.subject ?? '', body: draft.body ?? '', subjectAuto: !!draft.subject, bodyAuto: !!draft.body,
-    contact: { country: customer.country_name, lang: customer.language, company: customer.company_masked, email: customer.contact_email_masked, phone: '', pref: '' },
+    // 연락처는 고객이 직접 적는다 (시안의 데모 고객 값은 실제 문의로 보내지 않는다). 답변 언어는 화면에서 고른 언어로 시작한다.
+    contact: { country: '', lang: LANGUAGES.some(([c]) => c === lang) ? lang : 'en', company: '', email: '', phone: '', pref: '' },
     contactEdited: {}, submitting: false, error: null, done: null, chatOpen: false, chat: draft.chat ?? null,
   }
   return s.type && s.family && s.model ? enter2(applyModel(s)) : s
@@ -64,8 +65,8 @@ function Dropzone({ f, files, setFiles, error, onTouch }) {
   )
 }
 
-export default function Inquire({ draft, onSubmitted, onOpenMine, onExit, onContext }) {
-  const [s, setS] = useState(() => start(draft))
+export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, onContext }) {
+  const [s, setS] = useState(() => start(draft, lang))
   const set = (p) => setS((c) => ({ ...c, ...(typeof p === 'function' ? p(c) : p) }))
   const fields = useMemo(() => (s.type && s.family ? fieldsFor(s.type, s.family) : []), [s.type, s.family])
   const missing = useMemo(() => missingOf(fields, s.vals, s.files), [fields, s.vals, s.files])
@@ -132,7 +133,7 @@ export default function Inquire({ draft, onSubmitted, onOpenMine, onExit, onCont
       const valueOf = (f) => (confOf(f.key).type === 'file' ? fileNames(f) : String(s.vals[f.key] ?? ''))
       const details = provided.map((f) => `- ${f.label}: ${confOf(f.key).type === 'file' ? (s.files[f.key] ?? []).map((x) => `[attachment: ${x.file.name}]`).join(' ') : s.vals[f.key]}`).join('\n')
       const c = s.contact
-      const contactLine = [c.company && `회사: ${c.company}`, c.email && `이메일: ${c.email}`, c.phone && `전화: ${c.phone}`, c.pref && `선호 연락: ${c.pref === 'email' ? '이메일' : '전화'}`].filter(Boolean).join(' / ')
+      const contactLine = [c.country && `국가: ${c.country}`, c.company && `회사: ${c.company}`, c.email && `이메일: ${c.email}`, c.phone && `전화: ${c.phone}`, c.pref && `선호 연락: ${c.pref === 'email' ? '이메일' : '전화'}`].filter(Boolean).join(' / ')
       const threadRef = newThreadRef() // 추가정보 요청에 회신할 때 같은 문의로 이어진다
       const subject = s.subject.trim()
       const sent = await api.createInquiry({
@@ -295,7 +296,7 @@ export default function Inquire({ draft, onSubmitted, onOpenMine, onExit, onCont
             <ul className="kv">{fields.map((f) => (
               <li key={f.key}><span>{f.label}</span><b>{confOf(f.key).type === 'file' ? ((s.files[f.key] ?? []).map((x) => x.file.name).join(', ') || '—') : (s.vals[f.key] || '—')}</b></li>))}</ul></div>
           <div className="sumb"><div><b>연락처</b><button type="button" onClick={() => set({ stage: 3 })}>수정</button></div>
-            <p>{s.contact.company} · {s.contact.country}<br />{s.contact.email}{s.contact.phone && ` · ${s.contact.phone}`}<br />답변 언어: {LANGUAGES.find(([c]) => c === s.contact.lang)?.[1]}{s.contact.pref && ` · 선호: ${s.contact.pref === 'email' ? '이메일' : '전화'}`}</p></div>
+            <p>{[s.contact.company, s.contact.country].filter(Boolean).join(' · ') || '(회사·국가 미입력)'}<br />{s.contact.email}{s.contact.phone && ` · ${s.contact.phone}`}<br />답변 언어: {LANGUAGES.find(([c]) => c === s.contact.lang)?.[1]}{s.contact.pref && ` · 선호: ${s.contact.pref === 'email' ? '이메일' : '전화'}`}</p></div>
           {s.chat && (
             <div className="sumb"><div><b>AI 상담 기록</b><button type="button" onClick={() => set({ chatOpen: !s.chatOpen })}>{s.chatOpen ? '접기' : '펼쳐보기'}</button></div>
               <p>상담 대화 기록과 참고한 문서 목록이 상담원에게 함께 전달돼요.</p>
