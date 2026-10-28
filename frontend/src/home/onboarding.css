@@ -1,0 +1,54 @@
+/* 온보딩 — 첨부 배경(파랑 그라데이션 + LS ELECTRIC 로고)을 따른다. 토큰은 tokens.css 를 쓴다. */
+.ob {
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
+  padding: 40px 16px; font-family: var(--font);
+  background: linear-gradient(180deg, #07337c 0%, #0d52a0 50%, #4393d2 100%);
+}
+.ob-brand { text-align: center; color: #fff; }
+.ob-logo { width: 300px; max-width: 70vw; height: auto; display: block; margin: 0 auto 8px; }
+.ob-brand p { margin: 0; font-size: 15px; color: rgba(255, 255, 255, .85); }
+
+.ob-card {
+  width: 100%; max-width: 640px; background: var(--bg); border-radius: 24px; padding: 28px;
+  box-shadow: 0 16px 48px rgba(3, 18, 60, .28);
+}
+.ob-card h1 { margin: 0 0 4px; font-size: 26px; color: var(--text-strong); }
+.ob-sub { margin: 0 0 20px; color: var(--text-weak); font-size: 15px; }
+
+.ob-country { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 16px; background: var(--bg-grey); margin-bottom: 22px; }
+.ob-badge {
+  width: 52px; height: 52px; flex: none; border-radius: 50%; background: #fff; border: 1px solid transparent;
+  display: grid; place-items: center; overflow: hidden;
+}
+.ob-badge.is-loading { border-color: var(--grey-200); border-top-color: var(--ls-blue-light); animation: ob-spin .8s linear infinite; }
+.ob-cname { display: flex; flex-direction: column; min-width: 0; }
+.ob-cname small { color: var(--text-weak); font-size: 13px; }
+.ob-cname b { font-size: 18px; color: var(--text-strong); }
+.ob-cname b.is-weak { color: var(--text-weak); font-weight: 600; }
+
+.ob-lh { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+.ob-langs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ob-lang {
+  display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 14px; border-radius: 14px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 600; color: var(--text);
+  background: #fff; border: 1.5px solid var(--grey-200); text-align: start;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.ob-lang:hover { background: var(--grey-50); border-color: var(--ls-blue-300); }
+.ob-lang:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.ob-lang.is-on { background: var(--ls-blue); border-color: var(--ls-blue); color: #fff; }
+.ob-check { width: 18px; flex: none; font-size: 14px; font-weight: 800; text-align: center; }
+
+.ob-go {
+  margin-top: 24px; width: 100%; height: 54px; border: 0; border-radius: 16px; cursor: pointer;
+  background: var(--ls-blue); color: #fff; font: inherit; font-size: 17px; font-weight: 700;
+}
+.ob-go:hover { background: var(--ls-blue-mid); }
+.ob-go:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+@keyframes ob-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ob-badge.is-loading { animation: none; } }
+@media (max-width: 520px) {
+  .ob-card { padding: 22px 18px; border-radius: 20px; }
+  .ob-langs { grid-template-columns: repeat(2, 1fr); }
+}

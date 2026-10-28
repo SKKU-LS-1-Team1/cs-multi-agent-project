@@ -1,0 +1,47 @@
+/* LS Design System — tokens
+   출처: TDS Mobile 캡처 12장(색상 hex는 캡처의 라벨 값). 블루와 폰트만 LS 기준으로 대체. */
+:root {
+  /* font: 영문·숫자 = SF Pro, 한글 = Apple SD Gothic Neo */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+
+  /* LS Blue — 핵심 토큰 (지정값) */
+  --ls-blue: #0A1E5A;        /* 메인 */
+  --ls-blue-mid: #183B80;    /* 중간 */
+  --ls-blue-light: #3562A6;  /* 밝은 */
+  /* LS Blue — 파생 (ls-blue-light 를 흰색 위에 8·16·32·50% 올린 값) */
+  --ls-blue-50: #EFF2F8;
+  --ls-blue-100: #DFE6F1;
+  --ls-blue-200: #BECDE3;
+  --ls-blue-300: #9AB0D2;
+
+  /* Grey */
+  --grey-50:#f9fafb; --grey-100:#f2f4f6; --grey-200:#e5e8eb; --grey-300:#d1d6db; --grey-400:#b0b8c1;
+  --grey-500:#8b95a1; --grey-600:#6b7684; --grey-700:#4e5968; --grey-800:#333d4b; --grey-900:#191f28;
+  /* Grey Opacity (색, 불투명도) */
+  --grey-a50:rgba(0,23,51,.02); --grey-a100:rgba(2,32,71,.05); --grey-a200:rgba(0,27,55,.1);
+  --grey-a300:rgba(0,29,58,.18); --grey-a400:rgba(0,25,54,.31); --grey-a500:rgba(3,24,50,.46);
+  --grey-a600:rgba(0,19,43,.58); --grey-a700:rgba(3,18,40,.7); --grey-a800:rgba(0,12,30,.8);
+  --grey-a900:rgba(2,9,19,.91);
+  /* Role colors (유지) */
+  --red-50:#ffeeee; --red-100:#ffd4d6; --red-200:#feafb4; --red-300:#fb8890; --red-400:#f66570;
+  --red-500:#f04452; --red-600:#e42939; --red-700:#d22030; --red-800:#bc1b2a; --red-900:#a51926;
+  --orange-50:#fff3e0; --orange-100:#ffe0b0; --orange-200:#ffcd80; --orange-300:#ffbd51; --orange-400:#ffa927;
+  --orange-500:#fe9800; --orange-600:#fb8800; --orange-700:#f57800; --orange-800:#ed6700; --orange-900:#e45600;
+  --yellow-50:#fff9e7; --yellow-100:#ffefbf; --yellow-200:#ffe69b; --yellow-300:#ffdd78; --yellow-400:#ffd158;
+  --yellow-500:#ffc342; --yellow-600:#ffb331; --yellow-700:#faa131; --yellow-800:#ee8f11; --yellow-900:#dd7d02;
+  --green-50:#f0faf6; --green-100:#aeefd5; --green-200:#76e4b8; --green-300:#3fd599; --green-400:#15c47e;
+  --green-500:#03b26c; --green-600:#02a262; --green-700:#029359; --green-800:#028450; --green-900:#027648;
+  --teal-50:#edf8f8; --teal-100:#bce9e9; --teal-200:#89d8d8; --teal-300:#58c7c7; --teal-400:#30b6b6;
+  --teal-500:#18a5a5; --teal-600:#109595; --teal-700:#0c8585; --teal-800:#097575; --teal-900:#076565;
+  --purple-50:#f9f0fc; --purple-100:#edccf8; --purple-200:#da9bef; --purple-300:#c770e4; --purple-400:#b44bd7;
+  --purple-500:#a234c7; --purple-600:#9128b4; --purple-700:#8222a2; --purple-800:#73228e; --purple-900:#65237b;
+  /* Background */
+  --bg:#ffffff; --bg-grey:var(--grey-100); --bg-layered:#ffffff; --bg-floated:#ffffff;
+
+  /* Semantic */
+  --text-strong: var(--grey-900);  --text: var(--grey-700);  --text-weak: var(--grey-500);
+  --primary: var(--ls-blue);       --primary-weak-bg: var(--ls-blue-50);  --primary-weak-text: var(--ls-blue-mid);
+  --primary-disabled: var(--ls-blue-200); --focus: var(--ls-blue-light);
+  --danger: var(--red-500);        --success: var(--green-500);           --warning: var(--orange-500);
+  --overlay: rgba(0,0,0,.2);       /* 캡처 실측: 흰색 → #CCCCCC */
+}

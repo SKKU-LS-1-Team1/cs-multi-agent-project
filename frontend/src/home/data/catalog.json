@@ -1,0 +1,2370 @@
+{
+ "families": [
+  {
+   "id": "LV_BREAKER",
+   "name": "저압차단기",
+   "models": [
+    "MCCB-ABS-103c",
+    "MCCB-ABS-403c",
+    "ACB-AS-2000",
+    "ELCB-EBN-203c"
+   ]
+  },
+  {
+   "id": "MV_EQUIP",
+   "name": "고압전력기기",
+   "models": [
+    "VCB-25kV-1250",
+    "SWGR-MV-12kV"
+   ]
+  },
+  {
+   "id": "TRANSFORMER",
+   "name": "변압기",
+   "models": [
+    "TRF-DRY-630",
+    "TRF-OIL-1000"
+   ]
+  },
+  {
+   "id": "DRIVE",
+   "name": "인버터",
+   "models": [
+    "INV-LSLV0075-S100",
+    "INV-LSLV0220-H100",
+    "INV-LSLV0750-iS7"
+   ]
+  },
+  {
+   "id": "UPS",
+   "name": "무정전전원장치(UPS)",
+   "models": [
+    "UPS-LSU-10K"
+   ]
+  },
+  {
+   "id": "ESS",
+   "name": "에너지저장장치(ESS)",
+   "models": [
+    "ESS-PCS-100kW",
+    "ESS-BMS-V3"
+   ]
+  },
+  {
+   "id": "PV",
+   "name": "태양광",
+   "models": [
+    "PV-INV-SOLAR-25"
+   ]
+  },
+  {
+   "id": "METER",
+   "name": "전력계측기",
+   "models": [
+    "METER-LP3500-3P4W",
+    "METER-LPB-DIN"
+   ]
+  },
+  {
+   "id": "CONTROL",
+   "name": "제어기",
+   "models": [
+    "CONT-MC-32a",
+    "RELAY-GMR-22"
+   ]
+  },
+  {
+   "id": "PLC",
+   "name": "PLC",
+   "models": [
+    "PLC-XGB-XBM-DR16S",
+    "PLC-XGI-CPUU"
+   ]
+  },
+  {
+   "id": "HMI",
+   "name": "HMI",
+   "models": [
+    "HMI-XGT-eXP60",
+    "HMI-XGT-iXP90"
+   ]
+  }
+ ],
+ "products": {
+  "MCCB-ABS-103c": {
+   "code": "MCCB-ABS-103c",
+   "family": "LV_BREAKER",
+   "name": "MCCB 100AF",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Breaker trips at motor start",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Motor inrush exceeds magnetic trip setting",
+     "check": "Measure starting current; compare with magnetic setting",
+     "action": "Select breaker with higher magnetic setting or adjust",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Terminal overheating / discoloration",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Loose connection or undersized cable",
+     "check": "Thermographic inspection; check tightening torque",
+     "action": "Retighten to specified torque; replace damaged terminal",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Breaker cannot be reset after trip",
+     "section": "3.3",
+     "severity": "P4",
+     "cause": "Handle not moved to reset position before ON",
+     "check": "Check handle position (trip / reset)",
+     "action": "Push handle fully to OFF/RESET then ON",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Breaker does not close, mechanism damaged",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "Internal mechanism failure",
+     "check": "Handle does not latch after reset",
+     "action": "Replace breaker under warranty",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Load current / temperature records"
+   ]
+  },
+  "MCCB-ABS-403c": {
+   "code": "MCCB-ABS-403c",
+   "family": "LV_BREAKER",
+   "name": "MCCB 400AF",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Breaker trips at motor start",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Motor inrush exceeds magnetic trip setting",
+     "check": "Measure starting current; compare with magnetic setting",
+     "action": "Select breaker with higher magnetic setting or adjust",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Terminal overheating / discoloration",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Loose connection or undersized cable",
+     "check": "Thermographic inspection; check tightening torque",
+     "action": "Retighten to specified torque; replace damaged terminal",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Breaker cannot be reset after trip",
+     "section": "3.3",
+     "severity": "P4",
+     "cause": "Handle not moved to reset position before ON",
+     "check": "Check handle position (trip / reset)",
+     "action": "Push handle fully to OFF/RESET then ON",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Breaker does not close, mechanism damaged",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "Internal mechanism failure",
+     "check": "Handle does not latch after reset",
+     "action": "Replace breaker under warranty",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Load current / temperature records"
+   ]
+  },
+  "ACB-AS-2000": {
+   "code": "ACB-AS-2000",
+   "family": "LV_BREAKER",
+   "name": "ACB 2000A",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Terminal overheating / discoloration",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Loose connection or undersized cable",
+     "check": "Thermographic inspection; check tightening torque",
+     "action": "Retighten to specified torque; replace damaged terminal",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "T.LT",
+     "symptom": "ACB long-time trip",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Sustained overload above long-time setting",
+     "check": "Read trip unit event log current",
+     "action": "Reduce load or adjust long-time setting per coordination study",
+     "note": null
+    },
+    {
+     "code": "T.GF",
+     "symptom": "ACB ground fault trip",
+     "section": "3.3",
+     "severity": "P1",
+     "cause": "Insulation fault in downstream feeder",
+     "check": "Insulation test of downstream feeders",
+     "action": "Repair insulation fault before re-closing",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "T.SF",
+     "symptom": "ACB trip unit self-diagnosis alarm",
+     "section": "3.4",
+     "severity": "P3",
+     "cause": "Firmware defect after control power dip",
+     "check": "Alarm after control voltage dip below 85 V; firmware older than 1.4",
+     "action": "Update trip unit firmware to 1.4",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "ACB motor does not charge spring",
+     "section": "3.5",
+     "severity": "P2",
+     "cause": "Control voltage mismatch or motor fuse blown",
+     "check": "Measure control voltage at motor terminals",
+     "action": "Supply correct control voltage; replace fuse",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Load current / temperature records"
+   ]
+  },
+  "VCB-25kV-1250": {
+   "code": "VCB-25kV-1250",
+   "family": "MV_EQUIP",
+   "name": "VCB 25.8kV 1250A",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "VCB spring not charging",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Charging motor failure",
+     "check": "Check control supply and motor current",
+     "action": "Replace charging motor",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "VCB fails to close electrically",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Closing coil burnt",
+     "check": "Measure closing coil resistance",
+     "action": "Replace closing coil",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "VCB contact wear indicator at limit",
+     "section": "3.3",
+     "severity": "P3",
+     "cause": "Vacuum interrupter end of electrical life",
+     "check": "Check contact wear indicator; vacuum integrity test",
+     "action": "Replace vacuum interrupter",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Protection relay trip without fault",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "CT polarity reversed / wrong relay setting",
+     "check": "Secondary injection test; check CT polarity",
+     "action": "Correct CT wiring and relay settings",
+     "note": "this check normally requires a site visit by qualified personnel."
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate"
+   ]
+  },
+  "ELCB-EBN-203c": {
+   "code": "ELCB-EBN-203c",
+   "family": "LV_BREAKER",
+   "name": "ELCB 200AF",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Terminal overheating / discoloration",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Loose connection or undersized cable",
+     "check": "Thermographic inspection; check tightening torque",
+     "action": "Retighten to specified torque; replace damaged terminal",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Breaker cannot be reset after trip",
+     "section": "3.2",
+     "severity": "P4",
+     "cause": "Handle not moved to reset position before ON",
+     "check": "Check handle position (trip / reset)",
+     "action": "Push handle fully to OFF/RESET then ON",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Breaker does not close, mechanism damaged",
+     "section": "3.3",
+     "severity": "P2",
+     "cause": "Internal mechanism failure",
+     "check": "Handle does not latch after reset",
+     "action": "Replace breaker under warranty",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": null,
+     "symptom": "Unwanted earth leakage trip",
+     "section": "3.4",
+     "severity": "P3",
+     "cause": "Cumulative leakage current from VFD EMC filters",
+     "check": "Measure leakage current with clamp meter",
+     "action": "Change sensitivity setting to 100/300 mA or separate circuits",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Test button does not trip ELCB",
+     "section": "3.5",
+     "severity": "P1",
+     "cause": "Residual current sensing circuit failure",
+     "check": "Press test button at rated voltage; no trip",
+     "action": "Replace ELCB immediately (safety)",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Load current / temperature records"
+   ]
+  },
+  "CONT-MC-32a": {
+   "code": "CONT-MC-32a",
+   "family": "CONTROL",
+   "name": "Magnetic Contactor 32A",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Contactor chattering",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Control voltage drops below pick-up level",
+     "check": "Measure coil voltage during pick-up",
+     "action": "Fix control supply capacity / cable length",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Contactor coil burnt",
+     "section": "3.2",
+     "severity": "P3",
+     "cause": "Coil voltage different from supply voltage",
+     "check": "Compare coil nameplate with supply",
+     "action": "Replace coil with correct voltage",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Main contacts welded",
+     "section": "3.3",
+     "severity": "P2",
+     "cause": "Short circuit without proper SCPD coordination",
+     "check": "Review coordination type (Type 1/2) with upstream breaker",
+     "action": "Replace contactor; apply Type 2 coordination",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate"
+   ]
+  },
+  "RELAY-GMR-22": {
+   "code": "RELAY-GMR-22",
+   "family": "CONTROL",
+   "name": "Thermal Overload Relay 22A",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Overload relay nuisance trip",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Setting lower than motor full load current",
+     "check": "Compare setting dial with motor FLC",
+     "action": "Adjust setting to motor FLC",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Overload relay does not trip on overload",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Mechanism failure",
+     "check": "Trip test with test button",
+     "action": "Replace relay under warranty",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": null,
+     "symptom": "Overload relay trips on phase loss",
+     "section": "3.3",
+     "severity": "P3",
+     "cause": "Upstream fuse blown on one phase",
+     "check": "Measure three phase currents",
+     "action": "Replace fuse; check motor",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate"
+   ]
+  },
+  "INV-LSLV0075-S100": {
+   "code": "INV-LSLV0075-S100",
+   "family": "DRIVE",
+   "name": "LSLV S100 7.5kW VFD",
+   "issues": [
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip during acceleration",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Acceleration time too short for load inertia",
+     "check": "Check trip log: output current at trip > 200% of rated during ACC",
+     "action": "Increase acceleration time and enable stall prevention",
+     "note": null
+    },
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip immediately at run command",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Motor cable insulation breakdown (phase-to-phase short)",
+     "check": "Disconnect motor cable, megger test cable and motor at 1,000 V",
+     "action": "Replace damaged motor cable section",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip even with motor disconnected",
+     "section": "3.3",
+     "severity": "P2",
+     "cause": "Output IGBT module damaged",
+     "check": "Diode test on output terminals U/V/W shows short circuit",
+     "action": "Replace power module under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "E.OV",
+     "symptom": "Over-voltage trip during deceleration",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "Regenerative energy from load; deceleration time too short",
+     "check": "Trip log shows DC link voltage > 820 V during DEC",
+     "action": "Increase deceleration time or install braking resistor",
+     "note": null
+    },
+    {
+     "code": "E.OV",
+     "symptom": "Over-voltage trip at standstill",
+     "section": "3.5",
+     "severity": "P3",
+     "cause": "Supply voltage above tolerance (> 528 V)",
+     "check": "Measure line voltage at drive input terminals",
+     "action": "Adjust transformer tap or install input reactor",
+     "note": null
+    },
+    {
+     "code": "E.LV",
+     "symptom": "Low-voltage trip during operation",
+     "section": "3.6",
+     "severity": "P2",
+     "cause": "Loose input power terminal causing voltage drop",
+     "check": "Measure input voltage under load; inspect terminal torque and discoloration",
+     "action": "Retighten input terminals to specified torque",
+     "note": null
+    },
+    {
+     "code": "E.LV",
+     "symptom": "Low-voltage trip on one phase loss",
+     "section": "3.7",
+     "severity": "P2",
+     "cause": "Input fuse blown on one phase",
+     "check": "Measure phase-to-phase input voltages",
+     "action": "Replace input fuse and check upstream protection",
+     "note": null
+    },
+    {
+     "code": "E.OL",
+     "symptom": "Motor stops with overload trip",
+     "section": "3.8",
+     "severity": "P3",
+     "cause": "Motor rated current parameter set lower than motor nameplate",
+     "check": "Compare motor rated current parameter with motor nameplate; check overload trip log",
+     "action": "Correct motor rated current parameter and overload level",
+     "note": null
+    },
+    {
+     "code": "E.OL",
+     "symptom": "Overload trip after several minutes of operation",
+     "section": "3.9",
+     "severity": "P2",
+     "cause": "Mechanical jam / bearing failure in driven load",
+     "check": "Load current trend rising over time; manual rotation check of load",
+     "action": "Repair mechanical load; resume operation",
+     "note": null
+    },
+    {
+     "code": "E.OH",
+     "symptom": "Inverter overheat trip",
+     "section": "3.10",
+     "severity": "P3",
+     "cause": "Cooling fan failure",
+     "check": "Check fan rotation and fan run-hour monitor",
+     "action": "Replace cooling fan",
+     "note": null
+    },
+    {
+     "code": "E.OH",
+     "symptom": "Overheat trip in summer afternoons",
+     "section": "3.11",
+     "severity": "P3",
+     "cause": "Panel ventilation insufficient; ambient > 50 °C",
+     "check": "Measure panel internal temperature; check heat sink temperature monitor",
+     "action": "Improve panel ventilation or apply derating",
+     "note": null
+    },
+    {
+     "code": "E.GF",
+     "symptom": "Ground fault trip",
+     "section": "3.12",
+     "severity": "P2",
+     "cause": "Motor winding insulation degradation",
+     "check": "Megger test motor winding to ground (< 1 MΩ)",
+     "action": "Repair or replace motor",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "E.PO",
+     "symptom": "Output phase open trip",
+     "section": "3.13",
+     "severity": "P3",
+     "cause": "Loose motor terminal or contactor between drive and motor opened during run",
+     "check": "Inspect motor wiring; check sequence of output contactor",
+     "action": "Fix wiring and correct output contactor sequence",
+     "note": null
+    },
+    {
+     "code": "E.CO",
+     "symptom": "Communication error trip from PLC/BMS network",
+     "section": "3.14",
+     "severity": "P3",
+     "cause": "RS-485 termination missing or baud rate mismatch",
+     "check": "Check communication parameters and termination resistor at both ends",
+     "action": "Set matching baud rate and enable termination",
+     "note": null
+    },
+    {
+     "code": "E.CO",
+     "symptom": "Intermittent communication error with fast polling",
+     "section": "3.15",
+     "severity": "P3",
+     "cause": "Firmware defect: Modbus response timeout below 20 ms polling",
+     "check": "Reproduce with polling interval < 20 ms; firmware version 3.00",
+     "action": "Update firmware to 3.05 or later",
+     "note": null
+    },
+    {
+     "code": "E.EP",
+     "symptom": "Parameter write error after keypad copy",
+     "section": "3.16",
+     "severity": "P3",
+     "cause": "Keypad parameter file from incompatible firmware version",
+     "check": "Compare keypad source firmware with drive firmware",
+     "action": "Update firmware to 3.10 and initialize parameters",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Motor does not run on remote command",
+     "section": "3.17",
+     "severity": "P4",
+     "cause": "Command source parameter set to keypad instead of terminal",
+     "check": "Check run command source and frequency reference source parameters",
+     "action": "Set command source to terminal/fieldbus",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "Parameter backup file",
+    "Motor nameplate data"
+   ]
+  },
+  "INV-LSLV0220-H100": {
+   "code": "INV-LSLV0220-H100",
+   "family": "DRIVE",
+   "name": "LSLV H100 22kW VFD",
+   "issues": [
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip during acceleration",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Acceleration time too short for load inertia",
+     "check": "Check trip log: output current at trip > 200% of rated during ACC",
+     "action": "Increase acceleration time and enable stall prevention",
+     "note": null
+    },
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip immediately at run command",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Motor cable insulation breakdown (phase-to-phase short)",
+     "check": "Disconnect motor cable, megger test cable and motor at 1,000 V",
+     "action": "Replace damaged motor cable section",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip even with motor disconnected",
+     "section": "3.3",
+     "severity": "P2",
+     "cause": "Output IGBT module damaged",
+     "check": "Diode test on output terminals U/V/W shows short circuit",
+     "action": "Replace power module under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "E.OV",
+     "symptom": "Over-voltage trip during deceleration",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "Regenerative energy from load; deceleration time too short",
+     "check": "Trip log shows DC link voltage > 820 V during DEC",
+     "action": "Increase deceleration time or install braking resistor",
+     "note": null
+    },
+    {
+     "code": "E.OV",
+     "symptom": "Over-voltage trip at standstill",
+     "section": "3.5",
+     "severity": "P3",
+     "cause": "Supply voltage above tolerance (> 528 V)",
+     "check": "Measure line voltage at drive input terminals",
+     "action": "Adjust transformer tap or install input reactor",
+     "note": null
+    },
+    {
+     "code": "E.LV",
+     "symptom": "Low-voltage trip during operation",
+     "section": "3.6",
+     "severity": "P2",
+     "cause": "Loose input power terminal causing voltage drop",
+     "check": "Measure input voltage under load; inspect terminal torque and discoloration",
+     "action": "Retighten input terminals to specified torque",
+     "note": null
+    },
+    {
+     "code": "E.LV",
+     "symptom": "Low-voltage trip on one phase loss",
+     "section": "3.7",
+     "severity": "P2",
+     "cause": "Input fuse blown on one phase",
+     "check": "Measure phase-to-phase input voltages",
+     "action": "Replace input fuse and check upstream protection",
+     "note": null
+    },
+    {
+     "code": "E.OL",
+     "symptom": "Motor stops with overload trip",
+     "section": "3.8",
+     "severity": "P3",
+     "cause": "Motor rated current parameter set lower than motor nameplate",
+     "check": "Compare motor rated current parameter with motor nameplate; check overload trip log",
+     "action": "Correct motor rated current parameter and overload level",
+     "note": null
+    },
+    {
+     "code": "E.OL",
+     "symptom": "Overload trip after several minutes of operation",
+     "section": "3.9",
+     "severity": "P2",
+     "cause": "Mechanical jam / bearing failure in driven load",
+     "check": "Load current trend rising over time; manual rotation check of load",
+     "action": "Repair mechanical load; resume operation",
+     "note": null
+    },
+    {
+     "code": "E.OH",
+     "symptom": "Inverter overheat trip",
+     "section": "3.10",
+     "severity": "P3",
+     "cause": "Cooling fan failure",
+     "check": "Check fan rotation and fan run-hour monitor",
+     "action": "Replace cooling fan",
+     "note": null
+    },
+    {
+     "code": "E.OH",
+     "symptom": "Overheat trip in summer afternoons",
+     "section": "3.11",
+     "severity": "P3",
+     "cause": "Panel ventilation insufficient; ambient > 50 °C",
+     "check": "Measure panel internal temperature; check heat sink temperature monitor",
+     "action": "Improve panel ventilation or apply derating",
+     "note": null
+    },
+    {
+     "code": "E.GF",
+     "symptom": "Ground fault trip",
+     "section": "3.12",
+     "severity": "P2",
+     "cause": "Motor winding insulation degradation",
+     "check": "Megger test motor winding to ground (< 1 MΩ)",
+     "action": "Repair or replace motor",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "E.PO",
+     "symptom": "Output phase open trip",
+     "section": "3.13",
+     "severity": "P3",
+     "cause": "Loose motor terminal or contactor between drive and motor opened during run",
+     "check": "Inspect motor wiring; check sequence of output contactor",
+     "action": "Fix wiring and correct output contactor sequence",
+     "note": null
+    },
+    {
+     "code": "E.CO",
+     "symptom": "Communication error trip from PLC/BMS network",
+     "section": "3.14",
+     "severity": "P3",
+     "cause": "RS-485 termination missing or baud rate mismatch",
+     "check": "Check communication parameters and termination resistor at both ends",
+     "action": "Set matching baud rate and enable termination",
+     "note": null
+    },
+    {
+     "code": "E.CO",
+     "symptom": "BACnet communication drops on large network",
+     "section": "3.15",
+     "severity": "P3",
+     "cause": "Firmware defect: MS/TP token loss with > 32 nodes",
+     "check": "Network analyzer shows token loss; firmware older than 2.31",
+     "action": "Update firmware to 2.31 or later",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Motor does not run on remote command",
+     "section": "3.16",
+     "severity": "P4",
+     "cause": "Command source parameter set to keypad instead of terminal",
+     "check": "Check run command source and frequency reference source parameters",
+     "action": "Set command source to terminal/fieldbus",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "Parameter backup file",
+    "Motor nameplate data"
+   ]
+  },
+  "INV-LSLV0750-iS7": {
+   "code": "INV-LSLV0750-iS7",
+   "family": "DRIVE",
+   "name": "iS7 75kW VFD",
+   "issues": [
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip during acceleration",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Acceleration time too short for load inertia",
+     "check": "Check trip log: output current at trip > 200% of rated during ACC",
+     "action": "Increase acceleration time and enable stall prevention",
+     "note": null
+    },
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip immediately at run command",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Motor cable insulation breakdown (phase-to-phase short)",
+     "check": "Disconnect motor cable, megger test cable and motor at 1,000 V",
+     "action": "Replace damaged motor cable section",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip even with motor disconnected",
+     "section": "3.3",
+     "severity": "P2",
+     "cause": "Output IGBT module damaged",
+     "check": "Diode test on output terminals U/V/W shows short circuit",
+     "action": "Replace power module under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "E.OC",
+     "symptom": "Over-current trip at restart after momentary power loss",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "Firmware defect in speed search at restart",
+     "check": "Trip log shows E.OC within 50 ms after power restoration; reproducible with speed search enabled",
+     "action": "Update firmware to 4.05 or later",
+     "note": null
+    },
+    {
+     "code": "E.OV",
+     "symptom": "Over-voltage trip during deceleration",
+     "section": "3.5",
+     "severity": "P2",
+     "cause": "Regenerative energy from load; deceleration time too short",
+     "check": "Trip log shows DC link voltage > 820 V during DEC",
+     "action": "Increase deceleration time or install braking resistor",
+     "note": null
+    },
+    {
+     "code": "E.OV",
+     "symptom": "Over-voltage trip at standstill",
+     "section": "3.6",
+     "severity": "P3",
+     "cause": "Supply voltage above tolerance (> 528 V)",
+     "check": "Measure line voltage at drive input terminals",
+     "action": "Adjust transformer tap or install input reactor",
+     "note": null
+    },
+    {
+     "code": "E.LV",
+     "symptom": "Low-voltage trip during operation",
+     "section": "3.7",
+     "severity": "P2",
+     "cause": "Loose input power terminal causing voltage drop",
+     "check": "Measure input voltage under load; inspect terminal torque and discoloration",
+     "action": "Retighten input terminals to specified torque",
+     "note": null
+    },
+    {
+     "code": "E.LV",
+     "symptom": "Low-voltage trip on one phase loss",
+     "section": "3.8",
+     "severity": "P2",
+     "cause": "Input fuse blown on one phase",
+     "check": "Measure phase-to-phase input voltages",
+     "action": "Replace input fuse and check upstream protection",
+     "note": null
+    },
+    {
+     "code": "E.OL",
+     "symptom": "Motor stops with overload trip",
+     "section": "3.9",
+     "severity": "P3",
+     "cause": "Motor rated current parameter set lower than motor nameplate",
+     "check": "Compare motor rated current parameter with motor nameplate; check overload trip log",
+     "action": "Correct motor rated current parameter and overload level",
+     "note": null
+    },
+    {
+     "code": "E.OL",
+     "symptom": "Overload trip after several minutes of operation",
+     "section": "3.10",
+     "severity": "P2",
+     "cause": "Mechanical jam / bearing failure in driven load",
+     "check": "Load current trend rising over time; manual rotation check of load",
+     "action": "Repair mechanical load; resume operation",
+     "note": null
+    },
+    {
+     "code": "E.OH",
+     "symptom": "Inverter overheat trip",
+     "section": "3.11",
+     "severity": "P3",
+     "cause": "Cooling fan failure",
+     "check": "Check fan rotation and fan run-hour monitor",
+     "action": "Replace cooling fan",
+     "note": null
+    },
+    {
+     "code": "E.OH",
+     "symptom": "Overheat trip in summer afternoons",
+     "section": "3.12",
+     "severity": "P3",
+     "cause": "Panel ventilation insufficient; ambient > 50 °C",
+     "check": "Measure panel internal temperature; check heat sink temperature monitor",
+     "action": "Improve panel ventilation or apply derating",
+     "note": null
+    },
+    {
+     "code": "E.GF",
+     "symptom": "Ground fault trip",
+     "section": "3.13",
+     "severity": "P2",
+     "cause": "Motor winding insulation degradation",
+     "check": "Megger test motor winding to ground (< 1 MΩ)",
+     "action": "Repair or replace motor",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "E.PO",
+     "symptom": "Output phase open trip",
+     "section": "3.14",
+     "severity": "P3",
+     "cause": "Loose motor terminal or contactor between drive and motor opened during run",
+     "check": "Inspect motor wiring; check sequence of output contactor",
+     "action": "Fix wiring and correct output contactor sequence",
+     "note": null
+    },
+    {
+     "code": "E.CO",
+     "symptom": "Communication error trip from PLC/BMS network",
+     "section": "3.15",
+     "severity": "P3",
+     "cause": "RS-485 termination missing or baud rate mismatch",
+     "check": "Check communication parameters and termination resistor at both ends",
+     "action": "Set matching baud rate and enable termination",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Motor does not run on remote command",
+     "section": "3.16",
+     "severity": "P4",
+     "cause": "Command source parameter set to keypad instead of terminal",
+     "check": "Check run command source and frequency reference source parameters",
+     "action": "Set command source to terminal/fieldbus",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "Parameter backup file",
+    "Motor nameplate data"
+   ]
+  },
+  "PLC-XGB-XBM-DR16S": {
+   "code": "PLC-XGB-XBM-DR16S",
+   "family": "PLC",
+   "name": "XGB PLC CPU 16 I/O",
+   "issues": [
+    {
+     "code": "P.01",
+     "symptom": "CPU stops with watchdog error",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Scan time exceeds watchdog due to program loop",
+     "check": "Check max scan time in CPU status; review FOR/JMP loops",
+     "action": "Fix program loop or increase watchdog setting",
+     "note": null
+    },
+    {
+     "code": "P.01",
+     "symptom": "Random watchdog error in noisy environment",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Electrical noise due to improper grounding",
+     "check": "Check FG grounding and cable shielding; correlate with contactor switching",
+     "action": "Separate grounding and add surge suppressors",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "P.02",
+     "symptom": "I/O configuration mismatch after module replacement",
+     "section": "3.3",
+     "severity": "P3",
+     "cause": "Replacement module type differs from I/O parameter",
+     "check": "Compare I/O parameter with installed module list",
+     "action": "Update I/O parameter and download",
+     "note": null
+    },
+    {
+     "code": "P.03",
+     "symptom": "Battery low warning",
+     "section": "3.4",
+     "severity": "P4",
+     "cause": "Backup battery end of life",
+     "check": "Check battery voltage in CPU status",
+     "action": "Replace backup battery (keep power on during replacement)",
+     "note": null
+    },
+    {
+     "code": "P.04",
+     "symptom": "Program checksum error after power cycle",
+     "section": "3.5",
+     "severity": "P2",
+     "cause": "Firmware defect on repeated power cycling within 1 s",
+     "check": "Event log shows power off/on within 1 s; firmware 3.00",
+     "action": "Re-download program and update firmware to 3.10",
+     "note": null
+    },
+    {
+     "code": "P.04",
+     "symptom": "Program lost repeatedly",
+     "section": "3.6",
+     "severity": "P2",
+     "cause": "Flash memory failure in CPU",
+     "check": "Checksum error recurs after re-download",
+     "action": "Replace CPU under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "P.05",
+     "symptom": "Ethernet communication timeout",
+     "section": "3.7",
+     "severity": "P3",
+     "cause": "IP address conflict on plant network",
+     "check": "ARP scan shows duplicate IP",
+     "action": "Assign unique IP address",
+     "note": null
+    },
+    {
+     "code": "P.06",
+     "symptom": "Base power fault, CPU does not start",
+     "section": "3.8",
+     "severity": "P2",
+     "cause": "Power supply module output degraded",
+     "check": "Measure 5 V DC output of power module",
+     "action": "Replace power supply module",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": null,
+     "symptom": "Relay output stuck ON",
+     "section": "3.9",
+     "severity": "P3",
+     "cause": "Relay contact welded by inrush of capacitive/lamp load",
+     "check": "Output stays ON with CPU in STOP; check load type",
+     "action": "Replace output module and add interposing relay",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "PLC/HMI project backup"
+   ]
+  },
+  "PLC-XGI-CPUU": {
+   "code": "PLC-XGI-CPUU",
+   "family": "PLC",
+   "name": "XGI PLC CPU Universal",
+   "issues": [
+    {
+     "code": "P.01",
+     "symptom": "CPU stops with watchdog error",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Scan time exceeds watchdog due to program loop",
+     "check": "Check max scan time in CPU status; review FOR/JMP loops",
+     "action": "Fix program loop or increase watchdog setting",
+     "note": null
+    },
+    {
+     "code": "P.01",
+     "symptom": "Random watchdog error in noisy environment",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Electrical noise due to improper grounding",
+     "check": "Check FG grounding and cable shielding; correlate with contactor switching",
+     "action": "Separate grounding and add surge suppressors",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "P.02",
+     "symptom": "I/O configuration mismatch after module replacement",
+     "section": "3.3",
+     "severity": "P3",
+     "cause": "Replacement module type differs from I/O parameter",
+     "check": "Compare I/O parameter with installed module list",
+     "action": "Update I/O parameter and download",
+     "note": null
+    },
+    {
+     "code": "P.03",
+     "symptom": "Battery low warning",
+     "section": "3.4",
+     "severity": "P4",
+     "cause": "Backup battery end of life",
+     "check": "Check battery voltage in CPU status",
+     "action": "Replace backup battery (keep power on during replacement)",
+     "note": null
+    },
+    {
+     "code": "P.04",
+     "symptom": "Program lost repeatedly",
+     "section": "3.5",
+     "severity": "P2",
+     "cause": "Flash memory failure in CPU",
+     "check": "Checksum error recurs after re-download",
+     "action": "Replace CPU under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "P.05",
+     "symptom": "Ethernet communication timeout",
+     "section": "3.6",
+     "severity": "P3",
+     "cause": "IP address conflict on plant network",
+     "check": "ARP scan shows duplicate IP",
+     "action": "Assign unique IP address",
+     "note": null
+    },
+    {
+     "code": "P.05",
+     "symptom": "Ethernet timeout during broadcast storm",
+     "section": "3.7",
+     "severity": "P2",
+     "cause": "Firmware defect under broadcast storm > 2,000 frames/s",
+     "check": "Packet capture shows broadcast storm; firmware older than 4.40",
+     "action": "Update firmware to 4.40 and configure switch storm control",
+     "note": null
+    },
+    {
+     "code": "P.06",
+     "symptom": "Base power fault, CPU does not start",
+     "section": "3.8",
+     "severity": "P2",
+     "cause": "Power supply module output degraded",
+     "check": "Measure 5 V DC output of power module",
+     "action": "Replace power supply module",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": null,
+     "symptom": "Relay output stuck ON",
+     "section": "3.9",
+     "severity": "P3",
+     "cause": "Relay contact welded by inrush of capacitive/lamp load",
+     "check": "Output stays ON with CPU in STOP; check load type",
+     "action": "Replace output module and add interposing relay",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "PLC/HMI project backup"
+   ]
+  },
+  "HMI-XGT-eXP60": {
+   "code": "HMI-XGT-eXP60",
+   "family": "HMI",
+   "name": "XGT Panel eXP60 (6\")",
+   "issues": [
+    {
+     "code": "H.02",
+     "symptom": "PLC communication timeout on HMI",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Driver protocol or station number mismatch",
+     "check": "Compare HMI connection settings with PLC port settings",
+     "action": "Correct protocol and station number",
+     "note": null
+    },
+    {
+     "code": "H.03",
+     "symptom": "Project download fails",
+     "section": "3.2",
+     "severity": "P3",
+     "cause": "Editor version newer than HMI OS",
+     "check": "Compare editor version with OS version",
+     "action": "Update HMI OS to 1.62 or later",
+     "note": null
+    },
+    {
+     "code": "H.01",
+     "symptom": "Touch position misaligned",
+     "section": "3.3",
+     "severity": "P4",
+     "cause": "Touch calibration drift",
+     "check": "Run touch test in system menu",
+     "action": "Recalibrate touch panel",
+     "note": null
+    },
+    {
+     "code": "H.01",
+     "symptom": "Touch not responding in one area",
+     "section": "3.4",
+     "severity": "P3",
+     "cause": "Touch panel physically damaged",
+     "check": "Visual inspection; touch test dead zone",
+     "action": "Replace touch panel under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "H.04",
+     "symptom": "Screen very dark",
+     "section": "3.5",
+     "severity": "P3",
+     "cause": "Backlight end of life",
+     "check": "Check operating hours (> 50,000 h)",
+     "action": "Replace backlight / unit under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "H.05",
+     "symptom": "Logging stops, memory full warning",
+     "section": "3.6",
+     "severity": "P4",
+     "cause": "Logging storage set to internal memory without rotation",
+     "check": "Check logging configuration",
+     "action": "Enable ring buffer or log to USB",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Screen freezes after weeks of operation",
+     "section": "3.7",
+     "severity": "P3",
+     "cause": "Firmware defect after ~30 days uptime",
+     "check": "Freeze reproducible after ~30 days; OS older than 1.58",
+     "action": "Update OS to 1.58 or later",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "PLC/HMI project backup"
+   ]
+  },
+  "HMI-XGT-iXP90": {
+   "code": "HMI-XGT-iXP90",
+   "family": "HMI",
+   "name": "XGT iXP90 (10\")",
+   "issues": [
+    {
+     "code": "H.02",
+     "symptom": "PLC communication timeout on HMI",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Driver protocol or station number mismatch",
+     "check": "Compare HMI connection settings with PLC port settings",
+     "action": "Correct protocol and station number",
+     "note": null
+    },
+    {
+     "code": "H.02",
+     "symptom": "Timeout when both Ethernet ports used",
+     "section": "3.2",
+     "severity": "P3",
+     "cause": "Firmware defect with two ports on same subnet",
+     "check": "Firmware older than 2.05; ports on same subnet",
+     "action": "Update OS to 2.05 or use separate subnets",
+     "note": null
+    },
+    {
+     "code": "H.01",
+     "symptom": "Touch position misaligned",
+     "section": "3.3",
+     "severity": "P4",
+     "cause": "Touch calibration drift",
+     "check": "Run touch test in system menu",
+     "action": "Recalibrate touch panel",
+     "note": null
+    },
+    {
+     "code": "H.01",
+     "symptom": "Touch not responding in one area",
+     "section": "3.4",
+     "severity": "P3",
+     "cause": "Touch panel physically damaged",
+     "check": "Visual inspection; touch test dead zone",
+     "action": "Replace touch panel under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "H.04",
+     "symptom": "Screen very dark",
+     "section": "3.5",
+     "severity": "P3",
+     "cause": "Backlight end of life",
+     "check": "Check operating hours (> 50,000 h)",
+     "action": "Replace backlight / unit under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "H.05",
+     "symptom": "Logging stops, memory full warning",
+     "section": "3.6",
+     "severity": "P4",
+     "cause": "Logging storage set to internal memory without rotation",
+     "check": "Check logging configuration",
+     "action": "Enable ring buffer or log to USB",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "PLC/HMI project backup"
+   ]
+  },
+  "TRF-DRY-630": {
+   "code": "TRF-DRY-630",
+   "family": "TRANSFORMER",
+   "name": "Cast Resin Dry-Type TRF 630kVA",
+   "issues": [
+    {
+     "code": "A.TH1",
+     "symptom": "Winding temperature alarm (140 °C)",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Cooling fans not operating under high load",
+     "check": "Check fan operation and load current",
+     "action": "Repair fan control; reduce load",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Abnormal humming noise",
+     "section": "3.2",
+     "severity": "P3",
+     "cause": "Loose core clamping or harmonic load",
+     "check": "Sound level and harmonic measurement",
+     "action": "Retighten clamping; apply harmonic filter",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Low insulation resistance before energisation",
+     "section": "3.3",
+     "severity": "P2",
+     "cause": "Moisture absorption during storage",
+     "check": "IR / PI test of windings",
+     "action": "Dry out with heaters and retest",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Secondary voltage too high",
+     "section": "3.4",
+     "severity": "P3",
+     "cause": "Off-circuit tap at wrong position",
+     "check": "Measure secondary voltage and check tap",
+     "action": "Change tap position in de-energised state",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Load current / temperature records"
+   ]
+  },
+  "TRF-OIL-1000": {
+   "code": "TRF-OIL-1000",
+   "family": "TRANSFORMER",
+   "name": "Oil-immersed Transformer 1000kVA",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Abnormal humming noise",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Loose core clamping or harmonic load",
+     "check": "Sound level and harmonic measurement",
+     "action": "Retighten clamping; apply harmonic filter",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "A.BH1",
+     "symptom": "Buchholz alarm",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Air trapped after oil filling",
+     "check": "Gas sample test (air vs fault gas), DGA",
+     "action": "Bleed air from Buchholz relay; monitor",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "A.BH2",
+     "symptom": "Buchholz trip",
+     "section": "3.3",
+     "severity": "P1",
+     "cause": "Internal winding fault",
+     "check": "DGA shows acetylene; winding resistance test",
+     "action": "Factory repair under warranty claim",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": null,
+     "symptom": "Oil leakage at gasket",
+     "section": "3.4",
+     "severity": "P3",
+     "cause": "Gasket damage during transport",
+     "check": "Visual inspection of flanges",
+     "action": "Replace gasket and top up oil",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Secondary voltage too high",
+     "section": "3.5",
+     "severity": "P3",
+     "cause": "Off-circuit tap at wrong position",
+     "check": "Measure secondary voltage and check tap",
+     "action": "Change tap position in de-energised state",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Load current / temperature records"
+   ]
+  },
+  "METER-LP3500-3P4W": {
+   "code": "METER-LP3500-3P4W",
+   "family": "METER",
+   "name": "Smart Power Meter 3P4W",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Negative active power reading",
+     "section": "3.1",
+     "severity": "P4",
+     "cause": "CT polarity reversed",
+     "check": "Check phase angle in meter diagnostics",
+     "action": "Rewire CT or set CT reverse parameter",
+     "note": null
+    },
+    {
+     "code": "R.01",
+     "symptom": "No Modbus response",
+     "section": "3.2",
+     "severity": "P4",
+     "cause": "Address / baud / parity mismatch",
+     "check": "Compare master and meter comm settings",
+     "action": "Align communication settings",
+     "note": null
+    },
+    {
+     "code": "R.01",
+     "symptom": "No response at 38400 even parity",
+     "section": "3.3",
+     "severity": "P4",
+     "cause": "Firmware defect at 38400 / even parity",
+     "check": "Firmware older than 1.80 with 38400 E",
+     "action": "Update firmware to 1.80",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Energy register reset after power loss",
+     "section": "3.4",
+     "severity": "P3",
+     "cause": "Firmware defect during flash write",
+     "check": "Firmware older than 1.72",
+     "action": "Update firmware to 1.72 or later",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate"
+   ]
+  },
+  "METER-LPB-DIN": {
+   "code": "METER-LPB-DIN",
+   "family": "METER",
+   "name": "DIN Rail Energy Meter",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Negative active power reading",
+     "section": "3.1",
+     "severity": "P4",
+     "cause": "CT polarity reversed",
+     "check": "Check phase angle in meter diagnostics",
+     "action": "Rewire CT or set CT reverse parameter",
+     "note": null
+    },
+    {
+     "code": "R.01",
+     "symptom": "No Modbus response",
+     "section": "3.2",
+     "severity": "P4",
+     "cause": "Address / baud / parity mismatch",
+     "check": "Compare master and meter comm settings",
+     "action": "Align communication settings",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Pulse output not counted by PLC",
+     "section": "3.3",
+     "severity": "P4",
+     "cause": "Open-collector output polarity reversed",
+     "check": "Check wiring polarity",
+     "action": "Correct polarity and pull-up",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate"
+   ]
+  },
+  "ESS-PCS-100kW": {
+   "code": "ESS-PCS-100kW",
+   "family": "ESS",
+   "name": "ESS PCS 100kW",
+   "issues": [
+    {
+     "code": "G.01",
+     "symptom": "Grid over-voltage trip",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Wrong country grid profile selected",
+     "check": "Check parameter G-01 grid profile",
+     "action": "Select correct grid profile per utility requirement",
+     "note": null
+    },
+    {
+     "code": "G.02",
+     "symptom": "Frequency trip during generator operation",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Firmware defect in ROCOF measurement",
+     "check": "Trip during genset; firmware older than 2.70",
+     "action": "Update PCS firmware to 2.70",
+     "note": null
+    },
+    {
+     "code": "G.04",
+     "symptom": "IGBT over-temperature",
+     "section": "3.3",
+     "severity": "P3",
+     "cause": "Air filter clogged",
+     "check": "Inspect filters and fans",
+     "action": "Clean/replace filters",
+     "note": null
+    },
+    {
+     "code": "G.05",
+     "symptom": "DC insulation fault",
+     "section": "3.4",
+     "severity": "P1",
+     "cause": "Moisture in battery rack DC cabling",
+     "check": "Insulation resistance test per rack",
+     "action": "Dry and repair cabling",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "G.06",
+     "symptom": "BMS communication loss on PCS",
+     "section": "3.5",
+     "severity": "P2",
+     "cause": "Firmware compatibility: BMS 3.4 heartbeat vs PCS < 2.62",
+     "check": "Check firmware versions of PCS and BMS",
+     "action": "Update PCS firmware to 2.62 or later",
+     "note": null
+    },
+    {
+     "code": "G.06",
+     "symptom": "Intermittent CAN errors",
+     "section": "3.6",
+     "severity": "P3",
+     "cause": "CAN termination missing",
+     "check": "Measure CAN bus resistance (expect 60 Ω)",
+     "action": "Install 120 Ω termination",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "Battery SOC / cell temperature at event"
+   ]
+  },
+  "ESS-BMS-V3": {
+   "code": "ESS-BMS-V3",
+   "family": "ESS",
+   "name": "ESS BMS Controller V3",
+   "issues": [
+    {
+     "code": "G.05",
+     "symptom": "DC insulation fault",
+     "section": "3.1",
+     "severity": "P1",
+     "cause": "Moisture in battery rack DC cabling",
+     "check": "Insulation resistance test per rack",
+     "action": "Dry and repair cabling",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "G.06",
+     "symptom": "BMS communication loss on PCS",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Firmware compatibility: BMS 3.4 heartbeat vs PCS < 2.62",
+     "check": "Check firmware versions of PCS and BMS",
+     "action": "Update PCS firmware to 2.62 or later",
+     "note": null
+    },
+    {
+     "code": "G.06",
+     "symptom": "Intermittent CAN errors",
+     "section": "3.3",
+     "severity": "P3",
+     "cause": "CAN termination missing",
+     "check": "Measure CAN bus resistance (expect 60 Ω)",
+     "action": "Install 120 Ω termination",
+     "note": null
+    },
+    {
+     "code": "B.01",
+     "symptom": "Cell over-voltage alarm",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "Defective battery module cell",
+     "check": "Cell voltage trend shows single cell drift",
+     "action": "Replace battery module under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "B.03",
+     "symptom": "Cell over-temperature",
+     "section": "3.5",
+     "severity": "P1",
+     "cause": "Container HVAC failure",
+     "check": "Check HVAC alarm and room temperature",
+     "action": "Stop operation; repair HVAC",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "B.04",
+     "symptom": "Cell imbalance alarm",
+     "section": "3.6",
+     "severity": "P3",
+     "cause": "Insufficient balancing after long partial cycling",
+     "check": "Max-min cell voltage difference > 50 mV",
+     "action": "Perform full charge balancing maintenance",
+     "note": null
+    },
+    {
+     "code": "B.06",
+     "symptom": "Main contactor welded alarm",
+     "section": "3.7",
+     "severity": "P1",
+     "cause": "Pre-charge circuit failure",
+     "check": "Pre-charge resistor measurement",
+     "action": "Replace contactor and pre-charge resistor",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": null,
+     "symptom": "SOC jumps after long rest",
+     "section": "3.8",
+     "severity": "P3",
+     "cause": "Firmware defect in SOC estimation",
+     "check": "SOC trend shows jump; firmware older than 3.50",
+     "action": "Update BMS firmware to 3.50 and perform calibration",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "Battery SOC / cell temperature at event"
+   ]
+  },
+  "PV-INV-SOLAR-25": {
+   "code": "PV-INV-SOLAR-25",
+   "family": "PV",
+   "name": "Solar Inverter 25kW",
+   "issues": [
+    {
+     "code": "S.01",
+     "symptom": "Insulation fault at sunrise",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Firmware defect at humidity > 95%",
+     "check": "Fault only at sunrise; firmware older than 1.82",
+     "action": "Update firmware to 1.82",
+     "note": null
+    },
+    {
+     "code": "S.01",
+     "symptom": "Insulation fault after rain",
+     "section": "3.2",
+     "severity": "P3",
+     "cause": "Water ingress in PV connector",
+     "check": "IR test per string",
+     "action": "Replace damaged connectors",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": "S.02",
+     "symptom": "Grid lost alarm",
+     "section": "3.3",
+     "severity": "P2",
+     "cause": "AC breaker tripped / grid outage",
+     "check": "Measure AC voltage at inverter terminals",
+     "action": "Restore AC supply; check breaker rating",
+     "note": null
+    },
+    {
+     "code": "S.03",
+     "symptom": "PV over-voltage alarm in winter",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "String too long for low temperature Voc",
+     "check": "Recalculate Voc at minimum temperature",
+     "action": "Reduce modules per string",
+     "note": null
+    },
+    {
+     "code": "S.04",
+     "symptom": "Power derating at noon",
+     "section": "3.5",
+     "severity": "P3",
+     "cause": "Installed in direct sunlight with poor airflow",
+     "check": "Check heat sink temperature log",
+     "action": "Relocate or add shading",
+     "note": null
+    },
+    {
+     "code": "S.05",
+     "symptom": "Residual current trip",
+     "section": "3.6",
+     "severity": "P2",
+     "cause": "Damaged DC cable insulation",
+     "check": "Locate fault by string isolation",
+     "action": "Repair cable",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Yield lower than expected",
+     "section": "3.7",
+     "severity": "P3",
+     "cause": "One string disconnected",
+     "check": "Compare string currents",
+     "action": "Reconnect string; check fuse",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "PV string configuration (modules per string)"
+   ]
+  },
+  "SWGR-MV-12kV": {
+   "code": "SWGR-MV-12kV",
+   "family": "MV_EQUIP",
+   "name": "MV Switchgear Panel 12kV",
+   "issues": [
+    {
+     "code": null,
+     "symptom": "Partial discharge alarm in switchgear",
+     "section": "3.1",
+     "severity": "P2",
+     "cause": "Condensation due to anti-condensation heater off",
+     "check": "PD measurement and humidity check",
+     "action": "Restore heater operation and clean insulators",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Partial discharge at cable compartment",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Cable termination workmanship defect",
+     "check": "PD localisation; inspect cable termination",
+     "action": "Re-terminate cable",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Cable compartment door cannot be opened",
+     "section": "3.3",
+     "severity": "P4",
+     "cause": "Earthing switch not closed (interlock)",
+     "check": "Check earthing switch position indicator",
+     "action": "Follow operation sequence: open VCB, rack out, close earthing switch",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Busbar joint overheating",
+     "section": "3.4",
+     "severity": "P2",
+     "cause": "Insufficient joint torque",
+     "check": "Thermographic inspection under load",
+     "action": "Retorque busbar joints in outage",
+     "note": "this check normally requires a site visit by qualified personnel."
+    },
+    {
+     "code": null,
+     "symptom": "Protection relay trip without fault",
+     "section": "3.5",
+     "severity": "P2",
+     "cause": "CT polarity reversed / wrong relay setting",
+     "check": "Secondary injection test; check CT polarity",
+     "action": "Correct CT wiring and relay settings",
+     "note": "this check normally requires a site visit by qualified personnel."
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate"
+   ]
+  },
+  "UPS-LSU-10K": {
+   "code": "UPS-LSU-10K",
+   "family": "UPS",
+   "name": "Online UPS 10kVA",
+   "issues": [
+    {
+     "code": "U.01",
+     "symptom": "Short backup time",
+     "section": "3.1",
+     "severity": "P3",
+     "cause": "Battery end of life (> 3 years)",
+     "check": "Run battery test; check battery age",
+     "action": "Replace battery set",
+     "note": null
+    },
+    {
+     "code": "U.02",
+     "symptom": "UPS on bypass due to overload",
+     "section": "3.2",
+     "severity": "P2",
+     "cause": "Connected load exceeds rating",
+     "check": "Read load % log",
+     "action": "Redistribute load",
+     "note": null
+    },
+    {
+     "code": "U.03",
+     "symptom": "Inverter fault, load on bypass",
+     "section": "3.3",
+     "severity": "P2",
+     "cause": "Inverter board failure",
+     "check": "Event log U.03; self-test fails",
+     "action": "Repair inverter board under RMA",
+     "note": "hardware replacement is required; request an RMA (see POL-WARRANTY)."
+    },
+    {
+     "code": "U.05",
+     "symptom": "Over-temperature alarm",
+     "section": "3.4",
+     "severity": "P3",
+     "cause": "Fan failure",
+     "check": "Check fan operation",
+     "action": "Replace fan",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "SNMP card not detected",
+     "section": "3.5",
+     "severity": "P4",
+     "cause": "Firmware defect after hot-swap",
+     "check": "Firmware older than 2.30",
+     "action": "Update UPS firmware to 2.30",
+     "note": null
+    },
+    {
+     "code": null,
+     "symptom": "Frequent transfer to battery on generator",
+     "section": "3.6",
+     "severity": "P3",
+     "cause": "Generator frequency outside default window",
+     "check": "Frequency log during genset operation",
+     "action": "Enable generator mode (firmware 2.20 or later)",
+     "note": null
+    }
+   ],
+   "support_info": [
+    "Product model / ordering code",
+    "Serial number (nameplate)",
+    "Error code or symptom displayed",
+    "Operating condition at failure (load, speed, temperature)",
+    "Photos of product and nameplate",
+    "Event / trip log export",
+    "Battery installation date / age"
+   ]
+  }
+ },
+ "faqs": {
+  "LV_BREAKER": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "MCCB 100AF (MCCB-ABS-103c), MCCB 400AF (MCCB-ABS-403c), ACB 2000A (ACB-AS-2000), ELCB 200AF (ELCB-EBN-203c)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "MCCB-ABS-103c: 18 months; MCCB-ABS-403c: 18 months; ACB-AS-2000: 24 months; ELCB-EBN-203c: 18 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "MCCB-ABS-103c: 4 weeks ex-works; MCCB-ABS-403c: 5 weeks ex-works; ACB-AS-2000: 8 weeks ex-works; ELCB-EBN-203c: 4 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "MCCB-ABS-103c: CE, CB, KC; MCCB-ABS-403c: CE, CB, KC, UL (-U variant); ACB-AS-2000: CE, KC, CB; ELCB-EBN-203c: CE, KC"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate, Load current / temperature records."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   },
+   {
+    "q": "What is the latest firmware?",
+    "a": "ACB-AS-2000: 1.4"
+   }
+  ],
+  "MV_EQUIP": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "VCB 25.8kV 1250A (VCB-25kV-1250), MV Switchgear Panel 12kV (SWGR-MV-12kV)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "VCB-25kV-1250: 24 months; SWGR-MV-12kV: 24 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "VCB-25kV-1250: 12 weeks ex-works; SWGR-MV-12kV: 14 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "VCB-25kV-1250: CE, KEMA type test report; SWGR-MV-12kV: KEMA type test report, CE"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   }
+  ],
+  "TRANSFORMER": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "Cast Resin Dry-Type TRF 630kVA (TRF-DRY-630), Oil-immersed Transformer 1000kVA (TRF-OIL-1000)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "TRF-DRY-630: 24 months; TRF-OIL-1000: 24 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "TRF-DRY-630: 10 weeks ex-works; TRF-OIL-1000: 12 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "TRF-DRY-630: Type test report (IEC 60076-11), KC; TRF-OIL-1000: Type test report (IEC 60076), KC"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate, Load current / temperature records."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   }
+  ],
+  "DRIVE": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "LSLV S100 7.5kW VFD (INV-LSLV0075-S100), LSLV H100 22kW VFD (INV-LSLV0220-H100), iS7 75kW VFD (INV-LSLV0750-iS7)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "INV-LSLV0075-S100: 24 months; INV-LSLV0220-H100: 24 months; INV-LSLV0750-iS7: 24 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "INV-LSLV0075-S100: 4 weeks ex-works; INV-LSLV0220-H100: 5 weeks ex-works; INV-LSLV0750-iS7: 6 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "INV-LSLV0075-S100: CE, UL, KC; INV-LSLV0220-H100: CE, UL, KC; INV-LSLV0750-iS7: CE, UL, KC"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate, Event / trip log export, Parameter backup file, Motor nameplate data."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   },
+   {
+    "q": "What is the latest firmware?",
+    "a": "INV-LSLV0075-S100: 3.10; INV-LSLV0220-H100: 2.40; INV-LSLV0750-iS7: 4.10"
+   }
+  ],
+  "UPS": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "Online UPS 10kVA (UPS-LSU-10K)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "UPS-LSU-10K: 24 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "UPS-LSU-10K: 4 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "UPS-LSU-10K: CE, KC"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate, Event / trip log export, Battery installation date / age."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   },
+   {
+    "q": "What is the latest firmware?",
+    "a": "UPS-LSU-10K: 2.30"
+   }
+  ],
+  "ESS": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "ESS PCS 100kW (ESS-PCS-100kW), ESS BMS Controller V3 (ESS-BMS-V3)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "ESS-PCS-100kW: 36 months; ESS-BMS-V3: 36 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "ESS-PCS-100kW: 10 weeks ex-works; ESS-BMS-V3: 8 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "ESS-PCS-100kW: CE, KC, UL 1741 SB (-U variant); ESS-BMS-V3: CE, KC"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate, Event / trip log export, Battery SOC / cell temperature at event."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   },
+   {
+    "q": "What is the latest firmware?",
+    "a": "ESS-PCS-100kW: 2.70; ESS-BMS-V3: 3.50"
+   }
+  ],
+  "PV": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "Solar Inverter 25kW (PV-INV-SOLAR-25)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "PV-INV-SOLAR-25: 60 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "PV-INV-SOLAR-25: 6 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "PV-INV-SOLAR-25: CE, VDE-AR-N 4105, KC"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate, Event / trip log export, PV string configuration (modules per string)."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   },
+   {
+    "q": "What is the latest firmware?",
+    "a": "PV-INV-SOLAR-25: 1.90"
+   }
+  ],
+  "METER": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "Smart Power Meter 3P4W (METER-LP3500-3P4W), DIN Rail Energy Meter (METER-LPB-DIN)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "METER-LP3500-3P4W: 24 months; METER-LPB-DIN: 24 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "METER-LP3500-3P4W: 3 weeks ex-works; METER-LPB-DIN: 3 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "METER-LP3500-3P4W: CE, KC; METER-LPB-DIN: CE, MID"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   },
+   {
+    "q": "What is the latest firmware?",
+    "a": "METER-LP3500-3P4W: 1.80"
+   }
+  ],
+  "CONTROL": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "Magnetic Contactor 32A (CONT-MC-32a), Thermal Overload Relay 22A (RELAY-GMR-22)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "CONT-MC-32a: 18 months; RELAY-GMR-22: 18 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "CONT-MC-32a: 3 weeks ex-works; RELAY-GMR-22: 3 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "CONT-MC-32a: CE, UL, KC, CCC; RELAY-GMR-22: CE, KC, UL"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   }
+  ],
+  "PLC": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "XGB PLC CPU 16 I/O (PLC-XGB-XBM-DR16S), XGI PLC CPU Universal (PLC-XGI-CPUU)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "PLC-XGB-XBM-DR16S: 24 months; PLC-XGI-CPUU: 24 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "PLC-XGB-XBM-DR16S: 3 weeks ex-works; PLC-XGI-CPUU: 4 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "PLC-XGB-XBM-DR16S: CE, UL, KC; PLC-XGI-CPUU: CE, UL, KC"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate, Event / trip log export, PLC/HMI project backup."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   },
+   {
+    "q": "What is the latest firmware?",
+    "a": "PLC-XGB-XBM-DR16S: 3.20; PLC-XGI-CPUU: 4.50"
+   }
+  ],
+  "HMI": [
+   {
+    "q": "Which products does this FAQ cover?",
+    "a": "XGT Panel eXP60 (6\") (HMI-XGT-eXP60), XGT iXP90 (10\") (HMI-XGT-iXP90)"
+   },
+   {
+    "q": "What is the warranty period?",
+    "a": "HMI-XGT-eXP60: 24 months; HMI-XGT-iXP90: 24 months. See POL-WARRANTY."
+   },
+   {
+    "q": "What is the standard lead time?",
+    "a": "HMI-XGT-eXP60: 4 weeks ex-works; HMI-XGT-iXP90: 4 weeks ex-works. See POL-ORDER."
+   },
+   {
+    "q": "Which certifications are available?",
+    "a": "HMI-XGT-eXP60: CE, KC; HMI-XGT-iXP90: CE, UL, KC"
+   },
+   {
+    "q": "Where can I get manuals and datasheets?",
+    "a": "Each product has a datasheet (DS-), installation guide (IG-), troubleshooting guide (TG-) and release notes (RN-) or maintenance guide (MG-). Documents are in English."
+   },
+   {
+    "q": "What information should I send when reporting a fault?",
+    "a": "Product model / ordering code, Serial number (nameplate), Error code or symptom displayed, Operating condition at failure (load, speed, temperature), Photos of product and nameplate, PLC/HMI project backup."
+   },
+   {
+    "q": "How do I return a product?",
+    "a": "Request an RMA number first. Returns without RMA are refused. See POL-RETURN."
+   },
+   {
+    "q": "What is the latest firmware?",
+    "a": "HMI-XGT-eXP60: 1.62; HMI-XGT-iXP90: 2.08"
+   }
+  ]
+ }
+}
