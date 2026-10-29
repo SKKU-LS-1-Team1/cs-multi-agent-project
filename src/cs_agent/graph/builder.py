@@ -69,6 +69,7 @@ class GraphDeps:
     tables: RefTables = field(default_factory=load_tables)
     docs: Any = None  # Retriever (CSA-28)
     cases: Any = None  # Retriever (CSA-28)
+    graph: Any = None  # 지식 그래프 (CSA-71, agents/knowledge_graph.py). None 이면 패턴 DB
     max_retries: int = field(default_factory=lambda: get_settings().max_verify_retries)
     # 에이전트 함수 (모양은 agents/*.py "만들 것" 주석)
     translate: Callable = translation.translate_to_korean
@@ -307,6 +308,10 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             confirmed = "\n".join(f"{name}: {value}" for name, value in sorted(fields.items()))
             query = f"{_inquiry_text(state)}\nConfirmed fields:\n{confirmed}"
             candidates = deps.first_pass(deps.docs, deps.cases, query)
+        # 지식 그래프는 문의 글로 증상을 비교한다 (켜져 있을 때만 넘긴다 — 주입한 대역의 규격 유지)
+        graph = {}
+        if deps.graph is not None:
+            graph = {"graph": deps.graph, "query": _inquiry_text(state)}
         return {
             "candidates": candidates,
             "information_review_refresh": False,
@@ -314,6 +319,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 candidates,
                 state["extraction"],
                 category=state["classification"].category,
+                **graph,
             ),
         }
 

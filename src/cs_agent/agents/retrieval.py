@@ -46,8 +46,12 @@
 # - 키워드 대체 구현의 cases 는 data/raw 의 사례 중 train 티켓에 연결된 것만 패턴으로 묶는다
 #   (완료 기준 2, case_patterns.train_cases).
 # - K3 측정: uv run python -m cs_agent.agents.retrieval --split valid
+# - 지식 그래프 (CSA-71): GRAPH_ENABLED=true 면 finalize_evidence 의 사례 자리를
+#   agents/knowledge_graph.py 검색 결과로 바꾼다 (제품·에러코드 경로로 좁힌 고장 위 2개).
+#   꺼져 있거나 Neo4j·임베딩이 실패하면 아래 패턴 DB 경로 그대로.
 import argparse
 import csv
+import logging
 import math
 import re
 from collections import Counter
@@ -59,6 +63,8 @@ from typing import Any, Protocol
 from cs_agent.config import get_settings
 from cs_agent.domain import BUNDLE_OF, Bundle, Category
 from cs_agent.schemas import Evidence, Extraction
+
+_LOGGER = logging.getLogger(__name__)
 
 DOCS_K = 8
 CASES_K = 8  # 패턴 후보 (근거 확정에서 거르므로 넉넉히)
@@ -235,10 +241,11 @@ def _engine() -> Any:
     return sa.create_engine(get_settings().database_url, pool_pre_ping=True)
 
 
-def _embed_query(text: str) -> list[float]:
+@lru_cache(maxsize=256)  # 같은 문의 글을 docs · 패턴 · 지식 그래프가 한 번씩 찾는다
+def _embed_query(text: str) -> tuple[float, ...]:
     from cs_agent.pipeline.embed_docs import embed  # 적재와 같은 모델·차원 (CSA-18)
 
-    return embed([text])[0]
+    return tuple(embed([text])[0])
 
 
 class PgVectorRetriever:
@@ -417,8 +424,15 @@ def finalize_evidence(
     extraction: Extraction,
     k: int = 3,
     category: Category | None = None,
+    *,
+    graph: Any = None,
+    query: str = "",
 ) -> list[Evidence]:
-    """⑧ 제품·유형으로 거르고 재정렬한 확정 근거. docs k개 + cases FINAL_CASES_K개."""
+    """⑧ 제품·유형으로 거르고 재정렬한 확정 근거. docs k개 + cases FINAL_CASES_K개.
+
+    graph(agents/knowledge_graph.KnowledgeGraph)가 있으면 사례는 지식 그래프에서 찾는다 (CSA-71).
+    그래프가 실패하면 후보의 패턴 DB 사례로 대체한다.
+    """
     docs: dict[tuple[str, str | None], Evidence] = {}
     for evidence in candidates:
         if evidence.source != "docs" or not _matches_product(evidence, extraction):
@@ -432,12 +446,18 @@ def finalize_evidence(
         if key not in docs or score > docs[key].score:
             docs[key] = evidence.model_copy(update={"score": round(score, 4)})
 
+    ranked = sorted(docs.values(), key=lambda e: e.score, reverse=True)
+    if graph is not None:
+        try:
+            return ranked[:k] + graph.search(query, extraction, category, FINAL_CASES_K)
+        except Exception:  # Neo4j 장애·임베딩 실패 → 패턴 DB (처리 흐름은 멈추지 않는다)
+            _LOGGER.exception("지식 그래프 사례 검색 실패 → 패턴 DB 로 대체")
+
     cases = [e for e in candidates if e.source == "cases" and _matches_product(e, extraction)]
     codes = {e.metadata.get("error_code", "").upper() for e in cases} - {""}
     cases = [e for e in cases if _matches_pattern(e, extraction, codes)]
     if category:  # 같은 유형 사례를 먼저
         cases.sort(key=lambda e: (e.metadata.get("category") == category, e.score), reverse=True)
-    ranked = sorted(docs.values(), key=lambda e: e.score, reverse=True)
     return ranked[:k] + cases[:FINAL_CASES_K]
 
 
