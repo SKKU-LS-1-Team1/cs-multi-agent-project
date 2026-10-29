@@ -20,6 +20,9 @@
 # - 피드백 루프 (CSA-15, agents/case_memory.py): 벡터 없이 저장된 해결 사례를 case_embed_interval_s
 #   마다 임베딩한다 (live·DB 일 때). 사례 검색기가 키워드 검색이면 운영 중 해결 사례도 같이 찾게
 #   감싼다 (with_live_cases).
+# - 지식 그래프 (CSA-71·72, agents/knowledge_graph.py): GRAPH_ENABLED 이고 Neo4j 에 붙으면 ⑧ 근거
+#   확정의 사례를 그래프에서 찾고, 해결 확정 사례를 그래프에도 학습한다 (with_graph_learning).
+#   붙지 못하면 경고만 남기고 패턴 DB 로 돈다. 테스트는 create_app(graph=가짜) 로 넣는다.
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -30,7 +33,8 @@ from typing import Any, Literal
 from fastapi import FastAPI
 
 from cs_agent import __version__
-from cs_agent.agents.case_memory import with_live_cases
+from cs_agent.agents import knowledge_graph
+from cs_agent.agents.case_memory import with_graph_learning, with_live_cases
 from cs_agent.agents.retrieval import default_retrievers
 from cs_agent.api import agents as agents_api
 from cs_agent.api import chat, customers, dashboard, inquiries, products, progress, tickets
@@ -111,6 +115,7 @@ def create_app(
     *,
     storage: Literal["auto", "memory"] = "auto",
     retrievers: tuple[Any, Any] | None = None,
+    graph: Any = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -119,6 +124,9 @@ def create_app(
         roster = load_agents()  # 담당자 명단 (CSA-53). 표가 틀리면 여기서 멈춘다
         app.state.llm = llm or get_router()
         app.state.docs, app.state.cases = retrievers or _retrievers()
+        # 검색기를 넘긴 테스트는 설정과 상관없이 그래프를 켜지 않는다 (넘긴 graph 만 쓴다)
+        owns_graph = graph is None and retrievers is None
+        app.state.graph = knowledge_graph.default_graph() if owns_graph else graph
 
         with ExitStack() as stack:
             app.state.sessionmaker = None
@@ -149,11 +157,15 @@ def create_app(
 
             # 키워드 사례 검색(로컬)도 운영 중 해결 사례를 찾게 (CSA-15 피드백 루프)
             app.state.cases = with_live_cases(app.state.cases, records)
+            records = with_graph_learning(records, app.state.graph)  # CSA-72
+            if owns_graph:
+                stack.callback(knowledge_graph.close, app.state.graph)
             deps = GraphDeps(
                 llm=app.state.llm,
                 tables=tables,
                 docs=app.state.docs,
                 cases=app.state.cases,
+                graph=app.state.graph,
                 **(agents or {}),
             )
             app.state.tickets = TicketService(

@@ -36,10 +36,14 @@
 #   - DB·키 없는 로컬은 case_patterns.MemoryPatternRetriever 가 train 사례 CSV 와 운영 중 해결
 #     사례(records.live_cases)를 패턴으로 묶어 찾는다 (main.py 가 with_live_cases 로 붙인다).
 #   - 재문의 제외 (할 일 5): records.deactivate_case → active=false (검색은 active 만).
+#   - 지식 그래프 (CSA-72): GRAPH_ENABLED 면 main.py 가 records 를 with_graph_learning 으로 감싼다.
+#     save_case · deactivate_case 를 DB 에 먼저 쓰고 같은 사례를 그래프에도 반영한다
+#     (agents/knowledge_graph.py learn · deactivate). 그래프 쓰기 실패는 기록만 하고 넘어간다.
 #   - 할 일 6 은 사례에 표시(source_fix_needed)만 한다 (원천을 고치라는 알림은 아직 없다).
 #   - 사례 답변은 고객에게 나간 final_reply(고객 언어 번역본, CSA-27·29)다 (tests/test_api.py 고정).
 #
 # 참고: 기획서 v10 7장·7.1
+import logging
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -47,6 +51,8 @@ from typing import Any
 from cs_agent.agents.case_patterns import assign_pattern
 from cs_agent.domain import FeedbackReason, ReviewAction
 from cs_agent.schemas import Evidence
+
+_LOGGER = logging.getLogger(__name__)
 
 # 해결 확정 때 사례로 남기는 마지막 상담원 행동. 이관 건은 이관 부서가 해결 확정하면 저장한다.
 SAVE_ON: set[ReviewAction] = {
@@ -217,3 +223,36 @@ def with_live_cases(cases: Any, records: Any) -> Any:
     if isinstance(cases, MemoryPatternRetriever):
         cases.records = records
     return cases
+
+
+# 지식 그래프 학습 (CSA-72) ---------------------------------------------------------------------
+
+
+class GraphLearningRecords:
+    """records 를 그대로 쓰되, 사례 저장 · 비활성화를 지식 그래프에도 반영한다."""
+
+    def __init__(self, records: Any, graph: Any) -> None:
+        self.records = records
+        self.graph = graph
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.records, name)
+
+    def save_case(self, case: dict) -> None:
+        self.records.save_case(case)  # DB 가 원본. 실패하면 그래프도 건드리지 않는다
+        try:
+            self.graph.learn(case)
+        except Exception:  # 해결 확정을 막지 않는다 — build_graph 를 다시 돌리면 맞춰진다
+            _LOGGER.exception("지식 그래프 사례 학습 실패: %s", case.get("case_id"))
+
+    def deactivate_case(self, ticket_id: str) -> None:
+        self.records.deactivate_case(ticket_id)
+        try:
+            self.graph.deactivate(ticket_id)
+        except Exception:
+            _LOGGER.exception("지식 그래프 사례 비활성화 실패: %s", ticket_id)
+
+
+def with_graph_learning(records: Any, graph: Any) -> Any:
+    """지식 그래프가 켜져 있으면 records 를 감싼다. 없으면 그대로."""
+    return records if graph is None else GraphLearningRecords(records, graph)
