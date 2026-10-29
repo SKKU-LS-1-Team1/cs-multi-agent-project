@@ -9,10 +9,12 @@ from datetime import datetime
 from threading import BoundedSemaphore
 
 from cs_agent.followup_schemas import FollowupReading
+from cs_agent.llm.router import json_text
 
 _POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="specialist-followup")
 _CAPACITY = BoundedSemaphore(2)
-TIMEOUT_S = 20
+# 해석(write) 약 16초 + 검증(judge) — 20초로는 운영 Gemini 응답이 자주 시간 초과됐다 (2026-10-29)
+TIMEOUT_S = 45
 
 INSTRUCTIONS = """# ROLE
 You assist LS ELECTRIC staff handling an investigation after specialist referral.
@@ -156,7 +158,9 @@ def read_replies(state: Mapping, requests: list[dict], definitions: dict, llm) -
             "specialist_followup",
             INSTRUCTIONS + "\n" + json.dumps(payload, default=str, ensure_ascii=False),
         )
-        reading = validate_reading(FollowupReading.model_validate_json(raw), requests, definitions)
+        reading = validate_reading(
+            FollowupReading.model_validate_json(json_text(raw)), requests, definitions
+        )
         judged = llm.judge(
             "verify_specialist_followup",
             "Check that every stage, requested field and final conclusion is explicitly supported "

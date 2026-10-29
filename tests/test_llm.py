@@ -8,7 +8,7 @@ from cs_agent.cache.store import MemoryKV
 from cs_agent.config import Settings
 from cs_agent.llm import tracing
 from cs_agent.llm.clients import Completion, JevClient, Judgement, parse_judgement
-from cs_agent.llm.router import LLMRouter, RateLimited
+from cs_agent.llm.router import LLMRouter, RateLimited, json_text
 
 OPTIONS = ["DEFECT", "RETURN", "QUOTE"]
 
@@ -438,3 +438,15 @@ def test_trace_marks_errors(langfuse):
     (generation,) = langfuse.generations
     assert generation.start["trace_context"] is None  # 문의 밖 호출은 trace 를 따로
     assert generation.updates["level"] == "ERROR"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['{"a": 1}', '```json\n{"a": 1}\n```', '```\n{"a": 1}\n```', '  ```JSON\n{"a": 1}\n```  '],
+)
+def test_json_text_strips_only_a_surrounding_markdown_fence(raw):
+    assert json.loads(json_text(raw)) == {"a": 1}
+
+
+def test_json_text_keeps_inner_backticks():
+    assert json_text('{"text": "use ```code```"}') == '{"text": "use ```code```"}'
