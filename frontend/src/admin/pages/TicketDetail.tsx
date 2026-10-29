@@ -483,7 +483,7 @@ function Copilot({ t }: { t: Ticket }) {
       summary: [reason, t.apiExtraction?.unconfirmed_evidence?.[field]].filter(Boolean).join(" · ") })),
     ...c.expertReferences.map((r: any) => ({ key: r.id, label: r.label, hint: "회신", summary: String(r.text || "") })),
     ...c.technical.documents.map((d: any) => ({ key: d.id, label: d.label, hint: "기술문서", summary: String(d.text || "") })),
-    ...c.technical.similarCases.map((r: any) => ({ key: r.id, label: <>유사 사례 <Mono>{r.id}</Mono></>, hint: r.matches ? "조건 유사" : "조건 차이", summary: r.text || `원인: ${r.cause} → 조치: ${r.action}` })),
+    ...c.technical.similarCases.map((r: any) => ({ key: r.id, label: <>유사 사례 <Mono>{r.id}</Mono></>, hint: r.path ? "그래프 경로" : r.matches ? "조건 유사" : "조건 차이", summary: r.path ? `경로: ${r.path}` : r.text || `원인: ${r.cause} → 조치: ${r.action}` })),
   ];
   const open = t.stage !== 5 && !t.sent;
   const choice = branchChoice(t);

@@ -1,0 +1,34 @@
+{
+  "split": "test",
+  "k": 2,
+  "gold": {
+    "n": 104,
+    "reachable": 103,
+    "case_embed@1": 77,
+    "case_embed@2": 85,
+    "frequency@1": 42,
+    "frequency@2": 57,
+    "pattern@1": 83,
+    "pattern@2": 93,
+    "graph@1": 84,
+    "graph@2": 95,
+    "case_embed_top2_same_fault": 61,
+    "case_embed_top1_wrong": 20,
+    "case_embed_top1_wrong_same_product": 18
+  },
+  "rule": {
+    "n": 104,
+    "reachable": 103,
+    "case_embed@1": 77,
+    "case_embed@2": 85,
+    "frequency@1": 42,
+    "frequency@2": 57,
+    "pattern@1": 83,
+    "pattern@2": 93,
+    "graph@1": 84,
+    "graph@2": 95,
+    "case_embed_top2_same_fault": 61,
+    "case_embed_top1_wrong": 20,
+    "case_embed_top1_wrong_same_product": 18
+  }
+}

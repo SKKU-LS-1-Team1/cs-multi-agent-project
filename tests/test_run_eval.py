@@ -211,6 +211,16 @@ def test_result_is_saved_as_json_and_markdown(tmp_path, monkeypatch) -> None:
     assert render_markdown(result) == markdown
 
 
+def test_graph_run_is_saved_separately(tmp_path) -> None:
+    rows = [_result()]
+    off = save(build_result("valid", "r", rows, {}), tmp_path)
+    on = save(build_result("valid", "r", rows, {}, graph=True), tmp_path)
+
+    assert off != on and on.name.startswith("eval_valid_graph_")  # 같은 날 끈 결과를 덮지 않는다
+    assert json.loads(on.read_text())["graph"] is True
+    assert "지식 그래프 켬" in on.with_suffix(".md").read_text()
+
+
 def test_test_split_needs_final_flag() -> None:
     with pytest.raises(SystemExit, match="N-05"):
         run_eval.main(["--split", "test"])

@@ -7,6 +7,8 @@
 #   case_embed : 바꾸기 전. 지난 문의 글 임베딩(resolution_cases.embedding) 코사인 상위 3
 #   frequency  : 패턴, 메타데이터가 맞는 것 중 해결 건수 많은 순 (임베딩 없음)
 #   pattern    : 지금. 패턴 설명 임베딩(case_patterns) 상위 8 → 제품군·적용 제품·에러코드로 거름
+#   graph      : --graph (CSA-73). 지식 그래프 — 제품 → 고장 ← 에러코드 경로로 후보를 좁힌 뒤
+#                그 안에서 패턴 설명 임베딩 비교 (agents/knowledge_graph.py · finalize_evidence)
 # 메타데이터 (finalize_evidence 에 넘기는 유형·제품·제품군·에러코드)
 #   gold : 티켓 라벨 (분석이 맞았을 때)
 #   rule : LLM 없는 규칙 추출 제품·에러코드 + 라벨 유형 (분석 정확도는 CSA-26 평가에서 따로)
@@ -14,6 +16,7 @@
 # 실행 (pgvector 에 사례·패턴이 적재돼 있어야 한다: pipeline.embed_docs --target all)
 #   DATABASE_URL=... uv run --extra llm --extra data python -m cs_agent.evaluation.case_retrieval
 #   --split valid|test, --out 결과.json
+#   --graph: Neo4j 에 그래프가 적재돼 있어야 한다 (pipeline.build_graph, extra: graph)
 import argparse
 import json
 from collections import Counter
@@ -70,8 +73,8 @@ def rule_metadata(row) -> dict:
     }
 
 
-def _final_faults(candidates, meta, fault_of) -> list[str]:
-    """운영과 같은 근거 확정 → 위 K개 사례 근거의 고장."""
+def _final_faults(candidates, meta, fault_of, **graph) -> list[str]:
+    """운영과 같은 근거 확정 → 위 K개 사례 근거의 고장. graph=, query= 를 넘기면 지식 그래프."""
     from cs_agent.agents.retrieval import finalize_evidence
     from cs_agent.schemas import Extraction
 
@@ -80,8 +83,21 @@ def _final_faults(candidates, meta, fault_of) -> list[str]:
         product_family=meta["product_family"],
         error_code=meta["error_code"],
     )
-    final = finalize_evidence(candidates, extraction, category=meta["category"])
+    final = finalize_evidence(candidates, extraction, category=meta["category"], **graph)
     return [fault_of(e) for e in final if e.source == "cases"][:K]
+
+
+class _Strict:
+    """그래프 검색이 실패하면 패턴 DB 로 대체하지 않고 멈춘다 (비교가 섞이지 않게)."""
+
+    def __init__(self, graph) -> None:
+        self.graph = graph
+
+    def search(self, *args, **kwargs):
+        try:
+            return self.graph.search(*args, **kwargs)
+        except Exception as e:
+            raise SystemExit(f"지식 그래프 검색 실패: {e}") from e
 
 
 def _frequency(meta, seed) -> list[str]:
@@ -96,6 +112,31 @@ def _frequency(meta, seed) -> list[str]:
     return list(counts.sort_values(["same", "n"], ascending=False).index[:K])
 
 
+METHODS = (
+    ("case_embed", "지난 문의 글 임베딩 (처음)"),
+    ("frequency", "패턴, 해결 건수 많은 순"),
+    ("pattern", "패턴 설명 임베딩 + 거름 (지금)"),
+    ("graph", "지식 그래프 (CSA-73)"),
+)
+
+
+def table(results: dict) -> str:
+    """발표용 표: 방식 × (메타데이터 gold · rule) 1등 · 위 K개 정답 수."""
+    n = results["gold"]["n"]
+    lines = [
+        f"{results['split']} {n}건 (정답 = 같은 fault_id)",
+        "",
+        f"| 방식 | gold 1등 | gold 위 {K}개 | rule 1등 | rule 위 {K}개 |",
+        "|---|---|---|---|---|",
+    ]
+    for key, label in METHODS:
+        if f"{key}@1" not in results["gold"]:
+            continue
+        cells = [results[v][f"{key}@{at}"] for v in ("gold", "rule") for at in (1, K)]
+        lines.append(f"| {label} | " + " | ".join(str(c) for c in cells) + " |")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> None:
     from cs_agent.agents.case_patterns import PgPatternRetriever
     from cs_agent.agents.retrieval import CASES_K, PgVectorRetriever
@@ -104,7 +145,14 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="해결 사례 찾기: 지난 문의 임베딩 vs 패턴 DB")
     parser.add_argument("--split", default="valid")
     parser.add_argument("--out", type=Path, help="결과 JSON 저장 경로")
+    parser.add_argument("--graph", action="store_true", help="지식 그래프(Neo4j)도 비교")
     args = parser.parse_args(argv)
+    graph = None
+    if args.graph:
+        from cs_agent.agents.knowledge_graph import default_graph
+
+        if (graph := default_graph(enabled=True)) is None:
+            raise SystemExit("Neo4j 에 붙지 못함 (docker compose up -d neo4j · build_graph)")
 
     queries, seed = load(args.split)
     fault_of_case = dict(zip(seed.case_id, seed.fault_id, strict=True))
@@ -119,6 +167,8 @@ def main(argv: list[str] | None = None) -> None:
     new = PgPatternRetriever(embed_fn=vectors.__getitem__)
     old_top = {t: old.search(q, 3) for t, q in texts.items()}  # 바꾸기 전 CASES_K = 3
     new_top = {t: new.search(q, CASES_K) for t, q in texts.items()}
+    if graph is not None:
+        graph.embed_fn = vectors.__getitem__  # 같은 문의 임베딩
 
     results: dict = {"split": args.split, "k": K}
     for variant, meta_of in (("gold", gold_metadata), ("rule", rule_metadata)):
@@ -134,6 +184,14 @@ def main(argv: list[str] | None = None) -> None:
                     new_top[row.ticket_id], meta, lambda e: e.metadata["pattern_id"]
                 ),
             }
+            if graph is not None:
+                ranked["graph"] = _final_faults(
+                    [],
+                    meta,
+                    lambda e: e.metadata["pattern_id"],
+                    graph=_Strict(graph),
+                    query=texts[row.ticket_id],
+                )
             hits["n"] += 1
             hits["reachable"] += gold in seen
             for name, faults in ranked.items():
@@ -150,6 +208,8 @@ def main(argv: list[str] | None = None) -> None:
         results[variant] = dict(hits)
 
     print(json.dumps(results, ensure_ascii=False, indent=2))
+    print()
+    print(table(results))
     if args.out:
         args.out.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
 
