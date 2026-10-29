@@ -8,6 +8,19 @@ export const families = catalog.families
 export const getFamily = (id) => families.find((f) => f.id === id)
 export const products = catalog.products
 export const getProduct = (code) => catalog.products[code]
+
+// 제품 목록(대분류 3 · 제품군 11 · 모델 23). 대분류는 data/ref/family_divisions.csv 와 같은 순서·이름.
+const DIVISIONS = [
+  ['POWER', '전력', ['LV_BREAKER', 'MV_EQUIP', 'TRANSFORMER', 'METER']],
+  ['AUTOMATION', '자동화', ['CONTROL', 'DRIVE', 'PLC', 'HMI']],
+  ['ENERGY', '에너지', ['ESS', 'PV', 'UPS']],
+]
+const listed = new Set(DIVISIONS.flatMap(([, , ids]) => ids))
+export const divisions = [
+  ...DIVISIONS.map(([id, label, ids]) => ({ id, label, families: ids.map(getFamily).filter(Boolean) })),
+  // 표에 없는 제품군이 생기면 빠뜨리지 않고 맨 아래에 둔다
+  { id: 'OTHER', label: '기타', families: families.filter((f) => !listed.has(f.id)) },
+].filter((d) => d.families.length)
 export const NONE = '__none'
 
 // 모델명을 모르는 경우: 제품군에 속한 모델의 증상을 모두 모아 보여 준다.
