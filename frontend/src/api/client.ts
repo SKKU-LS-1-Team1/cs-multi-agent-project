@@ -200,6 +200,25 @@ export type ProductDetail = {
   docs: DocMeta[];
 };
 export type ReviewAction = "approve" | "edit_approve" | "rewrite" | "info_request" | "escalate" | "reject";
+// 업무 메일함 (GET/POST /api/mail, services/mailbox.py): 앞단을 거치지 않은 메일 문의
+export type MailItem = {
+  mail_id: string; received_at: string; sender: string; company: string; customer_tier: string;
+  country: string | null; language: string | null; subject: string; body: string;
+  ticket_id: string | null; analyzed: boolean;
+};
+export type MailAnalysis = {
+  mail_id: string;
+  classification: Classification | null;
+  extraction: Extraction | null;
+  rules: (RuleResult & { sla_first_response_h: number; sla_resolution_h: number; escalate_to: string | null }) | null;
+  route: "draft" | "info_request" | "human" | null;
+  body_ko: string | null;
+  field_labels: Record<string, string>;
+  error: string | null;
+  category_by: "ai" | "reviewer";
+  product_by: "ai" | "reviewer";
+};
+export type MailReview = { category?: string | null; product_code?: string | null };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -264,5 +283,12 @@ export const api = {
   ticket: (id: string) => request<Ticket>(`/tickets/${id}`),
   act: (id: string, body: { action: ReviewAction } & Record<string, unknown>) =>
     request<Ticket>(`/tickets/${id}/action`, { method: "POST", body: JSON.stringify(body) }),
+  mails: () => request<MailItem[]>("/mail"),
+  // AI 분석 + 담당 부서·우선순위 (티켓은 만들지 않는다). 담당자가 고친 유형·제품이 있으면 그 값으로
+  analyzeMail: (id: string, review: MailReview = {}) =>
+    request<MailAnalysis>(`/mail/${id}/analyze`, { method: "POST", body: JSON.stringify(review) }),
+  // 검토한 유형·제품으로 티켓 등록 (이미 등록했으면 그 티켓)
+  registerMail: (id: string, body: { category: string; product_code?: string | null; reviewer: string }) =>
+    request<Ticket>(`/mail/${id}/register`, { method: "POST", body: JSON.stringify(body) }),
   departments: () => request<{ dept: string; open: number; at_risk: number }[]>("/dashboard/departments"),
 };

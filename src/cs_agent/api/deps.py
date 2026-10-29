@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from cs_agent.cache.store import ChatSessionStore
 from cs_agent.llm.router import LLMRouter
+from cs_agent.services.mailbox import Mailbox as MailboxService
 from cs_agent.services.tickets import TicketService
 
 
@@ -35,6 +36,10 @@ def _docs(request: Request) -> Any:
 
 def _cases(request: Request) -> Any:
     return request.app.state.cases
+
+
+def _mailbox(request: Request) -> MailboxService:
+    return request.app.state.mailbox
 
 
 def _chat_sessions(request: Request) -> ChatSessionStore:
@@ -55,3 +60,4 @@ Docs = Annotated[Any, Depends(_docs)]
 Cases = Annotated[Any, Depends(_cases)]
 ChatSessions = Annotated[ChatSessionStore, Depends(_chat_sessions)]
 DB = Annotated[Session, Depends(_db)]
+Mailbox = Annotated[MailboxService, Depends(_mailbox)]

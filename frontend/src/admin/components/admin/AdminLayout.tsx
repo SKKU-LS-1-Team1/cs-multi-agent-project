@@ -1,7 +1,7 @@
 // 관리자 공통 셸: LS 남색 그라데이션 프레임 안에 둥근 본문 판이 들어가는 구조(Emerald24 레퍼런스).
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { BookOpen, Inbox, LayoutGrid, LogOut, Search, Users } from "lucide-react";
+import { BookOpen, Inbox, LayoutGrid, LogOut, Mail, Search, Users } from "lucide-react";
 import { cn } from "@admin/lib/utils";
 import { setUi, useStore } from "@admin/lib/store";
 import { Toaster } from "@admin/components/ui/sonner";
@@ -17,6 +17,7 @@ const MENU = [
   { to: "/tickets", label: "문의 관리", icon: Inbox, match: (p: string) => p.startsWith("/tickets") },
   { to: "/customers", label: "고객 관리", icon: Users, match: (p: string) => p.startsWith("/customers") },
   { to: "/knowledge", label: "지식·해결 사례", icon: BookOpen, match: (p: string) => p.startsWith("/knowledge") },
+  { to: "/mail", label: "업무 메일", icon: Mail, match: (p: string) => p.startsWith("/mail") },
 ];
 
 export default function AdminLayout() {

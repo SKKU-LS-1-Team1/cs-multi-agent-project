@@ -25,7 +25,7 @@ import type { Ticket } from "./types";
 
 const REFRESH_MS = 10_000;
 
-const CATEGORY_LABEL: Record<string, string> = {
+export const CATEGORY_LABEL: Record<string, string> = {
   TECH_SPEC: "사양", MANUAL: "문서 요청", COMPLIANCE: "인증", QUOTE: "견적", ORDER_LEAD: "납기",
   DEFECT: "불량", INSTALL: "설치", FW_UPDATE: "펌웨어", WARRANTY: "보증", RETURN: "반품",
 };

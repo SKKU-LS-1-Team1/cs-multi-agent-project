@@ -6,6 +6,7 @@ import TicketDetail from "./pages/TicketDetail";
 import Customers from "./pages/Customers";
 import CustomerDetail from "./pages/CustomerDetail";
 import Knowledge from "./pages/Knowledge";
+import Mailbox from "./pages/Mailbox";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import { currentAccount } from "./lib/auth";
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="customers" element={<Customers />} />
         <Route path="customers/:customerId" element={<CustomerDetail />} />
         <Route path="knowledge" element={<Knowledge />} />
+        <Route path="mail" element={<Mailbox />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
