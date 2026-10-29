@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     inquiry_translation_timeout_s: float = Field(default=20.0, gt=0, le=60)
     case_embed_interval_s: float = 300.0  # 벡터 없는 해결 사례 임베딩 간격 (live). 0 이면 끔
 
+    # 사례 학습 지식 그래프 (CSA-69~73, agents/knowledge_graph.py). false 면 지금처럼 패턴 DB.
+    # true 여도 Neo4j 에 붙지 못하면 패턴 DB 로 대체한다 (처리 흐름은 멈추지 않는다).
+    graph_enabled: bool = False
+    neo4j_uri: str = "bolt://localhost:7687"  # compose 안의 api 는 docker-compose.yml 값을 쓴다
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "cs-graph-local"
+
 
 @lru_cache
 def get_settings() -> Settings:

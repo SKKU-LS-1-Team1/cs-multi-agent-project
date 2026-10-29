@@ -1,4 +1,5 @@
 # 로컬·GCP VM 공통 구성 (CSA-44 · 김도연): React+Nginx · FastAPI · PostgreSQL(+pgvector) · Redis
+#   + Neo4j (사례 학습 지식 그래프, CSA-69. GRAPH_ENABLED=true 일 때만 api 가 쓴다)
 # 실행: cp .env.example .env && docker compose up --build
 services:
   nginx:
@@ -34,6 +35,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://cs:cs@postgres:5432/cs
       REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
     volumes:
       - ./data/raw:/app/data/raw:ro
     depends_on:
@@ -63,5 +65,27 @@ services:
   redis:
     image: redis:7-alpine
 
+  # 사례 학습 지식 그래프 (CSA-69). 벡터 함수(vector.similarity.cosine)가 있는 5.18 이상으로 고정.
+  # Postgres 처럼 이 컴퓨터(127.0.0.1)에서만 열린다: Browser http://localhost:7474 · Bolt 7687
+  # (GCP 에서는 ssh -L 7474:localhost:7474 -L 7687:localhost:7687 로 터널).
+  # 데이터가 수천 노드 수준이라 메모리를 heap 512m · page cache 256m 로 묶는다.
+  neo4j:
+    image: neo4j:5.26.2-community
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-cs-graph-local}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null || exit 1"]
+      interval: 5s
+      retries: 20
+
 volumes:
   pgdata:
+  neo4jdata:
