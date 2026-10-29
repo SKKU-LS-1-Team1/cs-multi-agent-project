@@ -22,6 +22,8 @@
 #   지난 문의 글 임베딩 (바꾸기 전)            86       94          77       85
 #   패턴, 해결 건수 많은 순 (임베딩 없음)       37       56          42       57
 #   패턴 설명 임베딩 + 거름 (지금)              90      109          83       93
+#   지식 그래프 경로로 좁힌 뒤 비교 (CSA-73)     90      109          84       95
+#     (GRAPH_ENABLED, agents/knowledge_graph.py — docs/results/knowledge_graph.md)
 #   - 규칙 추출 메타데이터(LLM 없음)로 재도 같다.
 #   - 지난 문의 임베딩의 1등 오답 36건 중 34건이 '같은 제품의 다른 고장'이다. 같은 제품 문의끼리
 #     글(제품명 · 문체 · 템플릿)이 비슷해 증상 차이보다 그쪽이 유사도를 정한다 (피드백의 '왜곡').
@@ -89,27 +91,29 @@ def catalog_rows() -> list[dict]:
     return [dict(r) for r in _catalog_rows().values()]
 
 
+def catalog_pattern(r: Mapping[str, Any]) -> dict:
+    """fault_catalog.csv 행 → 패턴 행 (지식 그래프 적재도 같이 쓴다, pipeline/build_graph.py)."""
+    code = _code(r.get("error_code"))
+    return {
+        "pattern_id": r["fault_id"],
+        "family": r["family"],
+        "error_code": code,
+        "applies_to": [p for p in (r.get("applies_to") or "").split(";") if p],
+        "text": describe(
+            r["family"],
+            code,
+            r.get("symptom", ""),
+            r.get("root_cause", ""),
+            r.get("action", ""),
+            r.get("diagnosis", ""),
+        ),
+        "source": "catalog",
+    }
+
+
 @lru_cache(maxsize=1)
 def _catalog_rows() -> dict[str, dict]:
-    rows = {}
-    for fid, r in _catalog()[0].items():
-        code = _code(r.get("error_code"))
-        rows[fid] = {
-            "pattern_id": fid,
-            "family": r["family"],
-            "error_code": code,
-            "applies_to": [p for p in (r.get("applies_to") or "").split(";") if p],
-            "text": describe(
-                r["family"],
-                code,
-                r.get("symptom", ""),
-                r.get("root_cause", ""),
-                r.get("action", ""),
-                r.get("diagnosis", ""),
-            ),
-            "source": "catalog",
-        }
-    return rows
+    return {fid: catalog_pattern(r) for fid, r in _catalog()[0].items()}
 
 
 def assign_pattern(family: str | None, cause: str | None) -> str | None:
