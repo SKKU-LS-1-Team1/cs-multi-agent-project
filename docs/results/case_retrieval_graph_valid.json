@@ -1,0 +1,34 @@
+{
+  "split": "valid",
+  "k": 2,
+  "gold": {
+    "n": 128,
+    "reachable": 123,
+    "case_embed@1": 86,
+    "case_embed@2": 94,
+    "frequency@1": 37,
+    "frequency@2": 56,
+    "pattern@1": 90,
+    "pattern@2": 109,
+    "graph@1": 90,
+    "graph@2": 109,
+    "case_embed_top2_same_fault": 74,
+    "case_embed_top1_wrong": 36,
+    "case_embed_top1_wrong_same_product": 34
+  },
+  "rule": {
+    "n": 128,
+    "reachable": 123,
+    "case_embed@1": 86,
+    "case_embed@2": 94,
+    "frequency@1": 36,
+    "frequency@2": 54,
+    "pattern@1": 90,
+    "pattern@2": 109,
+    "graph@1": 90,
+    "graph@2": 109,
+    "case_embed_top2_same_fault": 74,
+    "case_embed_top1_wrong": 36,
+    "case_embed_top1_wrong_same_product": 34
+  }
+}

@@ -42,6 +42,11 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 46개(CSA-14~51, C
 | CSA-31 | 자동 점검(검증) 에이전트 | 김동규 | 2 | `agents/verification.py` |
 | CSA-55 | 이관 요청서 작성 에이전트 (부서·사유·진단 요약·근거) | 김도연 | 2 | `agents/escalation.py` |
 | CSA-57 | 원문 한국어 번역 생성 (상담원 표시용) | 김도연 | 2 | `agents/translation.py` |
+| CSA-69 | [지식 그래프 ①] Neo4j 서비스·설정·드라이버 | 김동규 | 2 | `docker-compose.yml` (`neo4j`), `config.py` (`graph_enabled`·`neo4j_*`), `pyproject.toml` (`graph` extra) |
+| CSA-70 | [지식 그래프 ②] 그래프 적재 파이프라인 | 김동규 | 2 | `pipeline/build_graph.py` |
+| CSA-71 | [지식 그래프 ③] 그래프 검색 + ⑧ 근거 확정 연결 + fake 테스트 | 김동규 | 2 | `agents/knowledge_graph.py`, `agents/retrieval.py` (`finalize_evidence`), `tests/stubs.py` (`MemoryGraph`) |
+| CSA-72 | [지식 그래프 ④] 해결 확정 시 그래프 학습 | 김동규 | 2 | `agents/case_memory.py` (`with_graph_learning`), `agents/knowledge_graph.py` (`learn`) |
+| CSA-73 | [지식 그래프 ⑤] 평가 비교 · 근거 경로 표시 · 시연 | 김동규 | 2 | `evaluation/case_retrieval.py` (`--graph`), `evaluation/run_eval.py` (`--graph`), `frontend/src/pages/admin/EvidencePanel.tsx`, `frontend/src/admin/pages/TicketDetail.tsx` |
 
 ## CSA-9 고객 챗봇 에이전트
 | 키 | 작업 | 담당 | 스프린트 | 위치 |

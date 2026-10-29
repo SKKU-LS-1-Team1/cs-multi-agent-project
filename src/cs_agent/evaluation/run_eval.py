@@ -35,6 +35,10 @@
 #   AI 자신의 초안으로 쌓여 피드백 루프가 아니게 된다 (PR #31 리뷰).
 #   "같은 내용이면 approve" 는 판정 기준이 없어 하지 않는다 → 시연의 K2 는 재지 않는다 (None).
 #   앞 절반 vs 뒤 절반의 KPI 와 "live 사례를 근거로 쓴 문의 비율"을 비교한다.
+# - --graph / --no-graph (CSA-73): 지식 그래프를 켜고 끈 두 번을 같은 문의로 비교한다 (기본은
+#   GRAPH_ENABLED). 켜면 Neo4j 에 붙어야 한다 (못 붙으면 멈춘다 — 꺼진 결과가 켠 것으로 남지 않게).
+#   결과 파일 이름에 _graph 가 붙어 같은 날 끈 결과를 덮어쓰지 않는다. 시연(--demo)과 같이 쓰면
+#   해결 확정 사례가 그래프에도 학습된다.
 import argparse
 import json
 import time
@@ -103,8 +107,10 @@ def load_split(split: str, processed_dir: Path = PROCESSED_DIR) -> list[dict[str
 
 
 @contextmanager
-def open_service() -> Iterator[tuple[Any, Any]]:
+def open_service(graph: bool = False) -> Iterator[tuple[Any, Any]]:
     """앱과 같은 구성의 TicketService 와 DB 엔진. DB 가 없으면 여기서 멈춘다."""
+    from cs_agent.agents import knowledge_graph
+    from cs_agent.agents.case_memory import with_graph_learning
     from cs_agent.cache.store import MemoryKV
     from cs_agent.db.session import get_engine
     from cs_agent.graph.builder import GraphDeps, build_ticket_graph, postgres_checkpointer
@@ -123,12 +129,15 @@ def open_service() -> Iterator[tuple[Any, Any]]:
     if llm.enabled:
         llm.kv = MemoryKV()
     docs, cases = _retrievers()
-    deps = GraphDeps(llm=llm, tables=load_tables(), docs=docs, cases=cases)
+    kg = knowledge_graph.default_graph(enabled=True) if graph else None
+    if graph and kg is None:
+        raise SystemExit("--graph: Neo4j 에 붙지 못함 (docker compose up -d neo4j · build_graph)")
+    deps = GraphDeps(llm=llm, tables=load_tables(), docs=docs, cases=cases, graph=kg)
     with ExitStack() as stack:
+        stack.callback(knowledge_graph.close, kg)
         checkpointer = stack.enter_context(postgres_checkpointer(settings.database_url))
-        service = TicketService(
-            build_ticket_graph(deps, checkpointer), SqlRecords(sessionmaker, embed_fn=embed_fn)
-        )
+        records = with_graph_learning(SqlRecords(sessionmaker, embed_fn=embed_fn), kg)
+        service = TicketService(build_ticket_graph(deps, checkpointer), records)
         yield service, get_engine()
 
 
@@ -346,11 +355,13 @@ def build_result(
     rows: Sequence[Mapping[str, Any]],
     runs: Mapping[str, Mapping[str, Any]],
     demo: dict[str, Any] | None = None,
+    graph: bool = False,
 ) -> dict[str, Any]:
     settings = get_settings()
     return {
         "run_id": run_id,
         "split": split,
+        "graph": graph,
         "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "settings": {
             "llm_provider": settings.llm_provider,
@@ -375,7 +386,8 @@ def render_markdown(result: Mapping[str, Any]) -> str:
         f"# 평가 결과 — {result['split']} ({result['run_id']})",
         "",
         f"- 처리 {report['processed']}/{report['gold_count']}건, "
-        f"LLM {result['settings']['llm_provider']}, 끝난 시각 {result['finished_at']}",
+        f"LLM {result['settings']['llm_provider']}, "
+        f"지식 그래프 {'켬' if result.get('graph') else '끔'}, 끝난 시각 {result['finished_at']}",
         f"- K2 무수정 승인(정보 안내형): {report['K2_approve_as_is']} "
         f"(상담원 결정 {report['K2_decided']}건)",
         f"- 목표 통과: {report['checks']}",
@@ -409,7 +421,8 @@ def render_markdown(result: Mapping[str, Any]) -> str:
 
 def save(result: Mapping[str, Any], out_dir: Path = PROCESSED_DIR) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"eval_{result['split']}_{datetime.now(UTC):%Y%m%d}"
+    graph = "_graph" if result.get("graph") else ""
+    stem = f"eval_{result['split']}{graph}_{datetime.now(UTC):%Y%m%d}"
     path = out_dir / f"{stem}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=1, default=str))
     (out_dir / f"{stem}.md").write_text(render_markdown(result), encoding="utf-8")
@@ -426,7 +439,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--run-id", help="thread_ref 앞에 붙일 실행 ID (기본: eval-시각)")
     parser.add_argument("--demo", action="store_true", help="시연: 승인·해결하며 사례를 쌓는다")
     parser.add_argument("--final", action="store_true", help="test 분할 실행 확인 (N-05)")
+    parser.add_argument(
+        "--graph",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="지식 그래프 켬/끔 (기본: GRAPH_ENABLED)",
+    )
     args = parser.parse_args(argv)
+    graph = get_settings().graph_enabled if args.graph is None else args.graph
 
     if args.split == "test" and not args.final:
         raise SystemExit("test 597건은 마지막에 한 번만 돌린다 (N-05). 정말 돌리려면 --final")
@@ -437,13 +457,17 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     run_id = args.run_id or f"eval-{datetime.now(UTC):%Y%m%d%H%M%S}"
     rows = load_split(args.split)[: args.limit]
-    print(f"{args.split} {len(rows)}건 · run_id={run_id}" + (" · 시연" if args.demo else ""))
+    print(
+        f"{args.split} {len(rows)}건 · run_id={run_id}"
+        + (" · 시연" if args.demo else "")
+        + (" · 지식 그래프" if graph else "")
+    )
 
     def progress(done: int, total: int) -> None:
         if done % 10 == 0 or done == total:
             print(f"  {done}/{total}", flush=True)
 
-    with open_service() as (service, engine):
+    with open_service(graph) as (service, engine):
         with engine.begin() as conn:
             load_tickets_gold(conn)
         runs = submit_all(service, rows, run_id, demo=args.demo, progress=progress)
@@ -458,7 +482,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 }
                 demo = demo_halves(results, live, [str(r["ticket_id"]) for r in rows])
 
-    result = build_result(args.split, run_id, results, runs, demo)
+    result = build_result(args.split, run_id, results, runs, demo, graph=graph)
     path = save(result)
     print()
     print(render_markdown(result))

@@ -228,6 +228,7 @@ export function answerContext(t: Ticket, purpose?: string): Ctx {
     : (t.apiEvidence || []).filter((e: any) => e.source === "cases").map((e: any) => ({
         id: e.section ? `${e.doc_id}#${e.section}` : e.doc_id, label: e.metadata?.title || e.doc_id,
         text: e.text, kind: "case", matches: false,
+        path: e.metadata?.graph_path || "", // 지식 그래프 근거 경로 (CSA-73): 제품 → 에러코드 → 고장 → 사례 → 문서 절
       }));
   const refs: any[] = [
     ...documents, ...similar,
