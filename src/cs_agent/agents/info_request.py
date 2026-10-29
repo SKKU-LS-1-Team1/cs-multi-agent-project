@@ -120,6 +120,8 @@ def build_prompt(items: Sequence[str], language: str, summary: str) -> str:
         f"- List the items as a numbered list 1. to {len(items)}., one item per line, in this "
         "order. Translate each item naturally; keep product codes and abbreviations as written.\n"
         "- Do not answer the inquiry, promise anything, or ask for anything not in the list.\n"
+        "- For items marked if known/available, preserve that optionality. Ask for existing "
+        "records only; do not instruct live electrical measurements or reproduction tests.\n"
         "- Do not include internal source IDs or citation markers such as [POL-WARRANTY#4]. "
         "Keep actual product codes and attachment descriptions unchanged.\n"
         "- No subject line. Do not invent names for the customer or the sender; sign off as the "

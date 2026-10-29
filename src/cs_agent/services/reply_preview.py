@@ -31,6 +31,7 @@ def context_key(state: dict) -> str:
         "pending",
         "customer_revision",
         "specialist_revision",
+        "specialist_followup",
         "specialist_requests",
         "information_review",
         "draft",

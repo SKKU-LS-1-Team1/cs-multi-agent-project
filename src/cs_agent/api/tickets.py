@@ -22,12 +22,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from cs_agent.agents.drafting import TranslationError
 from cs_agent.agents.escalation import EscalationError
 from cs_agent.agents.info_request import LocalizationError
 from cs_agent.api.deps import LLM, Tickets
+from cs_agent.followup_schemas import FollowupConfirmation
 from cs_agent.schemas import (
     AssignIn,
     EscalationRequestIn,
@@ -72,6 +73,17 @@ def work_list(tickets: Tickets, dept: str | None = None, assignee: str | None = 
 @router.get("/answered")
 def answered(tickets: Tickets) -> list[str]:
     return tickets.answered()
+
+
+@router.get("/completed")
+def completed(
+    tickets: Tickets,
+    q: str = Query(default="", max_length=200),
+    verified: bool = False,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> dict:
+    return tickets.completed_page(q.strip(), verified, offset, limit)
 
 
 @router.get("/closed")
@@ -153,3 +165,17 @@ def review_information(ticket_id: str, body: InformationReviewIn, tickets: Ticke
     """최신 고객 회신의 자료 확인값을 저장하고 규칙·후속 답변만 갱신한다."""
     with _errors():
         return tickets.review_information(ticket_id, body)
+
+
+@router.post("/{ticket_id}/specialist-followup/analyze", response_model=TicketOut)
+def analyze_specialist_followup(ticket_id: str, tickets: Tickets) -> TicketOut:
+    with _errors():
+        return tickets.analyze_specialist_followup(ticket_id)
+
+
+@router.post("/{ticket_id}/specialist-followup/confirm", response_model=TicketOut)
+def confirm_specialist_finding(
+    ticket_id: str, body: FollowupConfirmation, tickets: Tickets
+) -> TicketOut:
+    with _errors():
+        return tickets.confirm_specialist_finding(ticket_id, body)

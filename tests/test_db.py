@@ -540,3 +540,62 @@ def test_reply_preview_survives_restart_and_is_sent_without_retranslation(db, mo
         assert result.final_reply == translated
         assert result.approved_reply == source
         assert calls == [source]
+
+
+@needs_db
+def test_completed_page_large_archive_matches_memory_without_checkpoint_reads(db):
+    from datetime import UTC, datetime
+
+    from cs_agent.services.records import MemoryRecords, SqlRecords
+
+    _, Session = db
+    memory = MemoryRecords()
+    good = {
+        "outcome": "resolved",
+        "cause": "motor",
+        "action": "replace",
+        "result": "normal",
+        "verification": "test passed",
+    }
+    rows = [
+        {
+            "ticket_id": f"ARCH-{n:04}",
+            "channel": "email",
+            "body": "large body " * 100,
+            "subject": "100% literal" if n == 0 else f"Archive {n}",
+            "product_code": "iS7",
+            "status": "RESOLVED",
+            "received_at": datetime(2026, 10, 1, tzinfo=UTC),
+            "resolution": good if n < 3 else None,
+        }
+        for n in range(3635)
+    ]
+    rows += [
+        {**rows[0], "ticket_id": "REOPENED", "status": "READY_FOR_REVIEW"},
+        {**rows[0], "ticket_id": "EMPTY", "status": "READY_FOR_REVIEW", "resolution": {}},
+        {**rows[0], "ticket_id": "REJECTED", "status": "REJECTED", "resolution": None},
+        {**rows[0], "ticket_id": "SUPERSEDED", "resolution": {**good, "superseded": True}},
+    ]
+    with Session.begin() as session:
+        session.execute(Ticket.__table__.insert(), rows)
+    for row in rows:
+        memory.tickets[row["ticket_id"]] = row
+    sql = SqlRecords(Session)
+    for query, verified, offset in [
+        ("", False, 0),
+        ("", False, 50),
+        ("", False, 3600),
+        ("", True, 0),
+        ("motor", False, 0),
+        ("100%", False, 0),
+        ("missing", False, 0),
+    ]:
+        actual = sql.completed_page(query, verified, offset, 50)
+        expected = memory.completed_page(query, verified, offset, 50)
+        assert actual["total"] == expected["total"]
+        assert [r["ticket_id"] for r in actual["items"]] == [
+            r["ticket_id"] for r in expected["items"]
+        ]
+        assert len(actual["items"]) <= 50
+        assert all("body" not in r for r in actual["items"])
+    assert sql.completed_page("", False, 0, 50)["total"] == 3638

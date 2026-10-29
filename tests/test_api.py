@@ -451,3 +451,40 @@ def test_info_request_preview_is_reused_without_second_translation(preview_clien
     assert sent["status"] == "WAITING_CUSTOMER"
     assert sent["final_reply"] == preview["final_text"]
     assert len(calls) == 1
+
+
+def test_completed_page_search_paging_and_no_graph_reads(client, monkeypatch):
+    records = client.app.state.tickets.records
+    good = {
+        "outcome": "resolved",
+        "cause": "motor",
+        "action": "replace",
+        "result": "normal",
+        "verification": "test passed",
+    }
+    for n in range(125):
+        records.tickets[f"ARCH-{n:04}"] = {
+            "status": "RESOLVED",
+            "subject": f"Archive {n}",
+            "product_code": "iS7",
+            "received_at": "2026-10-01T00:00:00Z",
+            "resolution": good if n == 0 else None,
+        }
+    records.tickets["REOPENED"] = {"status": "READY_FOR_REVIEW", "resolution": good}
+    records.tickets["REJECTED"] = {"status": "REJECTED", "resolution": None}
+
+    def no_graph(*args, **kwargs):
+        raise AssertionError("archive list must not read checkpoints")
+
+    monkeypatch.setattr(client.app.state.tickets.graph, "get_state", no_graph)
+    first = client.get("/api/tickets/completed?limit=50").json()
+    second = client.get("/api/tickets/completed?limit=50&offset=50").json()
+    assert first["total"] == 127
+    assert len(first["items"]) == len(second["items"]) == 50
+    assert not {r["ticket_id"] for r in first["items"]} & {r["ticket_id"] for r in second["items"]}
+    found = client.get("/api/tickets/completed?q=motor&verified=true").json()
+    assert found["total"] == 1 and found["items"][0]["ticket_id"] == "ARCH-0000"
+    assert "body" not in found["items"][0]
+    assert client.get("/api/tickets/completed?limit=101").status_code == 422
+    assert client.get("/api/tickets/completed?offset=-1").status_code == 422
+    assert client.get("/api/tickets/completed?q=missing").json()["total"] == 0

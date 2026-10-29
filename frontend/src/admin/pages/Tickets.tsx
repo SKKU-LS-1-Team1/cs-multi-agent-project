@@ -62,7 +62,7 @@ export default function Tickets() {
     <>
       <PageHeader title="문의 관리" actions={<Button size="lg" onClick={() => openModal("new-ticket")}>+ 새 문의 등록</Button>}>
         <UnderlineTabs
-          tabs={[...SCOPES.map((v) => [v, <Count key={v} label={v} n={scoped(v).filter((t) => v !== "내 담당" || t.stage !== 5).length} />] as const), [DONE_TAB, <Count key={DONE_TAB} label={DONE_TAB} n={completedTickets().length} />] as const]}
+          tabs={[...SCOPES.map((v) => [v, <Count key={v} label={v} n={scoped(v).filter((t) => v !== "내 담당" || t.stage !== 5).length} />] as const), [DONE_TAB, <Count key={DONE_TAB} label={DONE_TAB} n={ui.completedTotal ?? completedTickets().length} />] as const]}
           value={ui.filter as string}
           onChange={(v) => { exitSelect(); setUi(v === DONE_TAB ? { filter: v, kquery: "" } : { filter: v }); }} />
       </PageHeader>
