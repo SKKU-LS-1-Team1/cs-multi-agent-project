@@ -141,6 +141,10 @@ INSTRUCTIONS = """
 
 # RULES
 1. 사실을 만들지 않습니다. 원인은 확정된 진단 기록이 없으면 가설로만 표현합니다.
+   고객 주장·확인 사실·사용 조건·제공된 첨부자료·미확인 항목·부서 확인 요청을 구분합니다.
+   고객의 불량/과실 주장이나 return_defect는 접수 당시 진술이며 전문부서 최종 판정이 아닙니다.
+   조사에 필요한 추가 자료는 알려진 누락 항목과 근거가 있는 요청에 한해 적습니다.
+   항목을 임의로 필수화하거나 안전 문의 이관을 자료 수집 완료까지 지연시키지 않습니다.
 2. draft는 AI의 제안입니다. '점검하세요'를 '점검 완료'로 바꾸지 않습니다.
    자동 점검은 답변 품질 검사이며 실제 장비를 점검한 결과가 아닙니다.
 3. routing_condition은 이관 검토 기준입니다. 그 조건이 실제 발생했다는 증거가 아닙니다.
@@ -189,7 +193,7 @@ DEPARTMENT_FIELDS = {
         ("photos", "사진 제공 정보"),
         ("test_report", "시험성적서 제공 정보"),
         ("return_reason", "반품 사유"),
-        ("return_defect", "불량 반품 여부"),
+        ("return_defect", "고객 진술상 반품 사유 (최종 판정 아님)"),
     ),
     "CERT": (
         ("target_standard", "요청 규격/인증"),
@@ -316,9 +320,9 @@ def _fields(state: TicketState, target: str, sla_due_at: datetime | None = None)
         confirmed["return_defect"] = (
             UNKNOWN
             if extraction.return_defect is None
-            else "불량 반품"
+            else "고객이 불량을 사유로 반품 요청 (전문부서 판정 전)"
             if extraction.return_defect
-            else "비불량 반품"
+            else "고객이 비불량 사유로 반품 요청 (전문부서 판정 전)"
         )
     fields = {
         "product_code": (extraction.product_code if extraction else None) or UNKNOWN,
@@ -398,6 +402,18 @@ def write_escalation_request(
     tables = tables or load_tables()
     target = _target(state, to_dept, tables)
     fields = _fields(state, target, sla_due_at)
+    from cs_agent.rules.investigation import investigation_info
+
+    advisory = investigation_info(state, tables)
+    if advisory and advisory["missing_fields"]:
+        fields["investigation_recommended"] = (
+            "미제공·권장 자료: "
+            + ", ".join(
+                tables.request_labels.get(f, tables.field_labels.get(f, f))
+                for f in advisory["missing_fields"]
+            )
+            + " (자료가 없어도 이관 가능)"
+        )
     rules = state.get("rules")
     routing = next(
         (
@@ -447,6 +463,7 @@ def write_escalation_request(
         }
     )
     labels = {
+        "investigation_recommended": "추가 확인 권장 자료",
         "product_code": "제품 코드",
         "product_family": "제품군",
         "customer_tier": "고객 등급",

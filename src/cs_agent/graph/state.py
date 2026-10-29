@@ -54,6 +54,7 @@ class TicketState(TypedDict, total=False):
     escalation_request: EscalationRequest | None  # CSA-55: 검토 전 생성, 회신 시 무효화
     specialist_requests: list[dict]  # CSA-62 요청·회신 기록 (서비스가 갱신)
     specialist_replies: list[dict]  # 작성·검증에 사용하는 현재 문의 회신
+    specialist_followup: dict | None  # 회신 해석·원문 근거·담당자 최종 판정 확인
     specialist_revision: int  # 요청·회신 갱신 버전
     draft_specialist_revision: int  # 현재 초안이 반영한 전문부서 버전
     pending: str  # 상담원이 검토할 대상: draft | info_request

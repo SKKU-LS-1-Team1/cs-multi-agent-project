@@ -1,6 +1,7 @@
+import { investigationTask } from "@admin/lib/investigation";
 // 문의 상세: 대기열 · 문의 요약 · 처리 상황 · 문의·답변/처리 이력/고객·제품 정보 · AI Copilot.
 import { useEffect, useState, type ReactNode } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Paperclip, Send, User, type LucideIcon } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { Card } from "@admin/components/ui/card";
@@ -13,9 +14,9 @@ import {
   canAssign, latestCustomerReply, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
-  nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
+  requestInvestigationInfo, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
-import { isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
+import { loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
@@ -63,8 +64,18 @@ export default function TicketDetail() {
   useStore();
   const { ticketId } = useParams();
   const t = findTicket(ticketId);
+  const [loadError, setLoadError] = useState("");
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!ticketId) return;
+    let cancelled = false;
+    setLoadError("");
+    const stop = watchTicketDetail(ticketId);
+    void loadTicketDetail(ticketId).catch(() => { if (!cancelled) setLoadError("문의 상세를 불러오지 못했습니다."); });
+    return () => { cancelled = true; stop(); };
+  }, [ticketId, retry]);
   useEffect(() => { if (t && unreadReplies(t) > 0) markSeen(t); }, [t?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!t) return <Navigate to="/tickets" replace />;
+  if (!t) return <div className="p-10" role={loadError ? "alert" : "status"}>{loadError || "문의 상세를 불러오는 중입니다."}{loadError && <Button variant="outline" onClick={() => setRetry((v) => v + 1)}>다시 시도</Button>}</div>;
   return (
     <div data-ticket-id={t.id} className="grid grid-cols-1 items-start min-[1360px]:grid-cols-[minmax(0,1fr)_400px]">
       <section aria-label="문의 상세" key={t.id} className="grid min-w-0 content-start gap-8 px-12 pb-16">
@@ -405,6 +416,11 @@ function Disclosure({ title, count, children, defaultOpen }: { title: ReactNode;
 }
 
 function judgment(t: Ticket) {
+  const investigation = investigationTask(t);
+  const latest = latestCustomerReply(t);
+  const needsCustomerReview = t.customerRequestStatus === "received" && latest && requiredInformation(t).length && latest.id !== t.reviewedReplyKey;
+  if (investigation && t.owner && !needsCustomerReview) return { ...investigation, note: "", reason: "등록된 전문부서 회신과 현재 문의를 기준으로 안내합니다." };
+
   if (t.source === "api" && !t.analysisReady && !isManualReplyTicket(t) && !t.sent && t.stage !== 5) return { title: t.status || "분석 확인 대기",
     task: "문의 분석과 필수정보 결과를 확인한 뒤 다음 작업을 진행하세요.", note: "", reason: "아직 조회되지 않은 값을 충족으로 판단하지 않습니다.", missing: [] as string[] };
   if (!t.owner && t.stage !== 5 && !t.sent) return { title: "담당자 미배정", task: canAssign ? "담당자를 배정한 뒤 처리를 시작하세요." : "팀장이 담당자를 배정하면 처리를 시작할 수 있습니다.", note: "", reason: "배정하면 담당자의 오늘 할 일에 올라갑니다.", missing: [] as string[] };
@@ -509,6 +525,7 @@ function Copilot({ t }: { t: Ticket }) {
             <p className="mt-1.5 text-[15px] leading-[1.65] text-muted-foreground">{j.task}</p>
             {j.note && <p className="mt-2 flex items-center gap-1.5 text-sm text-warning-ink"><Clock className="size-4" aria-hidden />{j.note}</p>}
             {j.missing.length > 0 && <ul className="mt-3 grid gap-1.5 text-[15px]">{j.missing.map((x) => <li key={x} className="flex items-center gap-2"><span aria-hidden className="size-1.5 rounded-full bg-warning" />{x}</li>)}</ul>}
+            {t.specialistFollowup?.confirmation && <p className="mt-2 text-sm text-success">{t.specialistFollowup.confirmation.reviewer} · 전문부서 검토 결과 확인 완료</p>}
             {(choice || showNext) && (
               <div className="mt-5 grid gap-2.5">
                 {choice ? branches.map((k, i) => <Button key={k} className="w-full" variant={i === 0 ? "default" : "outline"} onClick={BRANCH[k][1]}>{BRANCH[k][0]}</Button>)
@@ -517,6 +534,13 @@ function Copilot({ t }: { t: Ticket }) {
             )}
           </div>
         </PanelBlock>
+        {open && t.investigationInfo?.missing_fields?.length > 0 && requests.length === 0 && (
+          <PanelBlock icon={Paperclip} tone="info" title="이관 전 권장 자료">
+            <p className="text-sm text-muted-foreground">분석에 도움이 되는 자료입니다. 없는 자료는 확인 필요로 남기고 이관할 수 있습니다.</p>
+            <ul className="mt-2 grid gap-1 text-sm">{t.investigationInfo.missing_fields.map((field: string) => <li key={field}>• {t.fieldLabels?.[field] || field}</li>)}</ul>
+            {["READY_FOR_REVIEW", "ON_HOLD"].includes(t.apiStatus) && !t.manualReply && t.owner && t.customerRequestStatus !== "waiting" && <Button className="mt-3 w-full" variant="outline" disabled={t.regenerating} onClick={() => requestInvestigationInfo(t)}>권장 자료 요청문 작성</Button>}
+          </PanelBlock>
+        )}
         {requests.length > 0 && (
           <PanelBlock icon={Building2} tone="navy" title="전문부서" count={`${requests.length}건`}>
             <ul className="-mx-3 grid">

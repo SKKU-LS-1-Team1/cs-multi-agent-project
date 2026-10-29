@@ -15,6 +15,7 @@ function load(file, imports, globals = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   vm.runInNewContext(code, { exports, require: id => {
+    if (id === "./investigation") return load("lib/investigation.ts", {});
     assert.ok(id in imports, `Unmocked dependency: ${id}`);
     return imports[id];
   }, crypto: webcrypto, setTimeout, ...globals });
@@ -266,7 +267,7 @@ test('poll started before rewrite completion cannot replace the new draft with o
   const reached = new Promise(resolve => { started = resolve; });
   const mod = load('lib/api-sync.ts', {
     sonner: { toast }, '../../api/client': { api: {
-      workList: async () => [{ ticket_id: 'T-X' }], agents: async () => [], answered: async () => [], closed: async () => [],
+      workList: async () => [{ ticket_id: 'T-X' }], agents: async () => [], answered: async () => [], completedPage: async () => ({ items: [], total: 0 }),
       ticket: async () => new Promise(resolve => { release = resolve; started(); }),
     } },
     './logic': { people: [], contextKey: c => JSON.stringify(c), answerContext: () => ({ references: [] }), signedIn: 'tester' },
@@ -738,16 +739,18 @@ test('server timeline restores multiple sent replies and assignments without loc
   assert.equal(t.events.find(e => e.id === 'sent-1').masterText, 'English request');
   assert.equal(t.events.find(e => e.id === 'sent-2').actor, 'Staff B');
 });
-test('new session loads closed tickets from the server and preserves actual completion wording', async () => {
+test('new session skips archive details and loads a closed ticket only when selected', async () => {
   const rows = [];
   const mod = load('lib/api-sync.ts', {
     sonner: { toast }, '../../api/client': { api: {
-      workList: async () => [], agents: async () => [], answered: async () => [], closed: async () => ['T-CLOSED'],
+      workList: async () => [], agents: async () => [], answered: async () => [], completedPage: async () => ({ items: [], total: 3635 }),
       ticket: async id => apiRow({ ticket_id: id, status: 'RESOLVED', final_reply: 'Answer', processing_history: [], assignment_history: [] }),
     } }, './logic': { people: [], answerContext: () => ({}), contextKey: JSON.stringify },
     './store': { tickets: rows, commit: noop, setUi: noop },
   });
   assert.equal(await mod.syncFromApi(), true);
+  assert.equal(rows.length, 0);
+  await mod.loadTicketDetail('T-CLOSED');
   assert.equal(rows.length, 1); assert.equal(rows[0].id, 'T-CLOSED');
   assert.equal(rows[0].stage, 5); assert.equal(rows[0].sla, '완료');
 });
@@ -789,7 +792,7 @@ test('polling a saved manual draft cannot interrupt its pending conversion respo
   const saved = apiRow({ status: 'ON_HOLD', manual_reply: true, draft: { text, cited: [] } });
   const mod = load('lib/api-sync.ts', {
     sonner: { toast }, '../../api/client': { api: {
-      workList: async () => [{ ticket_id: 'T-X' }], agents: async () => [], answered: async () => [], closed: async () => [],
+      workList: async () => [{ ticket_id: 'T-X' }], agents: async () => [], answered: async () => [], completedPage: async () => ({ items: [], total: 0 }),
       ticket: async () => saved,
       manualReply: async () => new Promise(resolve => { releaseSave = resolve; }),
       replyPreview: async () => { previewCalls++; return { preview_id: 'p1', source_text: text, final_text: text }; },
@@ -974,7 +977,7 @@ test('ticket sync removes only confirmed 404s and retains transient failures', a
   const ui = {};
   const mod = load('lib/api-sync.ts', {
     sonner: { toast }, '../../api/client': { api: {
-      workList: async () => [], agents: async () => [], answered: async () => [], closed: async () => [],
+      workList: async () => [], agents: async () => [], answered: async () => [], completedPage: async () => ({ items: [], total: 0 }),
       ticket: async id => { throw Object.assign(new Error('failed'), { status: id === 'gone' ? 404 : id === 'busy' ? 500 : undefined }); },
     } }, './logic': { people: [], answerContext: () => ({}), contextKey: JSON.stringify },
     './store': { tickets: rows, commit: noop, setUi: patch => Object.assign(ui, patch) },
@@ -988,7 +991,7 @@ test('failed list fetch retains cached tickets and exposes connection error', as
   const rows = [ticket()], ui = {};
   const mod = load('lib/api-sync.ts', {
     sonner: { toast }, '../../api/client': { api: {
-      workList: async () => { throw new Error('offline'); }, agents: async () => [], answered: async () => [], closed: async () => [],
+      workList: async () => { throw new Error('offline'); }, agents: async () => [], answered: async () => [], completedPage: async () => ({ items: [], total: 0 }),
     } }, './logic': { people: [], answerContext: () => ({}), contextKey: JSON.stringify },
     './store': { tickets: rows, commit: noop, setUi: patch => Object.assign(ui, patch) },
   });
@@ -996,4 +999,58 @@ test('failed list fetch retains cached tickets and exposes connection error', as
   assert.equal(rows.length, 1);
   assert.equal(ui.ticketSync, 'error');
   assert.match(ui.ticketSyncError, /서버 연결/);
+});
+
+test('investigation Copilot buttons reflect missing data, final findings and ongoing work', () => {
+  const { investigationTask } = load('lib/investigation.ts', {});
+  const f = { status: 'in_progress', pending_replies: false, needs_review: false,
+    missing_fields: ['logs'], reading: { conclusion: null } };
+  const t = actionableTicket({ specialistFollowup: f, apiStatus: "READY_FOR_REVIEW", fieldLabels: { logs: 'Event logs' } });
+  assert.equal(investigationTask(t).kind, 'request');
+  assert.equal(investigationTask({ ...t, customerRequestStatus: 'waiting' }).kind, 'progress');
+  assert.equal(investigationTask({ ...t, purpose: 'request' }), null);
+  f.missing_fields = [];
+  f.reading.conclusion = { reply_id: 'R', evidence: 'Final finding' };
+  assert.equal(investigationTask(t).kind, 'confirm');
+  f.needs_review = true;
+  assert.equal(investigationTask(t).kind, 'review');
+  f.reading = null;
+  assert.equal(investigationTask(t).kind, 'analyze');
+  f.status = 'confirmed';
+  assert.equal(investigationTask(t), null);
+});
+
+test('detail and dashboard share investigation actions and preserve customer review precedence', () => {
+  const rows = [actionableTicket({ apiCustomerId: 'C', apiLanguage: 'fr',
+    specialistFollowup: { status: 'in_progress', pending_replies: true, reading: null } })];
+  const { actions, opened } = nextActionFixture(rows);
+  assert.equal(actions.nextAction(rows[0]).label, '진행상황 안내 작성');
+  actions.nextAction(rows[0]).run();
+  assert.equal(opened[0][0], 'care');
+  assert.equal(opened[0][1].ticketId, rows[0].id);
+  rows[0].specialistFollowup = { status: 'in_progress', pending_replies: false,
+    needs_review: false, reading: { conclusion: { evidence: 'Final' } } };
+  assert.equal(actions.nextAction(rows[0]).label, '검토 결과 확인');
+  rows[0].customerRequestStatus = 'received';
+  rows[0].latestReply = { id: 'new' }; rows[0].required = ['logs'];
+  assert.equal(actions.nextAction(rows[0]).label, '수신 자료 확인');
+});
+
+test('polling 3635 cached closed tickets fetches only active and selected detail', async () => {
+  const rows = Array.from({ length: 3635 }, (_, n) => ({ id: `ARCH-${n}`, source: 'api', apiStatus: 'RESOLVED', stage: 5 }));
+  const calls = [];
+  const mod = load('lib/api-sync.ts', {
+    sonner: { toast }, '../../api/client': { api: {
+      workList: async () => [{ ticket_id: 'ACTIVE' }], agents: async () => [], answered: async () => [],
+      completedPage: async () => ({ items: [], total: 3635 }),
+      ticket: async id => { calls.push(id); return apiRow({ ticket_id: id, status: id === 'ACTIVE' ? 'READY_FOR_REVIEW' : 'RESOLVED' }); },
+    } }, './logic': { people: [], answerContext: () => ({}), contextKey: JSON.stringify },
+    './store': { tickets: rows, commit: noop, setUi: noop },
+  });
+  await mod.syncFromApi(); assert.deepEqual(calls, ['ACTIVE']);
+  calls.length = 0;
+  const unwatch = mod.watchTicketDetail('ARCH-1');
+  await mod.syncFromApi(); assert.deepEqual(calls.sort(), ['ACTIVE', 'ARCH-1']);
+  unwatch(); calls.length = 0;
+  await mod.syncFromApi(); assert.deepEqual(calls, ['ACTIVE']);
 });

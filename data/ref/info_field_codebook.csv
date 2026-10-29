@@ -31,3 +31,14 @@ load_profile,Load current / temperature records
 oil_test,Oil test (DGA) report
 string_config,PV string configuration (modules per string)
 battery_age,Battery installation date / age
+load_type,Load type driven by the inverter
+accel_decel_time,Acceleration and deceleration times
+cable_length,Motor cable length
+carrier_frequency,Inverter carrier frequency setting
+communication_config,PLC communication module configuration
+peer_device,Device communicating with the PLC
+noise_environment,Electrical noise conditions near the communication wiring
+occurrence_frequency,Frequency of the reported problem
+current_waveform,Load current waveform
+nearby_equipment_operation,Nearby equipment operation at the time of tripping
+trip_settings_photo,Photo of the trip unit settings

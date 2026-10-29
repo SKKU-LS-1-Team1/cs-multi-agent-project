@@ -50,7 +50,7 @@ export type InformationFieldReview = { status: "missing" | "unusable" | "confirm
 export type InformationReviewIn = { reply_id: string; customer_revision: number; expected_reviewed_at?: string | null; reviewer: string; fields: Record<string, InformationFieldReview> };
 export type InformationReview = InformationReviewIn & { checked_at: string };
 export type ProgressFact = { ticket_id: string; status: string; category: string | null; product_code: string | null;
-  pending_specialist_count: number; received_specialist_count: number; waiting_for_customer: boolean; resolution_outcome: string | null };
+  pending_specialist_count: number; received_specialist_count: number; waiting_for_customer: boolean; resolution_outcome: string | null; investigation?: { status: "in_progress" | "confirmed"; steps: { stage: string; status: "in_progress" | "completed" }[] } };
 export type ProgressNotice = {
   notice_id: string; anchor_ticket_id: string; ticket_ids: string[]; customer_id: string;
   target_language: string; status: "draft" | "prepared"; draft_text: string | null;
@@ -58,6 +58,14 @@ export type ProgressNotice = {
   created_at: string; approved_at: string | null; error: string | null;
   source_facts: ProgressFact[];
   customer_qc?: CustomerQc | null;
+};
+export type SpecialistFollowup = {
+  source_version: string; status: "in_progress" | "confirmed"; pending_replies: boolean;
+  needs_review: boolean; error: string | null; missing_fields: string[];
+  reading: { steps: { stage: string; status: "in_progress" | "completed"; reply_id: string; evidence: string }[];
+    requested_fields: { field: string; reply_id: string; evidence: string }[];
+    conclusion: { reply_id: string; evidence: string } | null; needs_review: boolean } | null;
+  confirmation: { reviewer: string; confirmed_at: string; finding: { reply_id: string; evidence: string } } | null;
 };
 export type Ticket = {
   ticket_id: string;
@@ -96,6 +104,8 @@ export type Ticket = {
   draft_information_reviewed_at?: string | null;
   information_review?: InformationReview | null;
   information_reviews?: InformationReview[];
+  investigation_info?: { recommended_fields: string[]; provided_fields: string[]; missing_fields: string[]; note: string } | null;
+  specialist_followup?: SpecialistFollowup | null;
   specialist_requests?: SpecialistRequest[];
   specialist_revision?: number;
   draft_specialist_revision?: number;
@@ -200,6 +210,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export type CompletedItem = {
+  ticket_id: string; subject: string; product_code: string | null; status: string;
+  received_at: string; resolved_at: string | null; resolution: Record<string, any>;
+  verified: boolean; superseded: boolean;
+};
+export type CompletedPage = { items: CompletedItem[]; total: number };
+
 export const api = {
   customers: () => request<Customer[]>("/customers"),
   productTree: () => request<ProductTree>("/products/tree"),
@@ -221,6 +238,7 @@ export const api = {
   agents: (dept?: string) => request<Agent[]>(`/agents${dept ? `?dept=${dept}` : ""}`),
   workList: (dept?: string) => request<WorkItem[]>(`/tickets${dept ? `?dept=${dept}` : ""}`),
   answered: () => request<string[]>("/tickets/answered"),
+  completedPage: (q = "", verified = false, offset = 0, limit = 50) => request<CompletedPage>(`/tickets/completed?${new URLSearchParams({ q, verified: String(verified), offset: String(offset), limit: String(limit) })}`),
   closed: () => request<string[]>("/tickets/closed"),
   manualReply: (id: string, body: { text: string; reviewer: string; expected_customer_revision: number; expected_specialist_revision: number; expected_information_reviewed_at: string | null }) =>
     request<Ticket>(`/tickets/${id}/manual-reply`, { method: "POST", body: JSON.stringify(body) }),
@@ -238,6 +256,8 @@ export const api = {
     request<ProgressNotice>(`/tickets/${id}/progress-notices/${noticeId}/approve`, { method: "POST", body: JSON.stringify(body) }),
   specialistRequest: (id: string, body: { request_id: string; to_dept: string; text: string; requested_by: string; channel?: string; attachment_names?: string[] }) =>
     request<Ticket>(`/tickets/${id}/specialist-requests`, { method: "POST", body: JSON.stringify(body) }),
+  analyzeSpecialistFollowup: (id: string) => request<Ticket>(`/tickets/${id}/specialist-followup/analyze`, { method: "POST" }),
+  confirmSpecialistFinding: (id: string, body: { source_version: string; reviewer: string; finding: { reply_id: string; evidence: string } }) => request<Ticket>(`/tickets/${id}/specialist-followup/confirm`, { method: "POST", body: JSON.stringify(body) }),
   specialistReply: (id: string, requestId: string, body: { reply_id: string; text: string; author: string }) =>
     request<Ticket>(`/tickets/${id}/specialist-requests/${requestId}/reply`, { method: "POST", body: JSON.stringify(body) }),
   replyPreview: (id: string, text: string) => request<{ preview_id: string; source_text: string; target_language: string; final_text: string }>(`/tickets/${id}/reply-preview`, { method: "POST", body: JSON.stringify({ text }) }),

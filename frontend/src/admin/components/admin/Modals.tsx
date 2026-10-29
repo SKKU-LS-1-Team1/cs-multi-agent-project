@@ -22,12 +22,13 @@ import { closeModal, findTicket, openModal, tickets, ui, useStore } from "@admin
 import { kindLabel, rememberProgressNotice, type CareKind } from "@admin/lib/care";
 import { NoticeSession, preparedNotice, type NoticeState } from "@admin/lib/progress-notice";
 import { checkBeforeSend, SendQcSession, type QcState } from "@admin/lib/send-qc";
-import { isApiTicket, replyPreviewKey } from "@admin/lib/api-sync";
+import { isApiTicket, replyPreviewKey, specialistFollowupViaApi } from "@admin/lib/api-sync";
 import { AI_STYLE } from "./CareButtons";
 import { SEGMENT_KO, STATUS_KO, useCustomers, type Customer } from "@admin/lib/customers";
 import type { Ticket } from "@admin/lib/types";
 
 const TITLES: Record<string, string> = {
+  "specialist-finding": "전문부서 검토 결과 확인",
   "new-ticket": "새 문의 등록", assign: "담당자 및 리소스 확인", send: "발송 확인", "answer-comparison": "답변 초안 갱신", "review-customer": "수신 자료 확인",
   "expert-receive": "전문부서 회신 등록", completion: "문의 완료 처리", "customer-reply": "고객 회신", "department-review": "전문부서 요청·회신", file: "첨부파일",
   document: "기술문서 · iS7 고장 가이드", "knowledge-document": "근거 문서",
@@ -57,6 +58,7 @@ function Body({ type, props, t }: { type: string; props: Record<string, any>; t?
     case "assign": return t ? <Assign t={t} /> : null;
     case "answer-comparison": return t ? <Comparison t={t} /> : null;
     case "review-customer": return t ? <ReviewCustomer t={t} /> : null;
+    case "specialist-finding": return t ? <SpecialistFinding key={t.id} t={t} /> : null;
     case "expert-receive": return t ? <ExpertReceive t={t} requestId={props.requestId} /> : null;
     case "completion": return t ? <Completion t={t} /> : null;
     case "customer-reply": return t ? <CustomerReply t={t} /> : null;
@@ -324,7 +326,7 @@ function CareModal({ customerId, ticketId }: { customerId: string; kind: CareKin
   const { rows, error } = useCustomers();
   const known = rows?.find((x) => x.id === customerId);
   const linked: NoticeTicket[] = (known?.notice_tickets || []).map((t) => ({ ...t,
-    apiLanguage: t.language, status: STATUS_KO[t.status] || t.status }));
+    apiLanguage: t.language, status: findTicket(t.id)?.specialistFollowup?.status === "in_progress" && t.status !== "WAITING_CUSTOMER" ? "사내 분석 중" : STATUS_KO[t.status] || t.status }));
   const c = known;
   return c ? <><p role={error ? "alert" : undefined} className="text-sm text-destructive">{error && `${error} 마지막 조회 정보를 표시합니다.`}</p><CareForm key={customerId} c={c} ticketId={ticketId} linked={linked} /></>
     : <p className="text-sm text-muted-foreground">{error || (rows ? "서버에 연결된 고객 문의가 없습니다." : "고객 문의를 불러오는 중입니다.")}</p>;
@@ -484,4 +486,37 @@ function KnowledgeDoc({ id }: { id: string }) {
       <Footer><Close /></Footer>
     </>
   );
+}
+
+
+function SpecialistFinding({ t }: { t: Ticket }) {
+  const f = t.specialistFollowup;
+  const replies = (t.specialistRequests || []).filter((r: any) => r.reply).map((r: any) => r.reply);
+  const [version] = useState(f?.source_version);
+  const stale = f?.source_version !== version;
+  const [replyId, setReplyId] = useState(f?.reading?.conclusion?.reply_id || replies[0]?.reply_id || "");
+  const [evidence, setEvidence] = useState(f?.reading?.conclusion?.evidence || "");
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const source = replies.find((r: any) => r.reply_id === replyId);
+  const save = async () => {
+    setBusy(true);
+    try { if (await specialistFollowupViaApi(t, { reply_id: replyId, evidence: evidence.trim() }, version)) closeModal(); }
+    finally { setBusy(false); }
+  };
+  if (!f) return <p>현재 확인할 조사 정보가 없습니다.</p>;
+  return <div className="grid gap-4">
+    <p className="text-sm text-muted-foreground">회신이 현재 문의에 대한 최종 검토 결과인지 확인하세요. 확인을 완료하면 이 결과를 반영해 고객 답변을 작성할 수 있습니다.</p>
+    {stale && <p role="alert" className="text-sm text-warning-ink">문의 또는 회신이 변경됐습니다. 창을 닫고 최신 내용을 다시 확인해 주세요.</p>}
+    {f.error && <p role="alert" className="text-sm text-warning-ink">{f.error}</p>}
+    {(f.error || !f.reading || f.needs_review) && <Button variant="outline" disabled={busy || stale || t.followupBusy} onClick={() => void specialistFollowupViaApi(t)}>회신 내용 다시 분석</Button>}
+    <NativeSelect aria-label="확인할 회신" value={replyId} onChange={e => { setReplyId(e.target.value); setEvidence(""); setConfirmed(false); }}>
+      {replies.map((r: any) => <option key={r.reply_id} value={r.reply_id}>{r.author} · {r.created_at}</option>)}
+    </NativeSelect>
+    <details className="rounded-2xl bg-muted p-4 text-sm"><summary className="cursor-pointer font-medium">회신 원문 보기</summary><p className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap">{source?.text || "아직 등록된 회신이 없습니다."}</p></details>
+    <Field label="고객 답변에 반영할 검토 결과 (회신 원문 그대로)"><Textarea value={evidence} onChange={e => { setEvidence(e.target.value); setConfirmed(false); }} /></Field>
+    <label className="flex items-start gap-2 text-sm"><Checkbox checked={confirmed} onCheckedChange={v => setConfirmed(v === true)} />위 내용이 현재 문의에 대한 전문부서의 최종 검토 결과이며, 고객 답변에 반영할 수 있음을 확인했습니다.</label>
+    {f.pending_replies && <p className="text-sm text-warning-ink">다른 전문부서의 회신을 기다리고 있습니다.</p>}
+    <DialogFooter><Button variant="outline" disabled={busy} onClick={closeModal}>닫기</Button><Button disabled={busy || stale || t.followupBusy || !confirmed || f.pending_replies || !evidence.trim() || !source?.text.includes(evidence.trim())} onClick={() => void save()}>{busy ? "저장 중…" : "확인 완료"}</Button></DialogFooter>
+  </div>;
 }

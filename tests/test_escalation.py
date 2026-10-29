@@ -139,7 +139,7 @@ def test_department_fields_and_fixed_facts(state, llm, writer, dept, expected):
     assert result.fields["serial_no"] == "**MASKED**"
     assert result.fields["photos"] == "[attachment: 6 photos]"
     assert "WITHDRAWN-111" not in result.text
-    assert result.fields["return_defect"] == "비불량 반품"
+    assert result.fields["return_defect"] == "고객이 비불량 사유로 반품 요청 (전문부서 판정 전)"
     assert result.cited == ["DOC-A#2"]
     assert result.model == "test-writer"
     if dept == "FIELD_SVC":

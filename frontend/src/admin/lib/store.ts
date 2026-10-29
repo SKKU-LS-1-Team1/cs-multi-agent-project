@@ -17,6 +17,7 @@ export const tickets: Ticket[] = Array.isArray(saved) ? saved.filter((t) => t?.s
 export const ui = {
   ticketSync: "loading" as "loading" | "ready" | "error",
   ticketSyncError: "",
+  completedTotal: null as number | null,
   filter: "내 담당",
   query: "",
   status: "",
