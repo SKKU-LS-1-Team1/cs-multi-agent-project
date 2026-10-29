@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { getFamily, getProduct } from '../lib/catalog.js'
 import FamilyCarousel from './FamilyCarousel.jsx'
+import ProductList from './ProductList.jsx'
 import CuteIcon from './CuteIcon.jsx'
 
 export const STEPS = ['제품군', '모델', '증상', '해결']
@@ -38,11 +40,20 @@ export function Stepper({ step, onGo, labels = STEPS }) {
   )
 }
 
+// 제품군 고르기: 회전 캐러셀 + 왼쪽 "제품 목록" 탭 (ProductList). 목록은 캐러셀을 돌리기만 하고,
+// 고르는 것은 지금처럼 캐러셀의 "이 제품군 선택하기" 버튼이다.
 export function FamilyStep({ s, pick, title = '어떤 제품에 문제가 생겼나요?', emoji }) {
+  const [focus, setFocus] = useState(null)
+  const [current, setCurrent] = useState(s.family)
   return (
     <>
       <Title>{title}</Title>
-      <FamilyCarousel selected={s.family} onPick={pick} />
+      <div className="fpick">
+        <ProductList current={current} onFamily={(id) => setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }))} />
+        <div className="fpick-main">
+          <FamilyCarousel selected={s.family} onPick={pick} focus={focus} onChange={setCurrent} />
+        </div>
+      </div>
     </>
   )
 }
