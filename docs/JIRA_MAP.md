@@ -88,7 +88,7 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 46개(CSA-14~51, C
 ## CSA-13 평가·성과 측정
 | 키 | 작업 | 담당 | 스프린트 | 위치 |
 |---|---|---|---|---|
-| CSA-48 | Langfuse 연동 (모든 LLM 호출 기록) | 김동규 | 1 | `llm/tracing.py`, `llm/router.py` |
+| CSA-48 | Langfuse 연동 (모든 LLM 호출 기록) | 김동규 | 1 | `llm/tracing.py`, `llm/router.py`, `evaluation/langfuse_report.py` (단계별 지연·Jev vs Gemini 표) |
 | CSA-49 | 성과 지표 기준선 측정·목표치 확정 | 김동규 | 1 | `evaluation/metrics.py` |
 | CSA-50 | 시험 문의 597건 평가 스크립트 | 박종석 | 2 | `evaluation/run_eval.py` |
 | CSA-51 | 최종 시험 결과 정리 (MVP 시연용) | 박종석 | 2 | `evaluation/run_eval.py` 출력 → 발표 자료 |
