@@ -46,6 +46,7 @@ Jira 프로젝트 **CSA** 의 에픽 9개(CSA-5~13)와 작업 46개(CSA-14~51, C
 | CSA-70 | [지식 그래프 ②] 그래프 적재 파이프라인 | 김동규 | 2 | `pipeline/build_graph.py` |
 | CSA-71 | [지식 그래프 ③] 그래프 검색 + ⑧ 근거 확정 연결 + fake 테스트 | 김동규 | 2 | `agents/knowledge_graph.py`, `agents/retrieval.py` (`finalize_evidence`), `tests/stubs.py` (`MemoryGraph`) |
 | CSA-72 | [지식 그래프 ④] 해결 확정 시 그래프 학습 | 김동규 | 2 | `agents/case_memory.py` (`with_graph_learning`), `agents/knowledge_graph.py` (`learn`) |
+| CSA-74 | 업무 메일함 — 메일 문의 AI 분석·담당 부서 검토 후 티켓 등록 | 김동규 | 2 | `services/mailbox.py`, `api/mail.py`, `frontend/src/admin/pages/Mailbox.tsx` |
 | CSA-73 | [지식 그래프 ⑤] 평가 비교 · 근거 경로 표시 · 시연 | 김동규 | 2 | `evaluation/case_retrieval.py` (`--graph`), `evaluation/run_eval.py` (`--graph`), `frontend/src/pages/admin/EvidencePanel.tsx`, `frontend/src/admin/pages/TicketDetail.tsx` |
 
 ## CSA-9 고객 챗봇 에이전트

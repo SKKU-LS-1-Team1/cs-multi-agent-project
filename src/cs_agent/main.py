@@ -16,6 +16,8 @@
 # - 시작 시 기준표와 담당자 명단을 읽는다 (rules/tables.py, services/assignment.py — 표가 틀리면
 #   여기서 멈춘다).
 #   종료 시 남은 Langfuse 기록을 보낸다.
+# - 업무 메일함(app.state.mailbox, services/mailbox.py): 메일 문의를 같은 분석 함수(deps)로
+#   검토한 뒤 TicketService 로 등록한다.
 # - 분석 대기(ANALYSIS_PENDING) 문의를 analysis_retry_interval_s 마다 다시 돌린다 (0 이면 끔).
 # - 피드백 루프 (CSA-15, agents/case_memory.py): 벡터 없이 저장된 해결 사례를 case_embed_interval_s
 #   마다 임베딩한다 (live·DB 일 때). 사례 검색기가 키워드 검색이면 운영 중 해결 사례도 같이 찾게
@@ -38,7 +40,7 @@ from cs_agent.agents.case_memory import with_graph_learning, with_live_cases
 from cs_agent.agents.retrieval import default_retrievers
 from cs_agent.agents.specialist_followup import read_replies
 from cs_agent.api import agents as agents_api
-from cs_agent.api import chat, customers, dashboard, inquiries, products, progress, tickets
+from cs_agent.api import chat, customers, dashboard, inquiries, mail, products, progress, tickets
 from cs_agent.cache.store import ChatSessionStore, MemoryKV, connect_redis
 from cs_agent.config import Settings, get_settings
 from cs_agent.graph.builder import GraphDeps, build_ticket_graph, postgres_checkpointer
@@ -46,6 +48,7 @@ from cs_agent.llm import tracing
 from cs_agent.llm.router import LLMRouter, get_router
 from cs_agent.rules.tables import load_tables
 from cs_agent.services.assignment import load_agents
+from cs_agent.services.mailbox import Mailbox, load_mails
 from cs_agent.services.progress import ProgressService
 from cs_agent.services.records import MemoryRecords, SqlRecords
 from cs_agent.services.tickets import TicketService
@@ -180,6 +183,8 @@ def create_app(
                     llm=deps.llm,
                 ),
             )
+            # 업무 메일함: 앞단을 거치지 않은 메일 문의를 같은 분석·규칙으로 검토 후 티켓 등록
+            app.state.mailbox = Mailbox.from_deps(load_mails(), app.state.tickets, deps)
             app.state.progress = ProgressService(
                 app.state.tickets, app.state.llm, check_customer_qc=deps.check_customer_qc
             )
@@ -211,7 +216,8 @@ def create_app(
     def health() -> dict:
         return {"status": "ok", "version": __version__}
 
-    for module in (tickets, inquiries, chat, products, dashboard, agents_api, progress, customers):
+    routers = (tickets, inquiries, chat, products, dashboard, agents_api, progress, customers, mail)
+    for module in routers:
         app.include_router(module.router, prefix="/api")
     return app
 
