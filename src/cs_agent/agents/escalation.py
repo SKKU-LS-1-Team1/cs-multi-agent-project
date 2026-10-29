@@ -64,7 +64,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cs_agent.agents.drafting import _chunks
 from cs_agent.config import get_settings
-from cs_agent.llm.router import LLMRouter, RateLimited
+from cs_agent.llm.router import LLMRouter, RateLimited, json_text
 from cs_agent.rules.sla import due_at
 from cs_agent.rules.tables import RefTables, load_tables
 from cs_agent.schemas import EscalationRequest, Evidence
@@ -376,7 +376,7 @@ def _write_narrative(
             failure = "escalation_generation_failed"
             continue
         try:
-            narrative = _Narrative.model_validate_json(raw)
+            narrative = _Narrative.model_validate_json(json_text(raw))
             return narrative, _check_narrative(narrative, allowed, tables)
         except (ValidationError, ValueError) as exc:
             llm.invalidate_write("escalation_request", prompt)

@@ -108,6 +108,23 @@ def test_customer_claim_cannot_be_used_as_specialist_evidence_and_judge_rejects_
     assert calls
 
 
+def test_reading_wrapped_in_markdown_fence_is_accepted():
+    """Gemini write() 가 ```json 으로 감싸 돌려줘도 해석한다 (운영에서 매번 실패했다)."""
+    raw = reading("R")
+    llm = SimpleNamespace(
+        enabled=True,
+        write=lambda *args: "```json\n" + json.dumps(raw) + "\n```",
+        judge=lambda *args: SimpleNamespace(answer="yes", confidence=1, model="judge"),
+    )
+    out = read_replies(
+        {"inquiry": {"body": "Unit trips"}},
+        [{"reply": {"reply_id": "R", "text": TEXT}}],
+        {"logs": "logs"},
+        llm,
+    )
+    assert out["steps"][0]["stage"] == "reproduction_test"
+
+
 def test_provided_fields_are_not_requested_again_and_new_customer_data_invalidates_reading():
     state = {
         "inquiry": {"provided_fields": {"logs": "attached"}},

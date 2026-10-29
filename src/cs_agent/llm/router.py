@@ -70,6 +70,14 @@ class RateLimited(RuntimeError):
     """분당 호출 상한에 걸렸고 llm_rate_wait_s 안에 다음 창이 오지 않는다."""
 
 
+def json_text(raw: str) -> str:
+    """write() 는 JSON 모드가 아니라 Gemini 가 ```json 으로 감싸 줄 때가 있다. 감싼 것만 벗긴다."""
+    text = raw.strip()
+    if text.startswith("```") and text.endswith("```") and "\n" in text:
+        return text[text.index("\n") + 1 : -3].strip()
+    return text
+
+
 class LLMRouter:
     def __init__(
         self,

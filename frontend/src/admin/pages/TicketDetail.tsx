@@ -14,7 +14,7 @@ import {
   canAssign, latestCustomerReply, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
-  requestInvestigationInfo, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
+  requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
 import { loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
@@ -415,54 +415,6 @@ function Disclosure({ title, count, children, defaultOpen }: { title: ReactNode;
   );
 }
 
-function judgment(t: Ticket) {
-  const investigation = investigationTask(t);
-  const latest = latestCustomerReply(t);
-  const needsCustomerReview = t.customerRequestStatus === "received" && latest && requiredInformation(t).length && latest.id !== t.reviewedReplyKey;
-  if (investigation && t.owner && !needsCustomerReview) return { ...investigation, note: "", reason: "등록된 전문부서 회신과 현재 문의를 기준으로 안내합니다." };
-
-  if (t.source === "api" && !t.analysisReady && !isManualReplyTicket(t) && !t.sent && t.stage !== 5) return { title: t.status || "분석 확인 대기",
-    task: "문의 분석과 필수정보 결과를 확인한 뒤 다음 작업을 진행하세요.", note: "", reason: "아직 조회되지 않은 값을 충족으로 판단하지 않습니다.", missing: [] as string[] };
-  if (!t.owner && t.stage !== 5 && !t.sent) return { title: "담당자 미배정", task: canAssign ? "담당자를 배정한 뒤 처리를 시작하세요." : "팀장이 담당자를 배정하면 처리를 시작할 수 있습니다.", note: "", reason: "배정하면 담당자의 오늘 할 일에 올라갑니다.", missing: [] as string[] };
-  if (t.activeComposer === "expert" && t.stage !== 5 && !t.sent) return { title: "전문부서 요청서 작성 중", task: "대상 부서와 요청 내용을 확인하고 요청서를 보내세요.", note: "", reason: "보내면 이 문의는 회신이 올 때까지 전문부서 회신 대기가 됩니다.", missing: [] as string[] };
-  if (isManualReplyTicket(t) && !t.draft && !t.sent && t.stage !== 5) return {
-    title: "담당자 검토 필요", task: "문의와 근거를 확인하고 영어 답변을 직접 작성하세요.",
-    note: "", reason: "작성한 답변은 고객 언어 변환과 최종 점검을 거칩니다.", missing: [] as string[],
-  };
-  const reply0 = latestCustomerReply(t);
-  // nextAction 과 같은 순서: 고객 회신을 기다리거나 확인할 일이 있으면 초안이 있어도 그 일이 먼저다.
-  const customerFirst = t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting" || (t.customerRequestStatus === "received" && !!reply0 && requiredInformation(t).length > 0 && reply0.id !== t.reviewedReplyKey);
-  if (t.draft && t.stage !== 5 && !t.sent && !customerFirst) {
-    const lang = customerLanguage(t), isRequest = t.purpose === "request", pending = waitingReviews(t).length || (t.legacyReviewPending ? 1 : 0);
-    if (!isRequest && pending) return { title: "전문부서 회신 대기", task: "회신을 등록하면 고객 답변을 작성할 수 있습니다.", note: `전문부서 회신 ${pending}건 대기 중`, reason: "답변은 전문부서 회신을 확인한 뒤 작성합니다.", missing: [] as string[] };
-    const what = isRequest ? "고객 질의서" : "고객 답변";
-    const [task, why] = !hasCurrentReplyPreview(t)
-      ? ["영어 초안을 검토하고, 필요하면 고쳐 주세요.", "초안은 영어로 작성됩니다. 검토 후 고객 언어로 변환 버튼을 눌러 주세요."]
-      : [t.reviewed ? `${lang} 발송용 문구를 확인한 뒤 발송하세요.` : "영어 초안과 변환된 문구를 확인하고 검토 완료에 체크해 주세요.", "발송하면 영어 원본과 발송본이 함께 이력에 남습니다."];
-    const lacking = !isRequest ? answerContext(t).missingInfo.length : 0;
-    return { title: `${what} 작성 중`, task, note: lacking ? `아직 받지 못한 자료 ${lacking}건` : "", reason: why, missing: [] as string[] };
-  }
-  const c = answerContext(t), missing = c.missingInfo.length, expertPending = waitingReviews(t).length || t.legacyReviewPending;
-  let title: string, task: string, reason: string;
-  const reply = reply0;
-  if (t.apiStatus === "REJECTED") { title = "반려된 문의"; task = "문의가 반려 처리되었습니다."; reason = "처리 이력에서 반려 기록을 확인하세요."; }
-  else if (t.stage === 5) { const rec = Object.values(t.resolution || {}).some(Boolean); title = "처리 완료"; task = rec ? "최종 처리 결과가 기록되었습니다." : "문의는 완료됐지만 처리 결과 기록은 비어 있습니다."; reason = "재문의는 기존 문의에서 이어서 처리합니다."; }
-  else if (t.sent && t.customerOutcome === "resolved") { title = "고객 해결 확인 수신"; task = "회신과 최종 처리 결과를 확인하고 완료하세요."; reason = "해결 확인 근거는 고객 회신 이력에 남아 있습니다."; }
-  else if (t.sent && t.customerOutcome === "provided") { title = "고객 정보 확인 완료"; task = "응대 결과를 기록하고 완료하세요."; reason = "정보 확인 회신과 기술적 해결 확인은 구분합니다."; }
-  else if (t.sent) { title = "고객 답변 발송 완료"; task = "고객 회신이나 처리 결과를 확인하세요."; reason = "회신이 없으면 해결 여부는 미확인입니다."; }
-  else if (t.customerOutcome === "needs-support") { title = "후속 문의 · 재검토 필요"; task = "이전 조치와 고객의 새 증상을 함께 확인하세요."; reason = "이전 완료 결과는 현재 해결 근거로 확정하지 않습니다."; }
-  else if (t.customerRequestStatus === "waiting") { title = "고객 회신 대기"; task = "고객이 요청 자료를 제출하기를 기다리고 있습니다."; reason = "회신이 들어오면 같은 문의에서 내용을 확인합니다."; }
-  else if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) { title = "고객 자료 수신 · 확인 필요"; task = "수신된 내용과 첨부자료를 확인하세요."; reason = "회신 수신만으로 필요한 자료가 충족된 것은 아닙니다."; }
-  else if (missing) { title = t.customerRequestStatus === "received" ? "회신 수신 · 추가정보 미충족" : "추가정보 필요 · 원인 미확정"; task = t.customerRequestStatus === "received" ? "아직 충족되지 않은 자료만 추가로 요청하세요." : "고객에게 아래 자료를 요청하세요."; reason = "이 자료가 있어야 원인 후보를 좁히고 정확한 답변을 쓸 수 있습니다."; }
-  else if (t.customerRequestStatus === "received" && reply && !expertPending) { title = "고객 회신 수신"; task = "회신 내용을 확인하고 고객 답변을 작성하세요."; reason = "회신 내용은 고객 소통에서 볼 수 있습니다."; }
-  else if (expertPending) { title = "전문부서 회신 대기"; task = "검토 결과를 받으면 해당 요청에 등록하세요."; reason = "회신을 확인한 뒤 고객 답변에 활용합니다."; }
-  else if (c.expertResponse) { title = "전문부서 회신 수신"; task = "회신 내용을 검토하고 고객 답변을 작성하세요."; reason = "회신은 아래 참고 근거에서 확인할 수 있습니다."; }
-  else if (c.availableReferences.length) { title = "참고 근거 확보 · 원인 미확정"; task = "현재 문의와 사례의 차이를 검토하세요."; reason = "과거 사례의 원인이 현재 고장의 원인과 같다고 확정할 수 없습니다."; }
-  else if (branchChoice(t) === "expert") { title = "근거 부족 · 전문부서 확인 권장"; task = "연결된 참고 근거가 없어 전문부서 검토를 요청하는 것이 좋습니다."; reason = "일반 안내로 바로 답변하거나, 고객에게 자료를 요청할 수도 있습니다."; }
-  else { title = "답변 작성 가능"; task = "추가 자료 없이 답변을 작성할 수 있습니다."; reason = "연결된 참고 근거가 없어 초안은 일반 안내 수준입니다. 전문 판단이 필요하면 전문부서에 요청하세요."; }
-  return { title, task, note: "", reason, missing: (missing > 0 && t.stage !== 5 ? c.missingInfo : []) as string[] };
-}
-
 const SECTION_TONE = { info: "bg-info/10 text-info", navy: "bg-[#003377]/10 text-[#003377]", success: "bg-success/10 text-success" } as const;
 /** Copilot 구역: 접지 않고 항상 보인다. 아이콘 색과 제목만 다르다. */
 function PanelBlock({ icon: Icon, tone, title, count, children }: { icon: LucideIcon; tone: keyof typeof SECTION_TONE; title: ReactNode; count?: ReactNode; children: ReactNode }) {
@@ -504,7 +456,7 @@ function Copilot({ t }: { t: Ticket }) {
   const open = t.stage !== 5 && !t.sent;
   const choice = branchChoice(t);
   const BRANCH: Record<Choice, [string, () => void]> = {
-    answer: ["답변 초안 작성", () => composeFromCopilot(t, "answer")],
+    answer: [isManualReplyTicket(t) && !t.draft ? "담당자 답변 작성·검토" : "답변 초안 작성", () => composeFromCopilot(t, "answer")],
     expert: ["전문부서 요청서 작성", () => openExpertComposer(t)],
     request: ["고객 질의서 작성", () => composeFromCopilot(t, "request")],
   };
