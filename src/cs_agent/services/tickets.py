@@ -36,14 +36,17 @@ from typing import Any
 from langgraph.types import Command
 
 from cs_agent.agents import drafting, info_request
+from cs_agent.agents import specialist_followup as followup
 from cs_agent.agents.case_memory import SAVE_ON, build_case
 from cs_agent.agents.escalation import ESCALATION_TARGETS, EscalationError, InvalidEscalation
 from cs_agent.agents.translation import new_part, source_body
 from cs_agent.agents.verification import detect_language
 from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
+from cs_agent.followup_schemas import FollowupConfirmation
 from cs_agent.llm.router import LLMRouter
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.engine import apply_rules
+from cs_agent.rules.investigation import investigation_info
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
 from cs_agent.rules.tables import load_tables
 from cs_agent.schemas import (
@@ -108,11 +111,13 @@ class TicketService:
         roster: list[Agent] | None = None,
         *,
         escalation_writer: Callable[..., EscalationRequest] | None = None,
+        specialist_reader: Callable | None = None,
     ) -> None:
         self.graph = graph
         self.records = records if records is not None else MemoryRecords()
         self.roster = list(roster or [])  # 담당자 명단 (data/ref/agents.csv). 비면 배정 안 함
         self.escalation_writer = escalation_writer
+        self.specialist_reader = specialist_reader
 
     @staticmethod
     def _config(ticket_id: str) -> dict:
@@ -405,7 +410,138 @@ class TicketService:
             self._check_specialist_budget(requests, len(body.text) - 512)
         self.records.add_specialist_reply(ticket_id, request_id, body)
         self._sync_specialists(ticket_id)
+        self._read_specialist_followup(ticket_id)
         return self.get(ticket_id)
+
+    def _followup(
+        self, ticket_id: str, *, state: dict | None = None, requests: list[dict] | None = None
+    ) -> dict | None:
+        state = state if state is not None else self._state(ticket_id).values
+        requests = requests if requests is not None else self.records.specialist_requests(ticket_id)
+        result = followup.current_followup(state, requests)
+        if result is not None:
+            result["missing_fields"] = followup.missing_fields(result["reading"], state)
+        return result
+
+    def _save_followup(self, ticket_id: str, updates: dict) -> None:
+        snapshot = self._state(ticket_id)
+        node = {
+            TicketStatus.READY_FOR_REVIEW: "ready",
+            TicketStatus.ON_HOLD: "hold",
+            TicketStatus.HUMAN_QUEUE: "human",
+            TicketStatus.WAITING_CUSTOMER: "finish",
+        }.get(snapshot.values.get("status"))
+        if node is None or (snapshot.next and snapshot.next != ("review",)):
+            raise InvalidAction("검토 또는 회신 대기 상태에서 조사 내용을 확인해 주세요")
+        self.graph.update_state(self._config(ticket_id), updates, as_node=node)
+        self.records.save_state(ticket_id, self._state(ticket_id).values)
+
+    def _read_specialist_followup(self, ticket_id: str, *, retry: bool = False) -> None:
+        state = self._state(ticket_id).values
+        requests = self.records.specialist_requests(ticket_id)
+        current = self._followup(ticket_id, state=state, requests=requests)
+        if current is None or not any(r.get("reply") for r in requests):
+            return
+        if not retry and (current["reading"] or current["error"]):
+            return
+        result = {
+            "source_version": current["source_version"],
+            "reading": None,
+            "confirmation": None,
+            "error": None,
+        }
+        try:
+            if self.specialist_reader is None:
+                raise ValueError("reader unavailable")
+            with ticket_scope(ticket_id):
+                result["reading"] = self.specialist_reader(state, requests)
+        except Exception:
+            # Reply was already stored; the staff can retry or record a finding manually.
+            result["error"] = "회신 자동 해석을 완료하지 못했습니다. 원문을 확인해 주세요."
+        if (
+            followup.source_version(
+                self._state(ticket_id).values, self.records.specialist_requests(ticket_id)
+            )
+            != result["source_version"]
+        ):
+            return
+        if current["confirmation"]:
+            result["confirmation"] = current["confirmation"]
+        self._save_followup(ticket_id, {"specialist_followup": result})
+
+    @_serialized
+    def analyze_specialist_followup(self, ticket_id: str) -> TicketOut:
+        self._require_specialist_state(ticket_id)
+        self._read_specialist_followup(ticket_id, retry=True)
+        return self.get(ticket_id)
+
+    @_serialized
+    def confirm_specialist_finding(self, ticket_id: str, body: FollowupConfirmation) -> TicketOut:
+        self._require_specialist_state(ticket_id)
+        self._sync_specialists(ticket_id)
+        current = self._followup(ticket_id)
+        if current is None or current["source_version"] != body.source_version:
+            raise InvalidAction("문의 또는 회신이 변경되었습니다. 최신 근거를 다시 확인해 주세요")
+        if current["pending_replies"]:
+            raise InvalidAction("아직 회신하지 않은 전문부서가 있습니다")
+        requests = self.records.specialist_requests(ticket_id)
+        reply = next(
+            (
+                r["reply"]
+                for r in requests
+                if r.get("reply") and str(r["reply"]["reply_id"]) == body.finding.reply_id
+            ),
+            None,
+        )
+        if not reply or body.finding.evidence not in reply["text"]:
+            raise InvalidAction("현재 전문부서 회신의 판정 근거를 원문 그대로 입력해 주세요")
+        state = self._state(ticket_id).values
+        existing = current["confirmation"]
+        if existing:
+            if existing["finding"] == body.finding.model_dump():
+                return self.get(ticket_id)
+            raise InvalidAction("이미 확인한 판정은 새 전문부서 요청·회신으로 갱신해 주세요")
+        confirmation = {**body.model_dump(), "confirmed_at": datetime.now(UTC).isoformat()}
+        stored = {
+            "source_version": current["source_version"],
+            "reading": current["reading"],
+            "confirmation": confirmation,
+            "error": current["error"],
+        }
+        self._save_followup(
+            ticket_id,
+            {
+                "specialist_followup": stored,
+                "reply_preview": None,
+                **(
+                    {
+                        "approved_reply": None,
+                        "final_reply": None,
+                        "approval_text": None,
+                        "approval_checks_key": None,
+                        "checks": [],
+                    }
+                    if state.get("pending") != "info_request"
+                    else {}
+                ),
+                "processing_history": [
+                    *state.get("processing_history", []),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "kind": "investigation_confirmed",
+                        "created_at": confirmation["confirmed_at"],
+                        "actor": body.reviewer,
+                        "text": "전문부서 최종 판정 확인: " + body.finding.evidence,
+                    },
+                ],
+            },
+        )
+        return self.get(ticket_id)
+
+    def _require_confirmed_investigation(self, ticket_id: str) -> None:
+        current = self._followup(ticket_id)
+        if current is not None and current["status"] != "confirmed":
+            raise InvalidAction("사내 분석 중입니다. 전문부서 최종 판정을 확인한 뒤 처리해 주세요")
 
     @_serialized
     def review_information(self, ticket_id: str, review: InformationReviewIn) -> TicketOut:
@@ -566,6 +702,8 @@ class TicketService:
         if "review" not in snapshot.next:
             raise InvalidAction("상담원 검토 대기 상태에서만 변환할 수 있습니다")
         state = snapshot.values
+        if state.get("pending") != "info_request":
+            self._require_confirmed_investigation(ticket_id)
         previous = state.get("reply_preview") or {}
         text = drafting.customer_text(text, [drafting._ref(e) for e in state.get("evidence", [])])
         if valid_preview(state, text, previous.get("preview_id")):
@@ -615,6 +753,7 @@ class TicketService:
             review.action in {ReviewAction.APPROVE, ReviewAction.EDIT_APPROVE}
             and snapshot.values.get("pending") != "info_request"
         ):
+            self._require_confirmed_investigation(ticket_id)
             revision = len(requests) + sum(r["reply"] is not None for r in requests)
             if any(r["reply"] is None for r in requests):
                 raise InvalidAction(
@@ -681,6 +820,7 @@ class TicketService:
                     "이미 완료된 문의의 처리 결과가 다릅니다. 재문의 후 다시 처리해 주세요"
                 )
         elif status in {TicketStatus.APPROVED, TicketStatus.ESCALATED}:
+            self._require_confirmed_investigation(ticket_id)
             record = (
                 Resolution(**resolution.model_dump(), confirmed_at=datetime.now(UTC)).model_dump(
                     mode="json"
@@ -795,6 +935,8 @@ class TicketService:
             checks=v.get("checks", []),
             evidence=v.get("evidence", []),
             specialist_requests=specialist_requests,
+            investigation_info=investigation_info(v),
+            specialist_followup=self._followup(ticket_id, state=v, requests=specialist_requests),
             specialist_revision=len(specialist_requests)
             + sum(r["reply"] is not None for r in specialist_requests),
             draft_specialist_revision=v.get("draft_specialist_revision", 0),
@@ -810,6 +952,9 @@ class TicketService:
             information_review=v.get("information_review"),
             information_reviews=v.get("information_reviews", []),
         )
+
+    def completed_page(self, query: str, verified: bool, offset: int, limit: int) -> dict:
+        return self.records.completed_page(query, verified, offset, limit)
 
     def closed(self) -> list[str]:
         """Closed records are discoverable without a browser's previously loaded IDs."""

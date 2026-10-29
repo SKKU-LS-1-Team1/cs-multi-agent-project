@@ -1,3 +1,4 @@
+import { investigationTask } from "./investigation";
 // 화면 동작을 공통 함수로 관리한다. 실제 티켓은 API로 저장하고, 프로토타입 티켓은 로컬에서 처리한다.
 import { toast } from "sonner";
 import {
@@ -60,6 +61,11 @@ export function composeFromCopilot(t: Ticket, purpose: string) {
   switchComposer(t, purpose);
   if (!t.draft || (purpose === "request" && contextIsNew(t))) generate(t, purpose);
   scrollToEditor();
+}
+/** 권장 자료도 기존 질의서 작성기를 사용하며 이관 자체는 막지 않는다. */
+export function requestInvestigationInfo(t: Ticket) {
+  setUi({ tab: "문의·답변" }); t.composerOpen = true; switchComposer(t, "request");
+  void infoRequestViaApi(t); scrollToEditor();
 }
 export function openExpertComposer(t: Ticket) {
   setUi({ tab: "문의·답변" });
@@ -175,6 +181,7 @@ export async function prepareCustomerReply(t: Ticket) {
 }
 
 export function canSend(t: Ticket) {
+  if (t.purpose !== "request" && t.specialistFollowup?.status === "in_progress") return false;
   if (t.translatingReply || !hasCurrentReplyPreview(t)) return false;
   if (isApiTicket(t) && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return false;
   if (isApiTicket(t) && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return false;
@@ -403,6 +410,17 @@ export function nextAction(t: Ticket): Next | null {
   if (t.activeComposer === "expert") return null; // 요청서를 쓰는 중에는 판단 카드가 따로 안내한다
   if (!t.owner) return canAssign ? { label: "담당자 배정", run: () => openModal("assign", { id: t.id }) } : { label: "팀장이 배정합니다", waiting: true };
   const reply = latestCustomerReply(t), c = answerContext(t);
+  const investigation = investigationTask(t);
+  if (investigation && !(t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey)) {
+    if (investigation.kind === "request") return { label: "고객 질의서 작성", run: () => {
+      setUi({ tab: "문의·답변" }); t.composerOpen = true; switchComposer(t, "request");
+      void infoRequestViaApi(t); scrollToEditor();
+    } };
+    if (investigation.kind === "confirm") return { label: "검토 결과 확인", run: () => openModal("specialist-finding", { id: t.id }) };
+    if (investigation.kind === "analyze" || investigation.kind === "review") return { label: "회신 확인하기", run: () => openModal("specialist-finding", { id: t.id }) };
+    if (t.apiCustomerId && t.apiLanguage) return { label: "진행상황 안내 작성", externalWaiting: true, run: () => openModal("care", { customerId: t.apiCustomerId, ticketId: t.id, kind: "notice" }) };
+    return { label: "사내 분석 중", waiting: true };
+  }
   if (t.customerRequestStatus === "waiting") return { label: "고객 회신 대기 중", waiting: true };
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) };
   if (t.draft && t.purpose !== "request" && (waitingReviews(t).length || t.legacyReviewPending)) return { label: "전문부서 회신 등록", externalWaiting: true, run: () => openModal("expert-receive", { id: t.id }) };

@@ -1,4 +1,4 @@
-// 전문부서 협업: 전문부서에 맡겨 놓고 "회신을 기다리는 요청"만 관리한다.
+// 전문부서 협업: 회신 대기와 회신 후에도 계속되는 사내 분석을 추적한다.
 // 왼쪽 = 회신 대기 카드(요청 후 경과 시간·회신 등록), 오른쪽 = 부서별 대기(건수 막대를 기다린 시간 구간으로 나눠 어느 부서가 오래 묵었는지 보인다).
 // 회신이 온 뒤의 일(답변 작성)은 "오늘 내가 할 일"과 문의 상세가 안내하므로 여기에는 두지 않는다.
 import { useState } from "react";
@@ -37,10 +37,10 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
   const go = useGo();
   const [showIdle, setShowIdle] = useState(false);
 
-  const waitingAll = referralRows().filter((r) => !r.response && r.ticket.stage !== 5);
+  const waitingAll = referralRows().filter((r) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5);
   const names = referralDepartments();
   const selected = ui.department !== "전체 부서" && !names.includes(ui.department) ? "전체 부서" : ui.department;
-  const pending = (selected === "전체 부서" ? waitingAll : departmentReviewRows(selected).filter((r) => !r.response && r.ticket.stage !== 5)).sort(byUrgency);
+  const pending = (selected === "전체 부서" ? waitingAll : departmentReviewRows(selected).filter((r) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5)).sort(byUrgency);
   // 부서별 현황: 대기가 있는 부서만 먼저(많은 순), 대기 없는 부서는 접어 둔다. 부서 목록 자체는 그대로다.
   const waitOf = (n: string) => (n === "전체 부서" ? waitingAll : waitingAll.filter((r) => (r.target || "대상 부서 미기록") === n)).length;
   const busy = names.filter((n) => waitOf(n) > 0).sort((a, b) => waitOf(b) - waitOf(a));
@@ -55,11 +55,11 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
       <PageHeader title="전문부서 협업 현황">{tabs}</PageHeader>
       <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-5 px-10 pb-12">
         <section aria-label="회신 대기" className="grid gap-4">
-          <h2 className="px-1 text-lg font-medium">회신 대기 <span className="tabular-nums text-muted-foreground">{pending.length}</span></h2>
+          <h2 className="px-1 text-lg font-medium">회신 대기·사내 분석 <span className="tabular-nums text-muted-foreground">{pending.length}</span></h2>
           <div className="grid grid-cols-2 gap-4">
             {pending.map((r, i) => <Card key={r.key} r={r} order={i + 1} onOpen={() => (r.event ? openModal("department-review", { key: r.key }) : go.ticket(r.ticket.id))} />)}
           </div>
-          {!pending.length && <p style={rise(1).style} className={cn("rounded-2xl bg-card py-12 text-center text-sm text-muted-foreground shadow-card", rise(1).className)}>회신을 기다리는 요청이 없습니다.</p>}
+          {!pending.length && <p style={rise(1).style} className={cn("rounded-2xl bg-card py-12 text-center text-sm text-muted-foreground shadow-card", rise(1).className)}>진행 중인 전문부서 요청이 없습니다.</p>}
         </section>
 
         <section aria-label="부서별 현황" style={rise(0).style} className={cn("rounded-2xl bg-card p-6 shadow-card", rise(0).className)}>
@@ -75,7 +75,7 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
                   <button onClick={() => setUi({ department: n })} aria-pressed={on} className={cn("grid w-full gap-1.5 rounded-xl px-3 py-2.5 text-left text-sm transition-colors", on ? "bg-[#003377] text-white" : "hover:bg-muted")}>
                     <span className="flex items-center justify-between gap-3">
                       <span className="truncate font-medium">{n}</span>
-                      <span className={cn("shrink-0 tabular-nums", on ? "text-white/80" : "text-muted-foreground")}><b className={cn("font-medium", !on && "text-foreground")}>{rows.length}</b> 대기</span>
+                      <span className={cn("shrink-0 tabular-nums", on ? "text-white/80" : "text-muted-foreground")}><b className={cn("font-medium", !on && "text-foreground")}>{rows.length}</b> 진행</span>
                     </span>
                     {n !== "전체 부서" && rows.length > 0 && (
                       // 막대 길이 = 대기 건수(가장 많은 부서 기준), 색 = 기다린 시간 구간
@@ -99,6 +99,8 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
 }
 
 function Card({ r, onOpen, order }: { r: Row; onOpen: () => void; order: number }) {
+  const go = useGo();
+  const goToInquiry = (id: string) => go.ticket(id);
   const h = waitedHours(r), late = h !== null && h >= NUDGE_HOURS;
   return (
     <article onClick={onOpen} style={rise(order).style} className={cn("grid cursor-pointer gap-3 rounded-2xl bg-card p-5 shadow-card transition-shadow hover:shadow-float", rise(order).className, departmentRisk(r.ticket) && "ring-1 ring-destructive/40")}>
@@ -111,7 +113,7 @@ function Card({ r, onOpen, order }: { r: Row; onOpen: () => void; order: number 
         <SlaTag t={r.ticket} />
       </div>
       <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-        <Button size="sm" onClick={() => openModal("expert-receive", { id: r.ticket.id, requestId: r.requestId || undefined })}>회신 등록</Button>
+        <Button size="sm" onClick={() => r.response ? goToInquiry(r.ticket.id) : openModal("expert-receive", { id: r.ticket.id, requestId: r.requestId || undefined })}>{r.response ? "사내 분석 확인" : "회신 등록"}</Button>
       </div>
     </article>
   );

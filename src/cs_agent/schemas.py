@@ -288,6 +288,8 @@ class TicketOut(BaseModel):
     checks: list[CheckResult] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
     specialist_requests: list[SpecialistRequest] = Field(default_factory=list)
+    investigation_info: dict | None = None  # 이관 전 권장 자료, 차단 조건 아님
+    specialist_followup: dict | None = None
     specialist_revision: int = 0
     draft_specialist_revision: int = 0
     resolution: Resolution | None = None

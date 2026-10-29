@@ -63,6 +63,7 @@ class ProgressService:
             requests = self.tickets.records.specialist_requests(ticket_id)
             resolution = state.get("resolution") or {}
             classification = state.get("classification")
+            investigation = self.tickets._followup(ticket_id, state=state, requests=requests)
             facts.append(
                 {
                     "ticket_id": ticket_id,
@@ -77,8 +78,17 @@ class ProgressService:
                     else None,
                 }
             )
+            if investigation is not None:
+                facts[-1]["investigation"] = {
+                    "status": investigation["status"],
+                    "steps": [
+                        {"stage": step["stage"], "status": step["status"]}
+                        for step in (investigation["reading"] or {}).get("steps", [])
+                    ],
+                }
             revisions.append(
                 {
+                    "investigation": state.get("specialist_followup"),
                     "customer_revision": state.get("customer_revision", 0),
                     "specialist_revision": len(requests)
                     + sum(r["reply"] is not None for r in requests),

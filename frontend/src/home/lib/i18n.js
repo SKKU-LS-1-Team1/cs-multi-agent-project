@@ -13,6 +13,7 @@ const en = {
 }
 const T = {
   en,
+  ko: { tagline: '글로벌 고객지원', title: '환영합니다', sub: '사용할 언어를 선택해 주세요.', country: '접속 국가', detecting: '국가를 확인하고 있어요…', unknown: '국가를 확인할 수 없어요', language: '언어', start: '계속', selected: '선택됨' },
   ja: { tagline: 'グローバルカスタマーサポート', title: 'ようこそ', sub: '言語を選んで始めましょう。', country: 'お住まいの国', detecting: '国を確認しています…', unknown: '国を確認できません', language: '言語', start: '続ける', selected: '選択中' },
   zh: { tagline: '全球客户支持', title: '欢迎', sub: '请选择语言开始使用。', country: '您所在的国家', detecting: '正在确认国家…', unknown: '无法确认国家', language: '语言', start: '继续', selected: '已选择' },
   es: { tagline: 'Atención al cliente global', title: 'Bienvenido', sub: 'Elija su idioma para comenzar.', country: 'Su país', detecting: 'Detectando su país…', unknown: 'País no disponible', language: 'Idioma', start: 'Continuar', selected: 'seleccionado' },

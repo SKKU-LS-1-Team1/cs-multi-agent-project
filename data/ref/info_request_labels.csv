@@ -31,3 +31,14 @@ load_profile,Records of load current and temperature over time
 oil_test,"Transformer oil test report (DGA), if you have one"
 string_config,How the solar panels are wired (number of panels in each string)
 battery_age,When the batteries were installed (or how old they are)
+load_type,"Type of load connected to the inverter (for example pump, fan or conveyor)"
+accel_decel_time,"Configured acceleration and deceleration times, with units if known"
+cable_length,"Approximate cable length between the inverter and motor, with units if known"
+carrier_frequency,"Carrier or switching frequency configured in the inverter, if known"
+communication_config,Communication module models and network configuration (a diagram or screenshot if available)
+peer_device,Model and type of the other device communicating with the PLC
+noise_environment,Nearby electrical equipment or noise conditions when the communication problem occurs
+occurrence_frequency,How often the problem occurs and whether it is repeatable
+current_waveform,"Recorded load current waveform at the time of tripping, if already available"
+nearby_equipment_operation,What nearby equipment was doing when the breaker tripped
+trip_settings_photo,"An existing photo or record of the breaker trip unit settings, if available"

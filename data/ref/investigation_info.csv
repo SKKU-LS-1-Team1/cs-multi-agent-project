@@ -1,0 +1,4 @@
+profile_id,family,keywords,error_codes,recommended_fields,note
+INV-OVERCURRENT,DRIVE,overcurrent;over current;과전류,E.OC;OC,load_type;motor_nameplate;accel_decel_time;cable_length;carrier_frequency;operating_condition;logs,슬라이드 예시 기반 권장 자료이며 필수·차단 조건이 아님
+PLC-COMM,PLC,communication failure;communication error;communication timeout;communication lost;통신 이상;통신 장애;통신 오류;통신 불량;통신 끊김,,program_backup;communication_config;peer_device;noise_environment;occurrence_frequency,슬라이드 예시 기반 권장 자료이며 필수·차단 조건이 아님
+BREAKER-NUISANCE,LV_BREAKER;MV_EQUIP,nuisance trip;unexpected trip;unwanted trip;false trip;오트립;오 트립,,current_waveform;nearby_equipment_operation;site_condition;trip_settings_photo,슬라이드 예시 기반 권장 자료이며 필수·차단 조건이 아님

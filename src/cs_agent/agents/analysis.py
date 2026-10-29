@@ -1687,16 +1687,22 @@ def extract_details(
     effective_category = category or inquiry.category
 
     def auto_required_fields() -> list[str]:
+        from cs_agent.rules.investigation import recommended_fields
+
         code = result.fields.get("product_model")
         family = products[code].family if code in products else None
         categories = [c for c in (effective_category, secondary_category) if c is not None]
-        return list(
-            dict.fromkeys(
-                field for c in categories for field in required_info(family, c, tables)[0]
-            )
+        required = [field for c in categories for field in required_info(family, c, tables)[0]]
+        advisory = recommended_fields(
+            family,
+            effective_category,
+            inquiry.subject + "\n" + inquiry.body,
+            result.fields.get("error_code"),
+            tables,
         )
+        return list(dict.fromkeys([*required, *advisory]))
 
-    # 대화에서 폼 값도 재평가한다. 철회·충돌 후보를 확정값과 구분해서 보존한다.
+    # 명시적 requested_fields 호출은 유지하고 자동 추출에만 권장 자료를 포함한다.
     if requested_fields is None:
         requested = auto_required_fields()
     else:

@@ -278,6 +278,11 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             missing = review.info_items
         else:
             missing = state["rules"].missing_blocking or state["rules"].missing_info
+        from cs_agent.rules.investigation import investigation_info
+
+        advisory = investigation_info(state, deps.tables)
+        if advisory and not (review and review.info_items):
+            missing = list(dict.fromkeys([*missing, *advisory["missing_fields"]]))
         # 고객 답변과 같이 영어로 검토하고, 승인한 문장만 finish에서 고객 언어로 바꾼다.
         text = deps.write_info_request(missing, "en", _inquiry_text(state), deps.llm)
         return {
@@ -326,6 +331,21 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     def draft(state: TicketState) -> dict:
         review = _review(state)
         feedback = review.feedback if review and review.action == ReviewAction.REWRITE else None
+        from cs_agent.agents.specialist_followup import current_followup
+
+        followup = current_followup(state, state.get("specialist_requests", []))
+        confirmation = followup.get("confirmation") if followup else None
+        if confirmation:
+            feedback = "\n".join(
+                filter(
+                    None,
+                    [
+                        feedback,
+                        "Staff-confirmed specialist finding (preserve scope and conditions): "
+                        + confirmation["finding"]["evidence"],
+                    ],
+                )
+            )
         options = {"fix_notes": state.get("fix_notes") or None, "reviewer_feedback": feedback}
         evidence = state.get("evidence", [])
         if deps.write_draft is drafting.write_draft:

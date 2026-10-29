@@ -1,12 +1,15 @@
 // 지식·해결 사례: 해결 사례(CSV 800건) / 기술문서. 완료 문의(담당자가 기록한 처리 결과)은 문의 관리의 탭에서 보여 준다.
-import { useRef } from "react";
+import { useEffect, useState } from "react";
+import { api, type CompletedPage } from "../../api/client";
+import { loadTicketDetail, watchTicketDetail } from "@admin/lib/api-sync";
+import type { Ticket } from "@admin/lib/types";
 import { Button } from "@admin/components/ui/button";
 import { Card } from "@admin/components/ui/card";
 import { Input } from "@admin/components/ui/input";
 import DocContent from "@admin/components/admin/DocContent";
 import { Empty, Facts, Mono, PageHeader, Tag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import { documentCatalog } from "@admin/data/knowledge-data";
-import { cases, completedTickets, sourceInquiry, translated, type CaseRow } from "@admin/lib/logic";
+import { cases, sourceInquiry, translated, type CaseRow } from "@admin/lib/logic";
 import { openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 
@@ -96,20 +99,44 @@ function CaseDetail({ c }: { c: CaseRow }) {
 /** 문의 관리의 "완료 문의" 탭: 담당자가 처리 결과를 기록해 완료한 문의. */
 export function CompletedTickets() {
   const go = useGo();
-  const q = ui.kquery.toLowerCase(), all = completedTickets();
-  const records = all.filter((r) => JSON.stringify([r.ticket.id, r.ticket.title, r.ticket.product, r.resolution]).toLowerCase().includes(q) && (ui.completedFilter !== "검증된 해결" || r.verified));
+  const [page, setPage] = useState<CompletedPage>({ items: [], total: 0 });
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const [detail, setDetail] = useState<Ticket | null>(null);
+  const [detailError, setDetailError] = useState("");
+  useEffect(() => { const timer = setInterval(() => setRetry((v) => v + 1), 30_000); return () => clearInterval(timer); }, []);
+  const query = ui.kquery, verified = ui.completedFilter === "검증된 해결";
+  useEffect(() => { setOffset(0); }, [query, verified]);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true); setError("");
+    const timer = setTimeout(() => {
+      api.completedPage(query, verified, offset, 50).then((result) => {
+        if (cancelled) return;
+        if (offset > 0 && offset >= result.total) { setOffset(0); return; }
+        setPage(result); setLoading(false);
+      }).catch(() => { if (!cancelled) { setError("완료 문의를 불러오지 못했습니다."); setLoading(false); } });
+    }, 200);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query, verified, offset, retry, ui.completedTotal]);
+  const records = page.items.map((r) => ({
+    ticket: { id: r.ticket_id, title: r.subject || r.ticket_id, product: r.product_code || "제품 미확인" },
+    resolution: { ...r.resolution, confirmedBy: r.resolution.confirmed_by } as Record<string, any>,
+    time: r.resolution.confirmed_at || r.resolved_at, verified: r.verified, superseded: r.superseded,
+  }));
   const chosen = records.find((r) => r.ticket.id === ui.completedTicket) || records[0];
-  const list = useRef(null);
-  if (!all.length)
-    return (
-      <div className="px-10 pb-12">
-        <div className="grid justify-items-center gap-3 rounded-2xl bg-card px-6 py-16 text-center shadow-card">
-          <strong className="font-medium">아직 완료 처리한 문의가 없습니다.</strong>
-          <p className="max-w-md text-sm text-muted-foreground">문의 상세에서 "처리 결과 기록 및 완료"를 하면 원인·조치·결과가 여기에 쌓여, 비슷한 문의의 근거로 쓸 수 있습니다.</p>
-          <Button variant="outline" onClick={() => go.list({ filter: "내 담당" })}>내 문의 보기</Button>
-        </div>
-      </div>
-    );
+  const chosenId = !loading && !error ? chosen?.ticket.id : undefined;
+  useEffect(() => {
+    setDetail(null); setDetailError("");
+    if (!chosenId) return;
+    let cancelled = false;
+    const stop = watchTicketDetail(chosenId);
+    loadTicketDetail(chosenId).then((t) => { if (!cancelled) setDetail(t); })
+      .catch(() => { if (!cancelled) setDetailError("문의 상세를 불러오지 못했습니다."); });
+    return () => { cancelled = true; stop(); };
+  }, [chosenId]);
   return (
     <>
       <div className="flex items-center gap-3 px-10 pb-4">
@@ -117,22 +144,27 @@ export function CompletedTickets() {
         {["전체 기록", "검증된 해결"].map((v) => <Button key={v} size="sm" variant={ui.completedFilter === v ? "default" : "outline"} onClick={() => setUi({ completedFilter: v })}>{v}</Button>)}
       </div>
       <div className="grid h-[calc(100dvh-16.5rem)] min-h-96 grid-cols-[340px_minmax(0,1fr)] gap-4 px-10 pb-6">
-        <div ref={list} className="grid min-h-0 content-start gap-2 overflow-y-auto pr-2">
-          {records.map((r) => (
+        <div className="grid min-h-0 content-start gap-2 overflow-y-auto pr-2">
+          {!loading && !error && records.map((r) => (
             <ListButton key={r.ticket.id} active={r === chosen} onClick={() => setUi({ completedTicket: r.ticket.id })}>
               <Mono className="text-xs text-info">{r.ticket.id}</Mono><strong className="text-sm">{r.ticket.title}</strong><small className="text-muted-foreground">{r.ticket.product}</small>
               <Tag tone={r.verified ? "green" : ""} className="w-fit">{r.superseded ? "재검토 중" : r.verified ? "담당자 해결 확인" : r.resolution.outcome === "provided" ? "정보 제공 완료" : r.resolution.outcome ? "해결 미확인" : "처리 결과 미기록"}</Tag>
             </ListButton>
           ))}
-          {!records.length && <Empty>해당하는 처리 기록이 없습니다.</Empty>}
+          {loading ? <Empty>완료 문의를 불러오는 중입니다.</Empty> : error ? <div role="alert">{error}<Button variant="outline" onClick={() => setRetry((v) => v + 1)}>다시 시도</Button></div> : !records.length && <Empty>해당하는 처리 기록이 없습니다.</Empty>}
+          <div className="flex items-center justify-between gap-2 py-2 text-sm">
+            <Button variant="outline" disabled={loading || offset === 0} onClick={() => setOffset((v) => Math.max(0, v - 50))}>이전</Button>
+            <span>{page.total}건 · {Math.floor(offset / 50) + 1}페이지</span>
+            <Button variant="outline" disabled={loading || offset + 50 >= page.total} onClick={() => setOffset((v) => v + 50)}>다음</Button>
+          </div>
         </div>
         <div className="min-h-0 overflow-y-auto pb-2 pr-1">
-        {chosen ? (
+        {!loading && !error && chosen ? (
           <Card className="gap-5 p-6">
             <div className="flex items-center justify-between"><Mono className="text-sm text-info">{chosen.ticket.id}</Mono><Tag tone={chosen.verified ? "green" : ""}>{chosen.superseded ? "재검토 중 · 이전 완료 기록" : chosen.verified ? "담당자 해결 확인" : "일반 응대 이력"}</Tag></div>
             <h1 className="text-2xl font-bold">{chosen.ticket.title}</h1>
             <div className="text-sm text-muted-foreground">{chosen.ticket.product} · {chosen.resolution.confirmedBy || "확인자 미기록"} · {chosen.time ? new Date(chosen.time).toLocaleDateString("ko-KR") : "완료일 미기록"}</div>
-            <Section title="문의와 처리 결과"><p>{sourceInquiry(chosen.ticket)}</p>
+            <Section title="문의와 처리 결과"><p>{detail?.id === chosen.ticket.id ? sourceInquiry(detail) : detailError || "문의 원문을 불러오는 중입니다."}</p>{detailError && <Button variant="outline" onClick={() => setRetry((v) => v + 1)}>다시 시도</Button>}
               <Facts rows={[["원인·판단", chosen.resolution.cause || "미기록"], ["수행 조치", chosen.resolution.action || "미기록"], ["결과", chosen.resolution.result || "미기록"], ["확인 근거", chosen.resolution.verification || "미기록"]]} /></Section>
             <Section title="참고 근거">{(chosen.resolution.references || []).length ? <ul className="list-disc pl-5 text-sm">{chosen.resolution.references.map((x: any) => <li key={x.id}>{x.label}</li>)}</ul> : <p className="text-sm text-muted-foreground">참고 근거 미기록</p>}</Section>
             <div className="rounded-lg bg-secondary px-4 py-3 text-sm text-muted-foreground">{chosen.superseded ? "후속 문의로 재검토 중인 이전 기록입니다. 현재 해결 근거로 사용하지 않습니다." : chosen.verified ? "담당자가 실제 조치 결과와 확인 근거를 기록한 사례입니다. 현재 문의의 조건과 비교해 활용하세요." : "응대 이력입니다. 실제 고장 해결이 확인된 사례와 구분합니다."}</div>

@@ -36,6 +36,7 @@ from cs_agent import __version__
 from cs_agent.agents import knowledge_graph
 from cs_agent.agents.case_memory import with_graph_learning, with_live_cases
 from cs_agent.agents.retrieval import default_retrievers
+from cs_agent.agents.specialist_followup import read_replies
 from cs_agent.api import agents as agents_api
 from cs_agent.api import chat, customers, dashboard, inquiries, products, progress, tickets
 from cs_agent.cache.store import ChatSessionStore, MemoryKV, connect_redis
@@ -173,6 +174,11 @@ def create_app(
                 records,
                 roster,
                 escalation_writer=partial(deps.write_escalation_request, llm=deps.llm),
+                specialist_reader=partial(
+                    read_replies,
+                    definitions=tables.field_labels,
+                    llm=deps.llm,
+                ),
             )
             app.state.progress = ProgressService(
                 app.state.tickets, app.state.llm, check_customer_qc=deps.check_customer_qc

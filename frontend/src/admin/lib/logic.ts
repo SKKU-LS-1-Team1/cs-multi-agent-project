@@ -1,3 +1,4 @@
+import { investigationTask } from "./investigation";
 // 레거시 app.js 의 업무 규칙(집계·배정·답변 컨텍스트·초안 문구)을 그대로 옮긴 순수 로직.
 import { caseCatalog } from "@admin/data/knowledge-data";
 import { ACCOUNTS, currentAccount } from "./auth";
@@ -463,6 +464,7 @@ save();
 export type Choice = "answer" | "expert" | "request";
 export function branchChoice(t: Ticket): Choice | null {
   // 백엔드 문의는 처음부터 AI 답변 초안이 있다. 고치기 전에는 전문부서 요청·고객 질의서로도 갈 수 있게 갈림길을 보인다 (CSA-61)
+  if (investigationTask(t)) return null;
   if (t.source === "api" && !t.analysisReady) return null;
   const untouchedAiDraft = t.source === "api" && t.purpose === "answer" && !!t.draft && t.draft === t.aiDraft;
   if (t.stage === 5 || t.sent || !t.owner || (t.draft && !untouchedAiDraft) || t.activeComposer === "expert") return null;

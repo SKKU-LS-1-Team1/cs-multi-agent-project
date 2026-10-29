@@ -1,7 +1,7 @@
 // 관리자 화면 ↔ 백엔드 API 연결 (CSA-61 · 담당 김동규). 페이지·디자인(CSA-59 · 김도연)은 그대로 두고
 // 데이터만 잇는다.
 //
-// - startApiSync(): 백엔드 작업 목록(GET /api/tickets)과 각 티켓(GET /api/tickets/{id})을 10초마다 읽어
+// - startApiSync(): 열린 작업과 선택한 문의의 상세만 10초마다 읽어
 //   서버 문의를 화면 스토어에 반영한다. 연결 실패 시 마지막 서버 데이터를 유지하고 오류를 표시한다.
 // - 백엔드 티켓(source "api")에서 API 로 보내는 동작 (actions.ts 가 여기로 넘긴다)
 //   · 승인 및 발송 → POST /action  approve (AI 초안 그대로) / edit_approve (고친 글)
@@ -102,7 +102,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
   const displayDraft = canEdit ? api.approval_text ||
     (api.translation_error ? api.approved_reply : null) || aiDraft : "";
   const target = t ?? ({ id: api.ticket_id, events: [], files: [], reviewed: false, source: "api" } as unknown as Ticket);
-  const reviewChanged = !t || t.specialistRevision !== (api.specialist_revision ?? 0) || t.customerRevision !== (api.customer_revision ?? 0) || t.informationReviewedAt !== (api.information_review?.checked_at ?? null) || t.apiStatus !== api.status || t.apiApprovalText !== api.approval_text || t.apiBaselineDraft !== aiDraft || JSON.stringify(t.apiChecks) !== JSON.stringify(api.checks) || JSON.stringify(t.apiEvidence) !== JSON.stringify(api.evidence);
+  const reviewChanged = !t || JSON.stringify(t.specialistFollowup || null) !== JSON.stringify(api.specialist_followup || null) || t.specialistRevision !== (api.specialist_revision ?? 0) || t.customerRevision !== (api.customer_revision ?? 0) || t.informationReviewedAt !== (api.information_review?.checked_at ?? null) || t.apiStatus !== api.status || t.apiApprovalText !== api.approval_text || t.apiBaselineDraft !== aiDraft || JSON.stringify(t.apiChecks) !== JSON.stringify(api.checks) || JSON.stringify(t.apiEvidence) !== JSON.stringify(api.evidence);
   const editing = t && t.draft && (t.draft !== t.aiDraft || rewrites.has(t) || sends.has(t) || api.status === "ON_HOLD" ||
     (t.draftSpecialistRevision ?? 0) !== (api.specialist_revision ?? 0));
   Object.assign(target, {
@@ -137,7 +137,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     type: api.category ? CATEGORY_LABEL[api.category] || api.category : "미분류",
     secondaryType: api.classification?.secondary_category ? CATEGORY_LABEL[api.classification.secondary_category] || api.classification.secondary_category : null,
     priority: api.priority || "—",
-    status: STATUS_LABEL[api.status] || api.status,
+    status: api.specialist_followup?.status === "in_progress" && !["WAITING_CUSTOMER", "RESOLVED", "REJECTED", "APPROVED"].includes(api.status) ? "사내 분석 중" : STATUS_LABEL[api.status] || api.status,
     sla: CLOSED.has(api.status) ? STATUS_LABEL[api.status] : slaText(api.sla_due_at),
     risk: Boolean(work?.at_risk),
     owner: api.assignee ? agents.get(api.assignee)?.name || api.assignee : "",
@@ -153,6 +153,8 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     apiEvidence: api.evidence,
     apiCited: api.draft?.cited || [],
     approvalCited: api.approval_cited,
+    investigationInfo: api.investigation_info || null,
+    specialistFollowup: api.specialist_followup || null,
     specialistRequests: api.specialist_requests || [],
     specialistRevision: api.specialist_revision ?? 0,
     apiDraftSpecialistRevision: api.draft_specialist_revision ?? 0,
@@ -252,12 +254,42 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
   return target;
 }
 
+const snapshotKey = (t: Ticket | undefined) => JSON.stringify([t?.apiStatus, t?.aiDraft, t?.apiDraftSpecialistRevision, t?.specialistRevision, t?.customerRevision, t?.reviewedReplyKey, t?.informationReviewedAt, t?.specialistFollowup]);
+
+// 완료 문의는 화면에서 선택한 동안만 갱신한다. 목록 전체를 상세 스토어에 넣지 않는다.
+const selectedDetails = new Map<string, number>();
+const detailLoads = new Map<string, Promise<Ticket>>();
+export function watchTicketDetail(id: string): () => void {
+  selectedDetails.set(id, (selectedDetails.get(id) || 0) + 1);
+  return () => {
+    const count = (selectedDetails.get(id) || 1) - 1;
+    if (count) selectedDetails.set(id, count); else selectedDetails.delete(id);
+  };
+}
+export function loadTicketDetail(id: string): Promise<Ticket> {
+  const pending = detailLoads.get(id);
+  if (pending) return pending;
+  const before = snapshotKey(tickets.find((t) => t.id === id));
+  const load = (async () => {
+    const row = await api.ticket(id);
+    const existing = tickets.find((t) => t.id === id);
+    if (existing && (before !== snapshotKey(existing) || rewrites.has(existing) || specialistWrites.has(existing) || sends.has(existing) || informationWrites.has(existing) || replyTranslations.has(existing))) return existing;
+    const result = apply(existing, row);
+    if (!existing) tickets.unshift(result);
+    commit();
+    return result;
+  })().finally(() => detailLoads.delete(id));
+  detailLoads.set(id, load);
+  return load;
+}
+
 let syncing = false;
 export async function syncFromApi(): Promise<boolean> {
   if (syncing) return false;
   syncing = true;
   try {
-    const [list, roster, answered, closed] = await Promise.all([api.workList(), api.agents(), api.answered(), api.closed()]);
+    const [list, roster, answered, completed] = await Promise.all([api.workList(), api.agents(), api.answered(), api.completedPage("", false, 0, 1)]);
+    setUi({ completedTotal: completed.total });
     agents = new Map(roster.map((a) => [a.agent_id, a]));
     // 담당자는 앞단 글로벌 C/S 센터 상담원 = 로그인 계정과 같은 이름 (agents.csv GCS_L1, CSA-53).
     // 팀 현황의 수용량은 명단의 max_open 을 따른다.
@@ -267,10 +299,10 @@ export async function syncFromApi(): Promise<boolean> {
     }
     workItems.clear();
     list.forEach((w) => workItems.set(w.ticket_id, w));
-    const known = tickets.filter(isApiTicket).map((t) => t.id);
+    const known = tickets.filter((t) => isApiTicket(t) && !CLOSED.has(t.apiStatus)).map((t) => t.id);
     // 작업 목록(열린 건) + 발송했고 완료 전인 건(다른 브라우저에서 발송했어도 완료 처리할 수 있게) + 이미 아는 건
-    const ids = [...new Set([...list.map((w) => w.ticket_id), ...answered, ...closed, ...known])];
-    const snapshotKey = (t: Ticket | undefined) => JSON.stringify([t?.apiStatus, t?.aiDraft, t?.apiDraftSpecialistRevision, t?.specialistRevision, t?.customerRevision, t?.reviewedReplyKey, t?.informationReviewedAt]);
+    const ids = [...new Set([...list.map((w) => w.ticket_id), ...answered, ...known, ...selectedDetails.keys()])];
+
     const fetched = await Promise.all(ids.map(async (id) => {
       const before = snapshotKey(tickets.find((t) => t.id === id));
       try { return { id, row: await api.ticket(id), before, missing: false }; }
@@ -548,7 +580,7 @@ export async function infoRequestViaApi(t: Ticket): Promise<boolean> {
   t.regenerating = true;
   commit();
   try {
-    takeNewDraft(t, await api.act(t.id, { action: "info_request", reviewer: signedIn, info_items: (t.requiredInformation || []).filter((item: { id: string }) => !["provided", "confirmed"].includes(t.infoChecks?.[item.id]?.status)).map((item: { id: string }) => item.id) }));
+    takeNewDraft(t, await api.act(t.id, { action: "info_request", reviewer: signedIn, info_items: [...new Set([...(t.specialistFollowup?.missing_fields || []), ...(t.investigationInfo?.missing_fields || []), ...(t.requiredInformation || []).filter((item: { id: string }) => !["provided", "confirmed"].includes(t.infoChecks?.[item.id]?.status)).map((item: { id: string }) => item.id)])] }));
     record(t, "draft", "추가정보 요청문 초안 생성", { purpose: "request" });
     toast("추가정보 요청문을 준비했습니다.");
     return true;
@@ -632,4 +664,20 @@ export async function informationReviewViaApi(t: Ticket, replyId: string, revisi
     return true;
   } catch (e) { toast.error(`자료 확인 저장 실패: ${e}`); return false; }
   finally { informationWrites.delete(t); t.informationSaving = false; commit(); }
+}
+
+
+/** 최신 회신 재해석/담당자 판정 확인은 서버 체크포인트에 저장한다. */
+export async function specialistFollowupViaApi(t: Ticket, finding?: { reply_id: string; evidence: string }, expectedVersion?: string): Promise<boolean> {
+  if (t.followupBusy) return false;
+  t.followupBusy = true; commit();
+  try {
+    const row = finding ? await api.confirmSpecialistFinding(t.id, {
+      source_version: expectedVersion || t.specialistFollowup.source_version, reviewer: signedIn, finding,
+    }) : await api.analyzeSpecialistFollowup(t.id);
+    apply(t, row); commit();
+    if (!finding && row.specialist_followup?.error) { toast.error(row.specialist_followup.error); return false; }
+    return true;
+  } catch (e) { toast.error(`회신 확인 실패: ${e}`); return false; }
+  finally { t.followupBusy = false; commit(); }
 }

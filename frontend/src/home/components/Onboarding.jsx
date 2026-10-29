@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import logo from '../assets/ls-electric-logo.png'
 import {
-  LANGUAGES, RTL, countryName, detectCountry, initialLang, loadChoice, saveChoice,
+  LANGUAGES, RTL, countryName, detectCountry, initialLang, loadChoice, saveChoice, shownCountry,
 } from '../lib/onboarding.js'
 import { t } from '../lib/i18n.js'
 import FlagIcon from './FlagIcon.jsx'
@@ -49,7 +49,9 @@ export default function Onboarding({ onDone }) {
   }
 
   const ok = country.status === 'ok'
-  const label = country.status === 'loading' ? t(lang, 'detecting') : ok ? countryName(country.code) : t(lang, 'unknown')
+  // 국기·국가명은 고른 언어를 따라간다 (CSA-64)
+  const shown = shownCountry(lang, ok ? country.code : null)
+  const label = country.status === 'loading' ? t(lang, 'detecting') : shown ? countryName(shown) : t(lang, 'unknown')
   const aria = `${t(lang, 'country')}: ${label}`
 
   return (
@@ -65,11 +67,11 @@ export default function Onboarding({ onDone }) {
 
         <div className="ob-country" role="status" aria-live="polite" aria-label={aria}>
           <span className={`ob-badge${country.status === 'loading' ? ' is-loading' : ''}`} aria-hidden="true">
-            {country.status === 'loading' ? null : <FlagIcon code={ok ? country.code : null} size={52} />}
+            {country.status === 'loading' ? null : <FlagIcon code={shown} size={52} />}
           </span>
           <span className="ob-cname">
             <small>{t(lang, 'country')}</small>
-            <b className={ok ? '' : 'is-weak'}>{label}</b>
+            <b className={shown ? '' : 'is-weak'}>{label}</b>
           </span>
         </div>
 

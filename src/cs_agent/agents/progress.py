@@ -14,7 +14,7 @@ MAX_ATTEMPTS = 2
 MAX_TICKETS = 20
 MAX_NOTICE_CHARS = 8_000
 MIN_GROUNDING_CONFIDENCE = 0.5
-_PROMPT_VERSION = "progress-notice-v2-customer-text"
+_PROMPT_VERSION = "progress-notice-v3-investigation"
 _STATUSES = frozenset(
     {
         "ANALYSIS_PENDING",
@@ -55,6 +55,15 @@ resolution_outcome is resolved. provided means guidance provided, not equipment 
 unconfirmed or null never establishes that the technical issue was fixed.
 Specialist counts indicate recorded requests/replies only. A received reply does not mean
 its contents were validated or that a solution is known. Do not reveal internal team names.
+The optional investigation object is independent of customer waiting. in_progress means an
+internal investigation remains open even if specialist replies were received. In that case,
+explain the investigation rather than implying READY_FOR_REVIEW is a final answer ready to send.
+confirmed means
+staff reviewed the specialist finding, not that warranty/return was approved or the product
+was repaired. Describe only the explicit steps: triage (initial assessment), serial_trace
+(serial/shipment history tracing), impact_assessment, reproduction_test. A step marked completed
+only establishes completion of that step. Never invent skipped stages, causes, test results,
+serial numbers, responsible parties, dates, decisions or an ETA.
 # WRITING RULES
 Write concise English for staff review. Use plain text, not JSON or Markdown formatting.
 Do not diagnose, speculate about delays, promise dates/ETAs, invent next steps or actions,
@@ -77,7 +86,9 @@ A ticket being closed is not proof the equipment was repaired. Only outcome reso
 supports technical resolution. Approval is not delivery. Rejecting a draft is not denial
 of a customer request. Recorded specialist requests/replies are not completed repairs.
 No unsupported dates, ETA, causes, actions, next steps, internal priority/SLA/departments,
-private details, or specialist hypotheses are allowed. Each selected ticket must be covered
+private details, or specialist hypotheses are allowed. Investigation stages describe only the
+recorded step and its progress; confirmed is staff review, not proof of repair or eligibility.
+Each selected ticket must be covered
 without transferring facts between tickets. If uncertain, answer no.
 # OUTPUT
 Select yes or no using the requested judgement schema.
@@ -122,6 +133,27 @@ def _facts(facts: Sequence[Mapping]) -> list[dict]:
         if not isinstance(waiting, bool):
             raise ProgressError("고객 정보 대기 상태를 확인해 주세요.")
         item.update(waiting_for_customer=waiting, resolution_outcome=outcome)
+        investigation = fact.get("investigation")
+        if investigation is not None:
+            if not isinstance(investigation, Mapping) or investigation.get("status") not in {
+                "in_progress",
+                "confirmed",
+            }:
+                raise ProgressError("조사 진행 상태를 확인해 주세요.")
+            steps = investigation.get("steps", [])
+            if not isinstance(steps, list) or len(steps) > 12:
+                raise ProgressError("조사 진행 단계를 확인해 주세요.")
+            public_steps = []
+            for step in steps:
+                if (
+                    not isinstance(step, Mapping)
+                    or step.get("stage")
+                    not in {"triage", "serial_trace", "impact_assessment", "reproduction_test"}
+                    or step.get("status") not in {"in_progress", "completed"}
+                ):
+                    raise ProgressError("조사 진행 단계를 확인해 주세요.")
+                public_steps.append({"stage": step["stage"], "status": step["status"]})
+            item["investigation"] = {"status": investigation["status"], "steps": public_steps}
         clean.append(item)
     return clean
 

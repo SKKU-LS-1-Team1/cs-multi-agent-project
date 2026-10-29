@@ -90,6 +90,9 @@ class RefTables:
     customers: dict[str, dict[str, str]] = field(default_factory=dict)  # customer_id -> row
     spec_facts: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # product_code ->
     faults: list[dict[str, str]] = field(default_factory=list)
+    investigation_info: list[dict[str, str]] = field(
+        default_factory=list
+    )  # 조사 권장 자료 (접수 차단 안 함)
     firmware: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # product_code ->
 
 
@@ -222,6 +225,11 @@ def _load(ref_dir: Path) -> RefTables:
     unknown = sorted(set(request_labels) - set(field_labels))
     if unknown:
         raise ValueError(f"info_request_labels.csv: codebook 에 없는 항목 {unknown}")
+    investigation_info = _read(ref_dir / "investigation_info.csv")
+    _unique(((r["profile_id"], r) for r in investigation_info), "investigation_info.csv")
+    for row in investigation_info:
+        if unknown := sorted(set(_split(row["recommended_fields"])) - set(field_labels)):
+            raise ValueError(f"investigation_info.csv: codebook 에 없는 항목 {unknown}")
     return RefTables(
         products,
         routing,
@@ -246,6 +254,7 @@ def _load(ref_dir: Path) -> RefTables:
         ),
         spec_facts=_group(_read(ref_dir / "product_spec_facts.csv"), "product_code"),
         faults=_read(ref_dir / "fault_catalog.csv"),
+        investigation_info=investigation_info,
         firmware=_group(_read(ref_dir / "firmware_history.csv"), "product_code"),
     )
 

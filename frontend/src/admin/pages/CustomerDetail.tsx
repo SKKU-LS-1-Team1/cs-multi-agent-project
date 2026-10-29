@@ -49,7 +49,7 @@ export default function CustomerDetail() {
   const items: Item[] = [
     ...rec.actions.map((a): Item => ({ key: a.id, at: a.at, type: "대응", title: <Ids text={a.text} />, sub: <>{a.by}</> })),
     ...c.t.map(([id, date, subject, cat, fam, pri, st, sla]): Item => ({ key: id, at: date, type: "문의", title: subject, onOpen: () => { void openTicket(id); }, sub: <>{CATEGORY_KO[cat] || cat} · {FAMILY_KO[fam] || fam}</>,
-      tags: <><Tag tone={pri === "P1" ? "red" : pri === "P2" ? "amber" : ""}>{pri} {PRIORITY_KO[pri]}</Tag>{sla === "BREACHED" && <Tag tone="red">SLA 초과</Tag>}<span className={cn("text-sm", ["IN_PROGRESS", "ESCALATED", "NEW", "WAITING_CUSTOMER"].includes(st) && "font-medium")}>{STATUS_KO[st] || st}</span></> })),
+      tags: <><Tag tone={pri === "P1" ? "red" : pri === "P2" ? "amber" : ""}>{pri} {PRIORITY_KO[pri]}</Tag>{sla === "BREACHED" && <Tag tone="red">SLA 초과</Tag>}<span className={cn("text-sm", ["IN_PROGRESS", "ESCALATED", "NEW", "WAITING_CUSTOMER"].includes(st) && "font-medium")}>{findTicket(id)?.specialistFollowup?.status === "in_progress" && !["WAITING_CUSTOMER", "RESOLVED", "CLOSED", "REJECTED", "APPROVED"].includes(st) ? "사내 분석 중" : STATUS_KO[st] || st}</span></> })),
   ].sort((a, b) => b.at.localeCompare(a.at));
 
   return (

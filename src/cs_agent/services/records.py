@@ -60,6 +60,8 @@ class Records(Protocol):
         """접수 순서. exclude 상태(TicketStatus 값)의 티켓은 뺀다."""
         ...
 
+    def completed_page(self, query: str, verified: bool, offset: int, limit: int) -> dict: ...
+
     def find_thread(self, thread_ref: str) -> str | None: ...
 
     def save_state(self, ticket_id: str, values: dict) -> None: ...
@@ -222,6 +224,34 @@ def current_wait(waiting_since: datetime | None, wait_hours: float, now: datetim
     return wait_hours + max((now - waiting_since).total_seconds(), 0) / 3600
 
 
+def _completion_summary(row: dict) -> dict:
+    resolution = row.get("resolution") or {}
+    superseded = row.get("status") not in {"RESOLVED", "REJECTED"} or bool(
+        resolution.get("superseded")
+    )
+    return {
+        **{
+            key: row.get(key)
+            for key in (
+                "ticket_id",
+                "subject",
+                "product_code",
+                "status",
+                "received_at",
+                "resolved_at",
+            )
+        },
+        "resolution": resolution,
+        "superseded": superseded,
+        "verified": not superseded
+        and resolution.get("outcome") == "resolved"
+        and all(
+            str(resolution.get(k) or "").strip()
+            for k in ("cause", "action", "result", "verification")
+        ),
+    }
+
+
 # 메모리 ---------------------------------------------------------------------------------------
 
 
@@ -251,6 +281,26 @@ class MemoryRecords(MemorySpecialists):
 
     def ticket_ids(self, exclude: frozenset[str] = frozenset()) -> list[str]:
         return [tid for tid, row in self.tickets.items() if row["status"] not in exclude]
+
+    def completed_page(self, query: str, verified: bool, offset: int, limit: int) -> dict:
+        rows = []
+        for tid, row in self.tickets.items():
+            if row["status"] not in {"RESOLVED", "REJECTED"} and not row.get("resolution"):
+                continue
+            item = _completion_summary({**row, "ticket_id": tid})
+            searchable = [
+                tid,
+                row.get("subject"),
+                row.get("product_code"),
+                *(item["resolution"].get(k) for k in ("cause", "action", "result", "verification")),
+            ]
+            if query.casefold() not in " ".join(str(v or "") for v in searchable).casefold():
+                continue
+            if verified and not item["verified"]:
+                continue
+            rows.append(item)
+        rows.sort(key=lambda r: (str(r.get("received_at") or ""), r["ticket_id"]), reverse=True)
+        return {"items": rows[offset : offset + limit], "total": len(rows)}
 
     def find_thread(self, thread_ref: str) -> str | None:
         return next((t for t, r in self.tickets.items() if r["thread_ref"] == thread_ref), None)
@@ -667,6 +717,66 @@ class SqlRecords(SqlSpecialists):
             return current_wait(
                 ticket.waiting_since, ticket.customer_wait_hours or 0.0, now or _now()
             )
+
+    def completed_page(self, query: str, verified: bool, offset: int, limit: int) -> dict:
+        import sqlalchemy as sa
+
+        from cs_agent.db.models import Ticket
+
+        resolution = Ticket.resolution
+        closed = Ticket.status.in_(["RESOLVED", "REJECTED"])
+        filters = [
+            sa.or_(
+                closed,
+                sa.and_(
+                    resolution.is_not(None),
+                    resolution != sa.literal_column("'null'::jsonb"),
+                    resolution != sa.literal_column("'{}'::jsonb"),
+                ),
+            )
+        ]
+        if query:
+            columns = [
+                Ticket.ticket_id,
+                Ticket.subject,
+                Ticket.product_code,
+                *(resolution[k].astext for k in ("cause", "action", "result", "verification")),
+            ]
+            filters.append(sa.or_(*(c.icontains(query, autoescape=True) for c in columns)))
+        if verified:
+            filters.extend(
+                [
+                    closed,
+                    resolution["outcome"].astext == "resolved",
+                    sa.func.coalesce(resolution["superseded"].astext, "false") != "true",
+                ]
+            )
+            filters.extend(
+                sa.func.length(sa.func.trim(resolution[k].astext)) > 0
+                for k in ("cause", "action", "result", "verification")
+            )
+        columns = [
+            getattr(Ticket, k)
+            for k in (
+                "ticket_id",
+                "subject",
+                "product_code",
+                "status",
+                "received_at",
+                "resolved_at",
+                "resolution",
+            )
+        ]
+        with self.sessionmaker() as session:
+            total = session.scalar(sa.select(sa.func.count()).select_from(Ticket).where(*filters))
+            rows = session.execute(
+                sa.select(*columns)
+                .where(*filters)
+                .order_by(Ticket.received_at.desc(), Ticket.ticket_id.desc())
+                .offset(offset)
+                .limit(limit)
+            ).mappings()
+            return {"items": [_completion_summary(dict(row)) for row in rows], "total": total}
 
     def work_list(self, dept: str | None, assignee: str | None, now: datetime) -> list[dict] | None:
         from cs_agent.db.queries import run
