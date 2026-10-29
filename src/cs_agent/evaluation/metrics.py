@@ -1,7 +1,7 @@
 # KPI 계산 (CSA-49 기준선 측정 · 담당 김동규 · Sprint 1)
 #
 # 정의·목표치는 analysis/kpi/KPI_설정안.md 를 따른다.
-#   K1 처리 지연 p95 (목표 ≤ 60초, Langfuse 기록)
+#   K1 처리 지연 p95 (목표 ≤ 60초, run_eval 이 잰 latency_s. 단계별 LLM 지연은 langfuse_report)
 #   K2 무수정 승인 가능률 (정보 안내형)
 #   K3 근거 일치율 (reference_doc_id + reference_section)
 #   K4 부서·우선순위 일치율 (부서는 100% 게이트)
