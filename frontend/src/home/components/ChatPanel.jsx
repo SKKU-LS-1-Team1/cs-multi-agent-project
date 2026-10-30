@@ -72,9 +72,15 @@ export default function ChatPanel({ messages, onSend, onReset, focusKey = 0, car
           </div>
         )}
         {messages.map((m) => (
-          <div key={m.id} className={`${m.role === 'user' ? 'bub me' : 'bub'}${m.flash ? ' flash' : ''}`} style={{ whiteSpace: 'pre-line' }}>{m.content}</div>
+          <div key={m.id} className={`${m.role === 'user' ? 'bub me' : 'bub'}${m.flash ? ' flash' : ''}`} style={{ whiteSpace: 'pre-line' }}>
+            {m.content}
+            {m.contact && (
+              <div className="bub-contact"><small>담당 기술팀</small><b>{m.contact.dept}</b><a href={`mailto:${m.contact.email}`}>{m.contact.email}</a><small>시연용 주소예요</small></div>
+            )}
+          </div>
         ))}
-        {messages.length > 0 && onInquire && <button type="button" className="chatgo" onClick={onInquire}>이 내용으로 문의 남기기</button>}
+        {/* 펌웨어 답변(기술팀 연락처 안내) 바로 뒤에는 문의서로 보내지 않는다 */}
+        {messages.length > 0 && onInquire && messages.at(-1).kind !== 'fw' && <button type="button" className="chatgo" onClick={onInquire}>이 내용으로 문의 남기기</button>}
       </div>
 
       <form className="cin" onSubmit={submit}>

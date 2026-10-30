@@ -96,7 +96,7 @@ export default function Info({ onExit, onContext, onInquire, nav, onNavDone }) {
       ]} />
 
       {stage === 0 && <FamilyStep title="어떤 제품이 궁금하세요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
-      {stage === 1 && <ModelStep s={s} allowUnknown={false} pick={(m) => setS((c) => ({ ...c, model: m, sel: null, tab: 'spec' }))} />}
+      {stage === 1 && <ModelStep s={s} allowUnknown={false} legacy={{ onInquire }} pick={(m) => setS((c) => ({ ...c, model: m, sel: null, tab: 'spec' }))} />}
 
       {stage === 2 && (!data || !mdocs ? <p className="faq-sub">자료를 불러오는 중이에요…</p> : (
         <>
@@ -106,7 +106,6 @@ export default function Info({ onExit, onContext, onInquire, nav, onNavDone }) {
               <small>{getFamily(s.family).name} · {p.code}</small>
               <h2>{p.name}</h2>
               <p>{data.master.description}</p>
-              <span className="imgnote">이미지는 제품군 대표 이미지예요</span>
             </div>
           </div>
           <QuickFacts m={data.master} />
@@ -161,6 +160,16 @@ export default function Info({ onExit, onContext, onInquire, nav, onNavDone }) {
               })}
             </div>
           )}
+
+          {/* 보던 탭에 맞는 유형으로 문의서를 연다 (사양 → 사양, 자료 → 문서 요청). 펌웨어 업데이트는 문의 유형이 없어 사양으로 받는다 */}
+          <div className="gfoot">
+            <button type="button" className="gbtn" onClick={() => onInquire?.({
+              type: tab === 'docs' ? 'MANUAL' : 'TECH_SPEC', family: s.family, model: s.model,
+              subject: `${p.name} ${tab === 'docs' ? '자료' : '사양'} 문의`.slice(0, 100),
+              body: `제품 정보의 ${tabs.find((t) => t.id === tab)?.label ?? ''} 탭을 보다가 문의드려요.\n`,
+            })}>궁금한 점이 남았어요 · 문의 남기기</button>
+            <button type="button" className="pbtn" onClick={onExit}>처음 화면으로</button>
+          </div>
         </>
       ))}
     </div>

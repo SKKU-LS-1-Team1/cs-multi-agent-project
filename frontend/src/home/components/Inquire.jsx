@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getFamily, getProduct } from '../lib/catalog.js'
+import { getFamily, getProduct, issuePool } from '../lib/catalog.js'
 import { customer, dept } from '../lib/inquiry.js'
+import { LEGACY_TYPE } from '../lib/legacy.js'
 import {
   CATEGORIES, EXAMPLES, LANGUAGES, TYPE_NAME, confOf, errorText, fieldsFor, filled, humanSize, isDate, missingOf, routeOf, typeInfo,
 } from '../lib/inquiryForm.js'
@@ -11,6 +12,7 @@ import { FamilyStep, ModelStep, PathTags, Stepper, Title, UNKNOWN } from './comm
 
 const LABELS = ['문의 선택', '필요한 정보', '내용 · 연락처', '확인 · 제출']
 const Auto = () => <em className="autot">자동 입력</em>
+const CUSTOM = '__custom'
 
 function start(draft = {}, lang) {
   const vals = { ...(draft.vals ?? {}) }
@@ -79,7 +81,8 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
   const allMissing = [...missing.map((f) => ({ key: f.key, label: f.label, stage: 2, blocking: f.blocking })), ...contentMissing]
 
   useEffect(() => {
-    onContext([...(s.family ? [`제품군: ${getFamily(s.family).name}`] : []), ...(p ? [`모델: ${p.name} (${p.code})`] : []), ...(s.type ? [`문의 유형: ${TYPE_NAME[s.type]}`] : []), `작성 단계: ${LABELS[s.stage - 1]}`])
+    // 단종·호환 문의는 모델이 아니라 제품군 단위로 상담하므로 모델 줄을 넘기지 않는다 (같은 제품군의 모델 상담 카드와 섞이지 않게)
+    onContext([...(s.family ? [`제품군: ${getFamily(s.family).name}`] : []), ...(p && s.type !== LEGACY_TYPE ? [`모델: ${p.name} (${p.code})`] : []), ...(s.type ? [`문의 유형: ${TYPE_NAME[s.type]}`] : []), `작성 단계: ${LABELS[s.stage - 1]}`])
   }, [s.family, s.model, s.type, s.stage, p, onContext]) // eslint-disable-line
 
   useEffect(() => {
@@ -138,17 +141,18 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
       const subject = s.subject.trim()
       const sent = await api.createInquiry({
         channel: 'WEB_FORM',
-        category: s.type === 'USAGE' ? null : s.type,
+        // 서버 Category 에 없는 유형(사용 방법 · 단종 호환 대체)은 비워서 보내고, 서버가 내용을 보고 분류한다
+        category: s.type === 'USAGE' || s.type === LEGACY_TYPE ? null : s.type,
         product_code: p?.code ?? null,
         subject,
-        body: `${s.body.trim()}${details ? `\n\nDetails:\n${details}` : ''}${contactLine ? `\n\nContact: ${contactLine}` : ''}`,
+        body: `${s.type === LEGACY_TYPE ? '[단종·호환·대체 문의]\n' : ''}${s.body.trim()}${details ? `\n\nDetails:\n${details}` : ''}${contactLine ? `\n\nContact: ${contactLine}` : ''}`,
         provided_fields: Object.fromEntries(provided.map((f) => [f.key, valueOf(f)])),
         thread_ref: threadRef,
         language: c.lang || null,
       })
-      rememberInquiry({ ticket_id: sent.ticket_id, thread_ref: threadRef, subject })
+      rememberInquiry({ ticket_id: sent.ticket_id, thread_ref: threadRef, subject, notify_email: s.contact.email.trim() })
       const t = {
-        demoSubmit: true, ticket_id: sent.ticket_id, received_at_utc: (sent.received_at ?? now.toISOString()).slice(0, 19) + 'Z', channel: 'WEB_FORM', language: c.lang, body_language: c.lang, customer_tier: customer.tier,
+        demoSubmit: true, notify_email: s.contact.email.trim(), ticket_id: sent.ticket_id, received_at_utc: (sent.received_at ?? now.toISOString()).slice(0, 19) + 'Z', channel: 'WEB_FORM', language: c.lang, body_language: c.lang, customer_tier: customer.tier,
         product_code: p?.code ?? '', product_name: p?.name ?? '(모델 미확인)', product_family: s.family, category_code: s.type === 'USAGE' ? '' : s.type,
         inquiry_subject: subject, inquiry_body: s.body.trim(), error_code_reported: '', fw_version_reported: '', priority: '',
         assigned_dept: route?.primary ?? 'GCS_L1', escalated: 'N', escalated_to: '', escalation_reason: '', required_info: fields.map((f) => f.key).join(';'),
@@ -181,6 +185,8 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
         <div className="done-box">
           <h2>접수 완료</h2>
           <p>문의번호 <b>{s.done.ticket_id}</b></p>
+          <p>상태가 바뀌면 <b>{s.done.notify_email}</b>로 메일을 보내 드릴 예정이에요.</p>
+          <p className="hintline">시연 화면이라 실제 메일은 아직 발송되지 않아요.</p>
           <div className="row"><button type="button" className="gbtn" onClick={onExit}>처음 화면으로</button>
             <button type="button" className="pbtn" onClick={() => onOpenMine(s.done.ticket_id)}>내 문의에서 확인하기</button></div></div>
       </div>
@@ -191,6 +197,20 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
   const cat = CATEGORIES.find((c) => c.id === s.catId)
   const page = pages[Math.min(s.page, pages.length - 1)] ?? []
   const knownFields = s.snap ? fields.filter((f) => s.snap.has(f.key)) : []
+  // 이미 알고 있는 값 중 목록에서 바로 고를 수 있는 것: 문의 유형, 제품 모델, 에러 코드·증상
+  const changeType = (type) => setS((c) => enter2({ ...c, type, catId: typeInfo(type)?.cat ?? c.catId, editing: {} }))
+  const picks = {}
+  if (s.family) {
+    const models = getFamily(s.family).models.map((c) => [c, `${getProduct(c).name} (${c})`])
+    const cur = p ? p.code : s.vals.product_model ?? ''
+    picks.product_model = {
+      value: cur, options: p ? models : [[cur, cur], ...models],
+      pick: (code) => setS((c) => enter2(applyModel({ ...c, model: code, vals: { ...c.vals, product_model: '' }, auto: { ...c.auto, product_model: false }, editing: {} }))),
+    }
+    const seen = new Map(issuePool(s.family, p?.code).map((x) => [x.code || x.symptom, x.code ? `${x.code} · ${x.symptom}` : x.symptom]))
+    const ev = s.vals.error_code ?? ''
+    picks.error_code = { value: ev, options: [...(seen.has(ev) ? [] : [[ev, ev]]), ...seen], pick: (v) => setVal('error_code', v) }
+  }
 
   return (
     <div className="flow inquire is-write">
@@ -229,17 +249,42 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
         <>
           {pages.length > 1 && <div className="pnum" aria-label={`질문 ${s.page + 1} / ${pages.length}`}>질문 <b>{s.page + 1}</b> / {pages.length}</div>}
           <Title emoji="🔎" sub={route ? `${tInfo?.label.replace(/^[^\p{L}\p{N}]+\s*/u, '')} 문의에 필요한 정보예요.` : '이 문의는 내용을 보고 담당 부서가 유형을 정해요. 제품 모델만 알려 주세요.'}>필요한 정보를 알려 주세요</Title>
-          {s.page === 0 && knownFields.length > 0 && (
+          {s.page === 0 && (knownFields.length > 0 || s.type) && (
             <div className="known"><b>✓ 이미 알고 있어요</b>
+              {/* 화면 중간에서 문의서로 넘어오면 유형을 고르는 단계를 건너뛴다 — 정해진 유형을 여기서 보여 주고 고칠 수 있게 한다 */}
+              {s.type && (
+                <>
+                  {/* 문의 유형은 고객용 4가지 중에서만 고른다. 세부 내용이 여러 개인 유형만 세부 내용을 한 줄 더 보여 준다 */}
+                  <div className="krow"><span>문의 유형</span>
+                    <select className="ksel" aria-label="문의 유형" value={typeInfo(s.type)?.cat ?? ''} onChange={(e) => changeType(CATEGORIES.find((c) => c.id === e.target.value).types[0].id)}>
+                      {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </select></div>
+                  {(CATEGORIES.find((c) => c.id === typeInfo(s.type)?.cat)?.types.length ?? 0) > 1 && (
+                    <div className="krow"><span>세부 내용</span>
+                      <select className="ksel" aria-label="세부 내용" value={s.type} onChange={(e) => changeType(e.target.value)}>
+                        {CATEGORIES.find((c) => c.id === typeInfo(s.type).cat).types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                      </select></div>
+                  )}
+                </>
+              )}
               {knownFields.map((f) => (
                 <div key={f.key} data-field={f.key}>
                   {s.editing[f.key] ? (
                     <>{renderField(f)}
                       <div className="kdone"><button type="button" className="pbtn" onClick={() => set({ editing: { ...s.editing, [f.key]: false } })}>수정 완료</button></div></>
                   ) : (
+                    picks[f.key] ? (
+                      // 모델·에러 코드는 목록에서 바로 고친다. 목록에 없으면 "직접 적기"로 입력칸을 연다.
+                      <div className="krow"><span>{f.label}{s.auto[f.key] && <Auto />}</span>
+                        <select className="ksel" aria-label={f.label} value={picks[f.key].value} onChange={(e) => (e.target.value === CUSTOM ? set({ editing: { ...s.editing, [f.key]: true } }) : picks[f.key].pick(e.target.value))}>
+                          {picks[f.key].options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                          <option value={CUSTOM}>목록에 없어요 · 직접 적기</option>
+                        </select></div>
+                    ) : (
                     <div className="krow"><span>{f.label}{s.auto[f.key] && <Auto />}</span>
                       <em>{confOf(f.key).type === 'file' ? `${(s.files[f.key] ?? []).length}개 파일` : s.vals[f.key]}</em>
                       <button type="button" onClick={() => set({ editing: { ...s.editing, [f.key]: true } })}>수정</button></div>
+                    )
                   )}
                 </div>
               ))}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getFamily, getProduct } from '../lib/catalog.js'
 import { buildGuide, purposeDesc } from '../lib/guide.js'
+import { STOP, firmwareContact } from '../lib/firmware.js'
 import { FamilyStep, ModelStep, PathTags, Stepper, Title } from './common.jsx'
 
 const LABELS = ['제품군', '모델', '목적', '안내']
@@ -29,7 +30,7 @@ function useReveal(dep) {
   return root
 }
 
-function Step({ st, n, onInquire }) {
+function Step({ st, n, family, onInquire }) {
   const [checked, setChecked] = useState({})
   const list = (items) => <ul className="gl-ul">{items.map((x) => <li key={x}>{x}</li>)}</ul>
   return (
@@ -51,6 +52,18 @@ function Step({ st, n, onInquire }) {
         {st.table && (
           <ul className="giss">{st.table.rows.map((r) => <li key={r[0]}><b>{r[0]}</b><span>{r[1]}</span><small>{r[2]}</small></li>)}</ul>
         )}
+        {st.id === 'fw' && STOP[family] && <div className="gwarn"><b>업데이트하는 동안</b><p>{STOP[family]}</p></div>}
+        {st.id === 'fw' && (() => {
+          const c = firmwareContact(family)
+          return (
+            <div className="fwc">
+              <span className="fwc-label">담당 기술팀</span>
+              <b className="fwc-dept">{c.dept}</b>
+              <a className="fwc-mail" href={`mailto:${c.email}`}>{c.email}<em>시연용 주소</em></a>
+              <p className="fwc-note">연락할 때 현재 펌웨어 버전, 운전을 멈출 수 있는 시간, 이중화·바이패스 구성을 알려 주세요.</p>
+            </div>
+          )
+        })()}
         {st.cautions?.length > 0 && <div className="gwarn"><b>주의</b>{st.cautions.map((x) => <p key={x}>{x}</p>)}</div>}
         {st.notes?.map((x) => (
           <div className="gnote" key={x}>
@@ -118,7 +131,7 @@ export default function Guide({ onExit, onContext, onInquire }) {
       ]} />
 
       {stage === 0 && <FamilyStep title="어떤 제품을 설치·사용하시나요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
-      {stage === 1 && <ModelStep s={s} allowUnknown={false} pick={(m) => setS((c) => ({ ...c, model: m, purpose: null }))} />}
+      {stage === 1 && <ModelStep s={s} allowUnknown={false} legacy={{ onInquire }} pick={(m) => setS((c) => ({ ...c, model: m, purpose: null }))} />}
 
       {stage === 2 && (
         <>
@@ -142,7 +155,7 @@ export default function Guide({ onExit, onContext, onInquire }) {
           {steps.length === 0 ? <p className="faq-sub">원문을 불러오는 중이에요…</p> : (
             <ol className="gl">
               {steps.map((st, i) => (
-                <GroupedStep key={`${s.purpose}-${st.id}`} st={st} n={i + 1} prev={steps[i - 1]} onInquire={ask} />
+                <GroupedStep key={`${s.purpose}-${st.id}`} st={st} n={i + 1} prev={steps[i - 1]} family={s.family} onInquire={ask} />
               ))}
             </ol>
           )}
@@ -158,11 +171,11 @@ export default function Guide({ onExit, onContext, onInquire }) {
 }
 
 // 원문이 묶음으로 뒷받침하는 경우(설치 가이드의 준비·설치·확인)에만 묶음 제목을 붙인다.
-function GroupedStep({ st, n, prev, onInquire }) {
+function GroupedStep({ st, n, prev, family, onInquire }) {
   return (
     <>
       {st.group && st.group !== prev?.group && <li className="gg" aria-hidden="true">{st.group}</li>}
-      <Step st={st} n={n} onInquire={onInquire} />
+      <Step st={st} n={n} family={family} onInquire={onInquire} />
     </>
   )
 }

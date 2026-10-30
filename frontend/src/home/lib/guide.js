@@ -102,7 +102,8 @@ export function buildGuide(purpose, docs) {
   }
   steps.push({ id: 'first', title: '처음 켜고 설정해요', lead: '아래 순서대로 하나씩 진행해요. 문장은 원문 그대로예요.', ordered: itemsOf(sec(IG, '5')), src: [src(IG, '5')] })
   steps.push({ id: 'precheck', title: '켜기 전에 확인해요', lead: '모두 확인한 뒤에 전원을 넣어요.', checklist: checklistOf(sec(IG, '6')), src: [src(IG, '6')] })
-  if (RN) steps.push({ id: 'fw', title: '펌웨어를 업데이트해요', lead: '최신 버전 요약과 업데이트 순서예요.', summary: itemsOf(sec(RN, '1')), ordered: itemsOf(sec(RN, '3')), cautions: itemsOf(sec(RN, '4')), src: [src(RN, '3'), src(RN, '1'), src(RN, '4')] })
+  // 펌웨어 업데이트 순서는 보여 주지 않는다. 현장 조건(24시간 가동, 정지 불가)에 따라 방법이 달라서 기술팀이 안내한다.
+  if (RN) steps.push({ id: 'fw', title: '펌웨어 업데이트는 기술팀과 진행해요', lead: '최신 버전이 나와 있어도, 전원을 끊을 수 없거나 24시간 돌아가야 하는 설비라면 바로 올리지 못할 수 있어요. 현장 조건에 맞는 방법은 기술팀이 안내해요.', summary: itemsOf(sec(RN, '1')), src: [src(RN, '1')] })
   if (MG) {
     const t = sec(MG, '1')?.blocks.find((b) => b.t === 'table')
     steps.push({ id: 'maint', title: '점검 주기를 확인해요', lead: '사용법이 아니라 유지보수 자료에 적힌 주기예요.', kv: t?.rows.map((r) => [r[0], r[1]]), src: [src(MG, '1')] })
@@ -114,7 +115,7 @@ export function buildGuide(purpose, docs) {
 export function purposeDesc(purpose, docs) {
   if (purpose === 'install') return '안전 확인부터 시운전, 전원 넣기 전 점검까지 알아보세요.'
   const parts = ['사용 범위', '처음 켜는 방법', '켜기 전 확인']
-  if (docs.RN) parts.push('펌웨어 업데이트')
+  if (docs.RN) parts.push('펌웨어 업데이트 문의처')
   if (docs.MG) parts.push('점검 주기')
   return `제품 사용에 필요한 내용을 확인해보세요. (${parts.join(' · ')})`
 }
