@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from cs_agent.agents.analysis import AnalysisError
 from cs_agent.chatbot import agent
-from cs_agent.chatbot.agent import ChatIn, respond
+from cs_agent.chatbot.agent import DECLINE_ANSWER, ChatIn, respond
 from cs_agent.config import Settings
 from cs_agent.domain import Category
 from cs_agent.llm.clients import Completion, Judgement
@@ -166,6 +166,27 @@ def test_answer_prompt_forbids_deciding_and_uses_customer_language(analysis):
     assert "ONLY the reference documents" in prompt
 
 
+def test_answer_is_formatted_for_the_chat_window(analysis):
+    writer = ScriptedWriter(
+        "## 답변\nE.OC 는 **가속 중 과전류**입니다.\n\n"
+        "* 가속 시간 `F23` 을 늘려 보세요. [TG-S100 · 3.1 E.OC]\n"
+        "* *부하*를 확인하세요.\n\n\n\n1. 다시 운전해 보세요."
+    )
+
+    out = respond(say(), [], FakeDocs([tg()]), live(writer), TABLES)
+
+    prompt = writer.prompts[0]
+    assert "Format for a narrow chat window" in prompt
+    assert "[TG-S100 · 3.1 E.OC]" in prompt  # 답변에 그대로 다는 근거 이름
+    assert DECLINE_ANSWER["ko"] in prompt  # 대화 중 엉뚱한 말에도 같은 안내
+    # 화면이 그리는 굵게 · 목록 · [문서 · 절] 만 남고 제목 · 코드 · 기울임은 걷힌다
+    assert out.answer == (
+        "답변\nE.OC 는 **가속 중 과전류**입니다.\n\n"
+        "- 가속 시간 F23 을 늘려 보세요. [TG-S100 · 3.1 E.OC]\n"
+        "- 부하를 확인하세요.\n\n1. 다시 운전해 보세요."
+    )
+
+
 def test_recurrence_after_remote_advice_hands_off_with_prefilled_form(analysis):
     history = [
         "S100 가속 중 E.OC",
@@ -231,18 +252,26 @@ def test_decision_categories_hand_off(analysis):
 OUT_OF_SCOPE = "오늘 서울 날씨 어때요?"  # 제품·제품군·에러코드가 없는 말
 
 
-@pytest.mark.parametrize("docs", [None, FakeDocs([])])
-def test_no_evidence_hands_off(analysis, docs):
-    out = respond(say(OUT_OF_SCOPE), [], docs, live(), TABLES)
+@pytest.mark.parametrize("docs", [None, FakeDocs([]), FakeDocs([tg(score=0.5)])])
+def test_out_of_scope_question_is_declined_not_handed_off(analysis, docs):
+    judge, writer = IntentJudge(), ScriptedWriter()
 
-    assert out.handoff is True
-    assert "couldn't find this" in out.handoff_reason
+    out = respond(say(OUT_OF_SCOPE), [], docs, live(writer, judge), TABLES)
+
+    assert ("our_product", OUT_OF_SCOPE) in judge.calls  # Jev 가 우리 제품이 아니라고 함
+    assert out.handoff is False and out.form is None
+    assert out.answer == DECLINE_ANSWER["ko"]
+    assert "문의주신 정보는 제공되지 않습니다" in out.answer
+    assert out.navigation.product_code is None
+    assert writer.prompts == []  # 답변을 쓰지 않는다
 
 
-def test_weak_evidence_hands_off(analysis):
-    out = respond(say(OUT_OF_SCOPE), [], FakeDocs([tg(score=0.5)]), live(), TABLES)
+def test_decline_follows_customer_language(analysis):
+    out = respond(say("What's the weather in Seoul?", language="en"), [], None, live(), TABLES)
+    assert out.answer == DECLINE_ANSWER["en"]
 
-    assert out.handoff is True
+    out = respond(say("今日の天気は?", language="ja-JP"), [], None, live(), TABLES)
+    assert out.answer == DECLINE_ANSWER["ja"]
 
 
 # 제품 이름을 잘못 쓴 말 (2026-10-30: "인터버 종류 뭐있어?" 가 근거 없음으로 상담원에게 감)
@@ -262,15 +291,6 @@ def test_misspelled_product_is_answered_with_whole_catalog(analysis):
     assert "iS7 75kW VFD" in prompt and "Solar Inverter 25kW" in prompt  # 전체 제품 목록
 
 
-def test_out_of_scope_is_still_handed_off_after_asking_jev(analysis):
-    judge = IntentJudge()
-
-    out = respond(say(OUT_OF_SCOPE), [], FakeDocs([tg(score=0.5)]), live(judge=judge), TABLES)
-
-    assert out.handoff is True
-    assert ("our_product", OUT_OF_SCOPE) in judge.calls
-
-
 def test_named_product_does_not_ask_jev_whether_it_is_ours(analysis):
     judge = IntentJudge()
 
@@ -279,12 +299,14 @@ def test_named_product_does_not_ask_jev_whether_it_is_ours(analysis):
     assert not [c for c in judge.calls if isinstance(c, tuple) and c[0] == "our_product"]
 
 
-def test_misspelled_product_is_handed_off_when_jev_is_off(analysis):
+@pytest.mark.parametrize("message", [MISSPELLED, OUT_OF_SCOPE])
+def test_no_evidence_hands_off_when_jev_is_off(analysis, message):
     llm = LLMRouter(Settings(_env_file=None), writer=ScriptedWriter())  # Jev 꺼짐(fake)
 
-    out = respond(say(MISSPELLED), [], FakeDocs([tg(score=0.6)]), llm, TABLES)
+    out = respond(say(message), [], FakeDocs([tg(score=0.6)]), llm, TABLES)
 
-    assert out.handoff is True  # 판단이 안 되면 전처럼 넘긴다
+    assert out.handoff is True  # 우리 제품인지 판단이 안 되면 전처럼 넘긴다
+    assert "couldn't find this" in out.handoff_reason
 
 
 # 근거 없음 판단 점수 (2026-10-23 운영 사고: "UPS 보증기간…" 다음 "인버터 E.OC" 가 상담원으로 감)
@@ -323,10 +345,11 @@ def test_keyword_scores_are_not_compared_with_the_threshold(analysis):
     out = respond(say(), [], ScoredDocs(lambda q: 0.3, calibrated=False), live(), TABLES)
     assert out.handoff is False
 
+    # 못 찾았으면 근거 없음 → 우리 제품 이야기도 아니라서 제공하지 않는 정보라고 안내
     out = respond(
         say(OUT_OF_SCOPE), [], ScoredDocs(lambda q: None, calibrated=False), live(), TABLES
     )
-    assert out.handoff is True and "couldn't find this" in out.handoff_reason
+    assert out.handoff is False and out.answer == DECLINE_ANSWER["ko"]
 
 
 def test_keyword_search_also_looks_with_the_product_codes(analysis):

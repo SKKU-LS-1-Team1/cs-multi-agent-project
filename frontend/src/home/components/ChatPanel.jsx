@@ -1,5 +1,6 @@
 import CuteIcon from './CuteIcon.jsx'
 import ContextCard from './ContextCard.jsx'
+import ChatText from './ChatText.jsx'
 import { useEffect, useRef, useState } from 'react'
 
 const CHIPS = ['화면에 E.OC가 떠요', '보증 기간이 남았나요?', '설치 설명서가 필요해요']
@@ -72,7 +73,9 @@ export default function ChatPanel({ messages, onSend, onReset, focusKey = 0, car
           </div>
         )}
         {messages.map((m) => (
-          <div key={m.id} className={`${m.role === 'user' ? 'bub me' : 'bub'}${m.flash ? ' flash' : ''}`} style={{ whiteSpace: 'pre-line' }}>{m.content}</div>
+          <div key={m.id} className={`${m.role === 'user' ? 'bub me' : 'bub'}${m.flash ? ' flash' : ''}`} style={m.role === 'user' ? { whiteSpace: 'pre-line' } : undefined}>
+            {m.role === 'user' ? m.content : <ChatText text={m.content} />}
+          </div>
         ))}
         {messages.length > 0 && onInquire && <button type="button" className="chatgo" onClick={onInquire}>이 내용으로 문의 남기기</button>}
       </div>
