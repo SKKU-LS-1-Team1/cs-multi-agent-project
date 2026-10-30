@@ -85,6 +85,15 @@
 #   범위 판단에만 쓴다. (2026-10-30 Jev 측정: 오타·제품군 이름 8개 YES, 날씨·냉장고·XYZ-9000·
 #   LG 에어컨 인버터·아이폰 5개 NO. 대개 0.2초, Jev 가 확신이 없어 Gemini 로 넘어가면 3~11초 —
 #   넘기려던 말에서만 묻는다.)
+# - Jev 가 우리 제품 이야기가 아니라고 하면(날씨·남의 제품 …) 상담원에게 넘기지 않고 "문의주신
+#   정보는 제공되지 않습니다"라고 답한다 (DECLINE_ANSWER, 고객 언어 고정 문장). 엔지니어가 답할 일이
+#   아니다. Jev 가 판단하지 못했을 때만 전처럼 근거 없음으로 넘긴다. 제품 이야기를 하던 대화 중에
+#   엉뚱한 말이 오면 대화의 제품 때문에 범위 안으로 보이므로, 답변 프롬프트에도 같은 문장으로
+#   답하라고 적는다 (Jev 를 매번 부르지 않는다).
+# - 답변 모양: 좁은 채팅 창에서 읽기 쉽게 첫 줄에 바로 답하고, 여러 제품·값은 "- " 목록, 단계는
+#   "1. " 목록, 핵심 값·제품명·에러코드만 **굵게**, 근거는 줄 끝에 [문서 · 절] 로 단다
+#   (CHAT_PROMPT). 화면(home/components/ChatText.jsx)이 굵게 · 목록 · [문서 · 절] 만 그리므로
+#   제목·코드 표시 등 나머지 마크다운은 _chat_text 가 걷어 낸다.
 import logging
 import re
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -93,7 +102,6 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from pydantic import BaseModel, Field
 
 from cs_agent.agents.analysis import AnalysisError, classify, extract, extract_details
-from cs_agent.agents.drafting import plain_text
 from cs_agent.agents.info_request import in_language, language_name
 from cs_agent.agents.retrieval import (
     Retriever,
@@ -255,6 +263,9 @@ CHAT_PROMPT = """You are the customer-support chatbot of an industrial electrica
 Answer the customer's latest message in {language}.
 
 Rules:
+- If the latest message is not about our products or their use at all (for example the weather,
+  news or another company's product), reply with exactly this text and nothing else:
+  {decline}
 - Use ONLY the reference documents below. If they do not contain the answer, say you could not
   find it and that a support engineer can help.
 - If the customer has not asked a specific question yet (a greeting, only a product or topic
@@ -264,10 +275,15 @@ Rules:
   products are listed and none is chosen, ask which one.
 - Never confirm a quotation amount, approve a warranty or a return, or state a definite root cause.
   Offer to open the inquiry form instead.
-- Be concise: a few sentences. When you give a value or a step, name the document section it
-  comes from.
-- Plain text only: no Markdown (no **bold**, # headings or backticks). The chat window shows
-  it as is.
+- Be concise. Answer directly in the first sentence.
+- Format for a narrow chat window:
+  - Put several products, values or options on separate lines starting with "- ", and steps
+    on numbered lines ("1. ", "2. "). One item per line. Leave a blank line before and after
+    a list.
+  - Make only key values, product names and error codes **bold**. No headings, tables, code
+    or any other Markdown.
+  - When you use a document section, put its label exactly as in the reference documents, such
+    as [TG-S100 · 3.1 E.OC], at the very end of that line, after the final punctuation.
 - Do not repeat steps the assistant already advised earlier in the conversation. Build on them.
 
 Product: {product}
@@ -360,6 +376,55 @@ HANDOFF_FALLBACK = {
     "ar": "سيتولى مهندس الدعم متابعة طلبك من هنا. سأفتح نموذج الاستفسار بما ناقشناه حتى الآن.",
 }
 
+# 우리 제품 이야기가 아닌 말에 대한 안내 (위 메모). drafting._CUSTOMER_LANGUAGES 와 같은 언어
+DECLINE_ANSWER = {
+    "en": "Sorry, the information you asked about is not provided here."
+    " Please ask about our products, such as specifications, installation, error codes,"
+    " firmware, warranty or manuals.",
+    "ko": "죄송합니다. 문의주신 정보는 제공되지 않습니다."
+    " 저희 제품의 사양, 설치, 에러 코드, 펌웨어, 보증, 매뉴얼에 대해 문의해 주세요.",
+    "ja": "申し訳ございません。お問い合わせの情報はご提供しておりません。"
+    "当社製品の仕様、設置、エラーコード、ファームウェア、保証、マニュアルについてお問い合わせください。",
+    "zh": "抱歉，我们不提供您所咨询的信息。"
+    "请咨询我们产品的规格、安装、错误代码、固件、保修或手册。",
+    "es": "Lo sentimos, aquí no ofrecemos la información que ha solicitado."
+    " Consúltenos sobre nuestros productos: especificaciones, instalación, códigos de error,"
+    " firmware, garantía o manuales.",
+    "fr": "Désolé, les informations demandées ne sont pas fournies ici."
+    " Interrogez-nous sur nos produits : caractéristiques, installation, codes d'erreur,"
+    " firmware, garantie ou manuels.",
+    "de": "Leider stellen wir die angefragten Informationen hier nicht bereit."
+    " Fragen Sie uns gern zu unseren Produkten: technische Daten, Installation, Fehlercodes,"
+    " Firmware, Garantie oder Handbücher.",
+    "it": "Spiacenti, le informazioni richieste non sono disponibili qui."
+    " Ci chieda dei nostri prodotti: specifiche, installazione, codici di errore, firmware,"
+    " garanzia o manuali.",
+    "pt": "Desculpe, as informações solicitadas não são fornecidas aqui."
+    " Pergunte-nos sobre os nossos produtos: especificações, instalação, códigos de erro,"
+    " firmware, garantia ou manuais.",
+    "ru": "К сожалению, запрошенная информация здесь не предоставляется."
+    " Задайте вопрос о нашей продукции: характеристики, монтаж, коды ошибок, прошивка,"
+    " гарантия или руководства.",
+    "tr": "Üzgünüz, sorduğunuz bilgi burada sağlanmıyor."
+    " Ürünlerimizin teknik özellikleri, kurulumu, hata kodları, yazılımı, garantisi veya"
+    " kılavuzları hakkında soru sorabilirsiniz.",
+    "pl": "Przepraszamy, nie udostępniamy tutaj informacji, o które pytasz."
+    " Zapytaj o nasze produkty: specyfikacje, instalację, kody błędów, oprogramowanie,"
+    " gwarancję lub instrukcje.",
+    "vi": "Xin lỗi, thông tin bạn hỏi không được cung cấp tại đây."
+    " Vui lòng hỏi về sản phẩm của chúng tôi như thông số kỹ thuật, lắp đặt, mã lỗi,"
+    " firmware, bảo hành hoặc tài liệu hướng dẫn.",
+    "id": "Maaf, informasi yang Anda tanyakan tidak tersedia di sini."
+    " Silakan tanyakan tentang produk kami, seperti spesifikasi, pemasangan, kode kesalahan,"
+    " firmware, garansi, atau manual.",
+    "th": "ขออภัย เราไม่ได้ให้ข้อมูลที่คุณสอบถามไว้ที่นี่"
+    " กรุณาสอบถามเกี่ยวกับผลิตภัณฑ์ของเรา เช่น ข้อมูลจำเพาะ การติดตั้ง รหัสข้อผิดพลาด"
+    " เฟิร์มแวร์ การรับประกัน หรือคู่มือ",
+    "ar": "عذرًا، المعلومات التي طلبتها غير متوفرة هنا."
+    " يمكنك السؤال عن منتجاتنا مثل المواصفات أو التركيب أو رموز الأخطاء أو البرامج الثابتة"
+    " أو الضمان أو الأدلة.",
+}
+
 
 class ChatIn(BaseModel):
     session_id: str
@@ -426,12 +491,15 @@ def respond(
     )
     in_scope = bool(quick.product_code or quick.product_family or find_error_codes(chat.message))
     # 제품 이름을 잘못 쓰면("인터버") 위에서 못 찾는다. 넘기기 직전에만 Jev 에게 묻는다 (위 메모)
-    misnamed = (
-        decision.code == "no_evidence"
-        and current != GENERAL
-        and not in_scope
-        and _about_our_products(llm, query, tables)
+    ours = (
+        _about_our_products(llm, query, tables)
+        if decision.code == "no_evidence" and current != GENERAL and not in_scope
+        else None
     )
+    if ours is False:
+        # 우리 제품 이야기가 아니다 → 넘기지 않고 제공하지 않는 정보라고 답한다 (위 메모)
+        return ChatOut(answer=_decline_answer(language), navigation=Navigation())
+    misnamed = ours is True
     if decision.code == "no_evidence" and (current == GENERAL or in_scope or misnamed):
         # 질문 전이거나 우리 제품 이야기다 → 근거 없음으로 넘기지 않고 답한다 (위 메모)
         decision = HandoffDecision(handoff=False)
@@ -450,6 +518,7 @@ def respond(
         evidence=_evidence_block(evidence, _product_facts(quick, tables), policy),
         conversation=_conversation(history) or "(first message)",
         message=chat.message,
+        decline=_decline_answer(language),
     )
 
     if decision.handoff:
@@ -474,7 +543,7 @@ def respond(
             form=form,
         )
 
-    answer = plain_text(llm.write("chat_answer", prompt))
+    answer = _chat_text(llm.write("chat_answer", prompt))
     extraction = _with_family(
         _with_viewing(_joined(full, quick, EXTRACT_GRACE_S), viewing, tables), said
     )
@@ -720,8 +789,8 @@ def _decision_requested(llm: LLMRouter, message: str) -> bool:
     return judgement.model == "fake" or judgement.answer != INFO
 
 
-def _about_our_products(llm: LLMRouter, message: str, tables: RefTables) -> bool:
-    """제품 이름을 잘못 쓴 말도 우리 제품 이야기인지. 판단이 안 되면 아니라고 본다 (넘기는 쪽)."""
+def _about_our_products(llm: LLMRouter, message: str, tables: RefTables) -> bool | None:
+    """제품 이름을 잘못 쓴 말도 우리 제품 이야기인지. 판단이 안 되면 None (전처럼 넘긴다)."""
     products = "\n".join(
         f"- {family}: " + ", ".join(names) for family, names in _families(tables).items()
     )
@@ -733,8 +802,29 @@ def _about_our_products(llm: LLMRouter, message: str, tables: RefTables) -> bool
         )
     except Exception as e:
         _LOGGER.warning("챗봇 우리 제품 판단 실패: %s", e)
-        return False
-    return judgement.model != "fake" and judgement.answer == YES
+        return None
+    return None if judgement.model == "fake" else judgement.answer == YES
+
+
+def _decline_answer(language: str) -> str:
+    """우리 제품 이야기가 아닌 말에 대한 고정 안내 (고객 언어, 모르는 언어는 영어)."""
+    code = language.lower().replace("_", "-").split("-", 1)[0]
+    return DECLINE_ANSWER.get(code, DECLINE_ANSWER["en"])
+
+
+_MD_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+", re.M)
+_MD_BULLET = re.compile(r"^([ \t]*)[*•][ \t]+", re.M)
+# 닫는 * 뒤에는 조사가 바로 붙는다 ("*부하*를")
+_MD_EMPHASIS = re.compile(r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?!\*)")
+
+
+def _chat_text(text: str) -> str:
+    """채팅 창 글: 굵게(**) · 목록(- , 1.) · [문서 · 절] 만 남긴다 (화면이 그것만 그린다)."""
+    text = _MD_HEADING.sub("", text)
+    text = _MD_BULLET.sub(r"\1- ", text)  # * · • 목록은 - 로
+    text = _MD_EMPHASIS.sub(r"\1", text)
+    text = text.replace("`", "")
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _partial_answer(prompt: str, reason: str, llm: LLMRouter) -> str | None:
@@ -742,7 +832,7 @@ def _partial_answer(prompt: str, reason: str, llm: LLMRouter) -> str | None:
     if not llm.enabled:
         return None
     try:
-        return plain_text(llm.write("chat_partial", prompt + PARTIAL_PROMPT.format(reason=reason)))
+        return _chat_text(llm.write("chat_partial", prompt + PARTIAL_PROMPT.format(reason=reason)))
     except Exception as e:  # RateLimited 포함 — 전환 안내로 대신한다
         _LOGGER.warning("결정 유형 부분 답변 실패: %s", type(e).__name__)
         return None
