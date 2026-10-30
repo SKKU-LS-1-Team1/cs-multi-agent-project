@@ -11,8 +11,13 @@ let infoCache, docsCache
 const loadInfo = () => (infoCache ??= import('../data/info.json').then((m) => m.default))
 const loadDocs = () => (docsCache ??= import('../data/docs.json').then((m) => m.default))
 
-export const fmtSize = (n) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`)
-const DOC_ICON = { DS: '📊', IG: '🛠️', MG: '🧰', RN: '🔄', TG: '🔎' }
+// 다운로드 아이콘 (원 안의 아래 화살표). 버튼 글자색을 따른다.
+export const DownloadIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="currentColor" /><path d="M12 6v8M8.5 10.5 12 14l3.5-3.5M8 17.5h8" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+)
+// 원문 PDF (scripts/build_pdfs.py 가 원문 Markdown 을 그대로 옮겨 만든다)
+export const pdfUrl = (name) => `${import.meta.env.BASE_URL}downloads/pdf/${name}.pdf`
+export const PdfButton = ({ name }) => <a className="pdfbtn" href={pdfUrl(name)} download><DownloadIcon />PDF 다운로드</a>
 
 function QuickFacts({ m }) {
   const rows = [
@@ -127,20 +132,14 @@ export default function Info({ onExit, onContext, onInquire, nav, onNavDone }) {
           )}
 
           {tab === 'docs' && (
-            <div className="ilist">
-              {DOC_ORDER.filter((t) => mdocs[t]).map((t) => {
-                const d = mdocs[t]
-                return (
-                  <div key={t} className="dcard">
-                    <div className="dmain">
-                      <span className="di">{DOC_ICON[t]}</span>
-                      <span><b>{DOC_LABEL[t]}</b><small>{d.title}</small><em>{d.id} · Rev. {d.revision}</em></span>
-                    </div>
-                    <a className="dl" href={`${import.meta.env.BASE_URL}${d.file}`} download>⬇️ 원본 다운로드<small>{d.fmt} · {fmtSize(d.bytes)}</small></a>
-                  </div>
-                )
-              })}
-              <p className="hintline">원본은 Markdown(.md) 파일만 있어요. PDF 원본은 제공 자료에 없어요.</p>
+            <div className="dlist">
+              {/* PDF 는 설치 가이드와 사용 방법 가이드만 있다(사용 방법 가이드 = 사용 방법 안내가 쓰는 문서를 한 파일로 묶은 것). 나머지는 기존 Markdown 원본을 내려받는다 */}
+              {mdocs.IG && <div className="drow"><b>설치 가이드</b><PdfButton name={mdocs.IG.id} /></div>}
+              {mdocs.IG && <div className="drow"><b>사용 방법 가이드</b><PdfButton name={`${s.model}-usage`} /></div>}
+              {DOC_ORDER.filter((t) => t !== 'IG' && mdocs[t]).map((t) => (
+                <div key={t} className="drow"><b>{DOC_LABEL[t]}</b>
+                  <a className="pdfbtn" href={`${import.meta.env.BASE_URL}${mdocs[t].file}`} download><DownloadIcon />원본 다운로드 (.md)</a></div>
+              ))}
             </div>
           )}
 

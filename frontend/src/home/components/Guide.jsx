@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getFamily, getProduct } from '../lib/catalog.js'
 import { buildGuide, purposeDesc } from '../lib/guide.js'
+import { PdfButton } from './Info.jsx'
 import { STOP, firmwareContact } from '../lib/firmware.js'
 import { FamilyStep, ModelStep, PathTags, Stepper, Title } from './common.jsx'
 
@@ -151,7 +152,9 @@ export default function Guide({ onExit, onContext, onInquire }) {
 
       {stage === 3 && (
         <div className="gview" ref={rootRef}>
-          <Title sub={`${getProduct(s.model).name} (${getProduct(s.model).code})`}>{PURPOSE[s.purpose]}</Title>
+          {/* 원문 PDF: scripts/build_pdfs.py 가 원문(Markdown)을 그대로 옮겨 만든다. 설치는 설치 가이드, 사용은 사용 안내가 쓰는 문서 묶음 */}
+          <Title sub={<span className="gsub">{getProduct(s.model).name} ({getProduct(s.model).code})
+            <PdfButton name={s.purpose === 'install' ? mine.IG.id : `${s.model}-usage`} /></span>}>{PURPOSE[s.purpose]}</Title>
           {steps.length === 0 ? <p className="faq-sub">원문을 불러오는 중이에요…</p> : (
             <ol className="gl">
               {steps.map((st, i) => (
