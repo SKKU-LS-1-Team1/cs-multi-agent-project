@@ -14,8 +14,7 @@ const wrap = (x) => ((((x + N / 2) % N) + N) % N) - N / 2
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v))
 const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
-// focus: 왼쪽 제품 목록에서 누른 제품군. 바뀔 때마다(같은 제품군을 다시 눌러도 n 이 바뀐다) 그쪽으로 돌린다.
-export default function FamilyCarousel({ selected, onPick, focus }) {
+export default function FamilyCarousel({ selected, onPick }) {
   const start = Math.max(0, families.findIndex((f) => f.id === selected))
   // pos: 연속 위치(소수). 정수에 있으면 그 제품이 정중앙. 한 바퀴 넘어도 끊기지 않게 모듈러 없이 누적한다.
   const [pos, setPos] = useState(start)
@@ -88,10 +87,6 @@ export default function FamilyCarousel({ selected, onPick, focus }) {
 
   const index = mod(Math.round(pos))
   const cur = families[index]
-  useEffect(() => {
-    const i = focus ? families.findIndex((f) => f.id === focus.family) : -1
-    if (i >= 0) goTo(Math.round(s.current.target) + wrap(i - Math.round(s.current.target)))
-  }, [focus]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="car" role="group" aria-roledescription="carousel" aria-label="제품군" onKeyDown={onKey}>

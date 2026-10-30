@@ -186,20 +186,6 @@ a { color: inherit; text-decoration: none; }
 .car-jump button.sel { background: var(--ls-blue); color: #fff; }
 .car-jump button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-/* 제품군 고르기 왼쪽 제품 목록 (CSA-39 고객 화면 shell.css 의 .cs-side 그대로). 처음엔 접힌 막대, 펼치면 260px 목록.
-   막대 높이는 캐러셀에 맞추고 목록은 그 안에서 스크롤한다 (contain: size). 휴대폰 폭에서는 목록 없음. */
-.fpick { display: flex; }
-.fpick-main { flex: 1; min-width: 0; }
-.cs-side { flex: none; contain: size; display: flex; flex-direction: column; min-height: 0; width: 64px; border-right: 1px solid var(--grey-200); background: var(--grey-50); }
-.cs-side.is-tree { width: 260px; background: #fff; }
-.cs-side > .ps-tree { flex: 1; border-right: 0; }
-.cs-side-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 4px; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 600; color: var(--grey-700); cursor: pointer; }
-.cs-side-btn > span:first-child { font-size: 18px; color: var(--ls-blue); }
-.cs-side-btn:hover { color: var(--ls-blue); background: var(--ls-blue-50); }
-.cs-side.is-tree .cs-side-btn { flex-direction: row; justify-content: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--grey-200); }
-.cs-side.is-tree .cs-side-btn > span:first-child { font-size: 15px; }
-@media (max-width: 899px) { .cs-side { display: none; } }
-
 /* ---- 설치 · 사용 방법 ---- */
 .purp { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .purp .opt { padding: 26px 24px; }

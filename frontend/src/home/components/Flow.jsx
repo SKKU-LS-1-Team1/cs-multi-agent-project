@@ -172,8 +172,7 @@ export default function Flow({ onExit, onContext, onHandoff, onInquire }) {
         { key: '모델', label: s.model ? (s.model === UNKNOWN ? '모델 모름' : getProduct(s.model).name) : '' },
         { key: '증상', label: s.code && s.code !== NONE ? s.code : (s.issue ? s.issue.symptom : '') },
       ]} />
-      {step === 0 && <FamilyStep s={{ ...s, family: pending ?? s.hl }} pick={setPending}
-        pickModel={(f, m) => setS((c) => settle({ ...c, hl: f, family: f, model: m, code: null, issue: null, tried: [], result: null }))} />}
+      {step === 0 && <FamilyStep s={{ ...s, family: pending ?? s.hl }} pick={setPending} />}
       {step === 1 && <ModelStep s={s} pick={pickModel} />}
       {step === 2 && (s.code === null ? <CodeStep s={s} pick={pickCode} /> : <SymptomStep s={s} pick={pickIssue} />)}
       {sol && <Solution key={s.issue.id} s={s} set={merge} onHandoff={onHandoff} onExit={onExit} onInquire={onInquire} />}
