@@ -180,7 +180,7 @@ export default function Biz({ onExit, onContext, onSend, onInquire }) {
         { key: '업무', label: s.task ? TASKS.find((x) => x.id === s.task).label : '', onClick: stage > 2 ? () => goStage(2) : undefined },
       ]} />
 
-      {stage === 0 && <FamilyStep title="어떤 제품에 대해 문의하세요?" emoji="🧾" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
+      {stage === 0 && <FamilyStep title="어떤 제품에 대해 문의하세요?" emoji="🧾" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} pickModel={(f, m) => setS({ ...INIT, hl: f, family: f, model: m })} />}
       {stage === 1 && <ModelStep s={s} allowUnknown={false} pick={(m) => setS((c) => ({ ...INIT, hl: c.hl, family: c.family, model: m }))} />}
       {stage === 2 && (
         <>

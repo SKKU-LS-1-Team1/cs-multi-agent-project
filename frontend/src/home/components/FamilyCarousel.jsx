@@ -14,9 +14,8 @@ const wrap = (x) => ((((x + N / 2) % N) + N) % N) - N / 2
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v))
 const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
-// focus: { id, n } — 바깥(제품 목록 탭)에서 그 제품군으로 돌린다. n 이 바뀔 때마다 (같은 제품군을 다시 눌러도).
-// onChange(id): 가운데 제품군이 바뀌면 알린다 (목록에서 지금 제품군을 표시).
-export default function FamilyCarousel({ selected, onPick, focus, onChange }) {
+// focus: 왼쪽 제품 목록에서 누른 제품군. 바뀔 때마다(같은 제품군을 다시 눌러도 n 이 바뀐다) 그쪽으로 돌린다.
+export default function FamilyCarousel({ selected, onPick, focus }) {
   const start = Math.max(0, families.findIndex((f) => f.id === selected))
   // pos: 연속 위치(소수). 정수에 있으면 그 제품이 정중앙. 한 바퀴 넘어도 끊기지 않게 모듈러 없이 누적한다.
   const [pos, setPos] = useState(start)
@@ -89,20 +88,17 @@ export default function FamilyCarousel({ selected, onPick, focus, onChange }) {
 
   const index = mod(Math.round(pos))
   const cur = families[index]
-  // 가까운 쪽으로 돌아 그 제품군에 선다
-  const turnTo = (i) => goTo(Math.round(s.current.target) + wrap(i - Math.round(s.current.target)))
   useEffect(() => {
-    const i = focus ? families.findIndex((f) => f.id === focus.id) : -1
-    if (i >= 0) turnTo(i)
-  }, [focus?.n]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { onChange?.(cur.id) }, [cur.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    const i = focus ? families.findIndex((f) => f.id === focus.family) : -1
+    if (i >= 0) goTo(Math.round(s.current.target) + wrap(i - Math.round(s.current.target)))
+  }, [focus]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="car" role="group" aria-roledescription="carousel" aria-label="제품군" onKeyDown={onKey}>
       <div className="car-jump" role="group" aria-label="제품군 바로 보기">
         {families.map((f, i) => (
           <button type="button" key={f.id} className={i === index ? 'sel' : ''} aria-pressed={i === index}
-            onClick={() => turnTo(i)}>
+            onClick={() => goTo(Math.round(s.current.target) + wrap(i - Math.round(s.current.target)))}>
             {f.name}
           </button>
         ))}

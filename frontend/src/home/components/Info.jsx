@@ -95,7 +95,7 @@ export default function Info({ onExit, onContext, onInquire, nav, onNavDone }) {
         { key: '모델', label: s.model ? getProduct(s.model).name : '' },
       ]} />
 
-      {stage === 0 && <FamilyStep title="어떤 제품이 궁금하세요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
+      {stage === 0 && <FamilyStep title="어떤 제품이 궁금하세요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} pickModel={(f, m) => setS({ ...INIT, hl: f, family: f, model: m })} />}
       {stage === 1 && <ModelStep s={s} allowUnknown={false} pick={(m) => setS((c) => ({ ...c, model: m, sel: null, tab: 'spec' }))} />}
 
       {stage === 2 && (!data || !mdocs ? <p className="faq-sub">자료를 불러오는 중이에요…</p> : (

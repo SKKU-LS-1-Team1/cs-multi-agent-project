@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { getFamily, getProduct } from '../lib/catalog.js'
+import ProductTree from '../../pages/customer/ProductTree'
 import FamilyCarousel from './FamilyCarousel.jsx'
-import ProductList from './ProductList.jsx'
 import CuteIcon from './CuteIcon.jsx'
 
 export const STEPS = ['제품군', '모델', '증상', '해결']
@@ -40,18 +40,27 @@ export function Stepper({ step, onGo, labels = STEPS }) {
   )
 }
 
-// 제품군 고르기: 회전 캐러셀 + 왼쪽 "제품 목록" 탭 (ProductList). 목록은 캐러셀을 돌리기만 하고,
-// 고르는 것은 지금처럼 캐러셀의 "이 제품군 선택하기" 버튼이다.
-export function FamilyStep({ s, pick, title = '어떤 제품에 문제가 생겼나요?', emoji }) {
+// 제품군 고르기: 왼쪽 제품 목록(CSA-39 고객 화면의 ProductTree · 접는 막대 그대로) + 회전 캐러셀.
+// 목록은 처음엔 접혀 있고(얇은 막대) 눌러서 펼친다. 제품군 이름을 누르면 캐러셀이 그 제품군으로 돌고,
+// 모델을 누르면 그 모델을 바로 고른다 (pickModel(제품군, 모델)).
+export function FamilyStep({ s, pick, pickModel, title = '어떤 제품에 문제가 생겼나요?', emoji }) {
+  const [treeOpen, setTreeOpen] = useState(false)
   const [focus, setFocus] = useState(null)
-  const [current, setCurrent] = useState(s.family)
+  const focusFamily = (family) => setFocus((f) => ({ family, n: (f?.n ?? 0) + 1 }))
+  const selectModel = (code) => { const p = getProduct(code); if (p) pickModel(p.family, code) }
   return (
     <>
       <Title>{title}</Title>
       <div className="fpick">
-        <ProductList current={current} onFamily={(id) => setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }))} />
+        <div className={`cs-side${treeOpen ? ' is-tree' : ''}`}>
+          <button type="button" className="cs-side-btn" aria-controls="cs-tree" aria-expanded={treeOpen} onClick={() => setTreeOpen((o) => !o)}>
+            <span aria-hidden="true">{treeOpen ? '«' : '☰'}</span>
+            <span>{treeOpen ? '목록 접기' : '제품 목록'}</span>
+          </button>
+          {treeOpen && <ProductTree id="cs-tree" selected={s.model ?? null} onSelect={selectModel} onFamily={focusFamily} />}
+        </div>
         <div className="fpick-main">
-          <FamilyCarousel selected={s.family} onPick={pick} focus={focus} onChange={setCurrent} />
+          <FamilyCarousel selected={s.family} onPick={pick} focus={focus} />
         </div>
       </div>
     </>

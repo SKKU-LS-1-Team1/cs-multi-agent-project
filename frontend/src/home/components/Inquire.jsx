@@ -220,7 +220,8 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
                 <button type="button" key={t.id} className="opt big" onClick={() => set({ type: t.id })}><b>{t.label}</b><small>{t.sub}</small></button>))}</div>
             </>
           )}
-          {s.type && !s.family && <FamilyStep title="어떤 제품에 대한 문의인가요?" emoji="📝" s={{ family: s.hl }} pick={(f) => set({ family: f, hl: f, model: null })} />}
+          {s.type && !s.family && <FamilyStep title="어떤 제품에 대한 문의인가요?" emoji="📝" s={{ family: s.hl }} pick={(f) => set({ family: f, hl: f, model: null })}
+            pickModel={(f, m) => setS((c) => enter2(applyModel({ ...c, family: f, hl: f, model: m })))} />}
           {s.type && s.family && !s.model && <ModelStep s={s} pick={(m) => setS((c) => enter2(applyModel({ ...c, model: m })))} />}
         </>
       )}
