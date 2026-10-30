@@ -117,7 +117,7 @@ export default function Guide({ onExit, onContext, onInquire }) {
         { key: '목적', label: s.purpose ? PURPOSE[s.purpose] : '' },
       ]} />
 
-      {stage === 0 && <FamilyStep title="어떤 제품을 설치·사용하시나요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} pickModel={(f, m) => setS({ ...INIT, hl: f, family: f, model: m })} />}
+      {stage === 0 && <FamilyStep title="어떤 제품을 설치·사용하시나요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
       {stage === 1 && <ModelStep s={s} allowUnknown={false} pick={(m) => setS((c) => ({ ...c, model: m, purpose: null }))} />}
 
       {stage === 2 && (
