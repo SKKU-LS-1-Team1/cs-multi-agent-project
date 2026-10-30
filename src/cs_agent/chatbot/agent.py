@@ -77,6 +77,14 @@
 #   FAMILY_TERMS 로 제품군을 찾아 채운다 → 화면은 FAMILY_ONLY("제품 선택" 버튼), 답변은 그 제품군
 #   제품 목록을 맥락으로 쓴다. 여러 제품군에 걸리면 가장 긴 낱말이 이기고, 같은 길이로 갈리면
 #   비운다.
+# - 제품 이름을 잘못 쓴 말("인터버 종류 뭐있어?")은 FAMILY_TERMS·규칙 추출에 안 걸려 범위 밖으로
+#   보이고 근거 없음으로 넘어갔다 (2026-10-30). LLM 추출도 모델명이 없으면 제품군을 비운다. 그래서
+#   근거 없음으로 넘기기 직전에만 Jev 에게 우리 제품 이야기인지 묻는다 (OUR_PRODUCT_PROMPT, 판단이
+#   안 되면 넘긴다). 그렇다면 넘기지 않고, 제품군을 모르니 답변 프롬프트에 전체 제품 목록을 넣어
+#   Gemini 가 고르게 한다. Jev 에게 제품군을 고르게 하면 "인터버"를 태양광(PV)으로 고르기도 해서
+#   범위 판단에만 쓴다. (2026-10-30 Jev 측정: 오타·제품군 이름 8개 YES, 날씨·냉장고·XYZ-9000·
+#   LG 에어컨 인버터·아이폰 5개 NO. 대개 0.2초, Jev 가 확신이 없어 Gemini 로 넘어가면 3~11초 —
+#   넘기려던 말에서만 묻는다.)
 import logging
 import re
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -289,6 +297,21 @@ Customer's message:
 {message}
 """
 
+YES, NO = "YES", "NO"
+OUR_PRODUCT_PROMPT = """A customer wrote the message below to the support chat of an industrial
+electrical equipment maker. Is the customer asking about our products listed below? The customer
+may misspell product names.
+
+YES: the message is about one of these products or product families.
+NO: the message is about something else, such as another company's product or an unrelated topic.
+
+Our products:
+{products}
+
+Customer's recent messages (latest last):
+{message}
+"""
+
 PARTIAL_PROMPT = """
 
 Part of this message needs a decision by our team: {reason}
@@ -402,7 +425,14 @@ def respond(
         else True,
     )
     in_scope = bool(quick.product_code or quick.product_family or find_error_codes(chat.message))
-    if decision.code == "no_evidence" and (current == GENERAL or in_scope):
+    # 제품 이름을 잘못 쓰면("인터버") 위에서 못 찾는다. 넘기기 직전에만 Jev 에게 묻는다 (위 메모)
+    misnamed = (
+        decision.code == "no_evidence"
+        and current != GENERAL
+        and not in_scope
+        and _about_our_products(llm, query, tables)
+    )
+    if decision.code == "no_evidence" and (current == GENERAL or in_scope or misnamed):
         # 질문 전이거나 우리 제품 이야기다 → 근거 없음으로 넘기지 않고 답한다 (위 메모)
         decision = HandoffDecision(handoff=False)
 
@@ -412,7 +442,7 @@ def respond(
     evidence = finalize_evidence(candidates, quick, k=CHAT_EVIDENCE_K, category=category)
     policy = doc_sections(POLICY_DOCS[category]) if category in POLICY_DOCS else []
 
-    product_context = _product_context(quick, tables)
+    product_context = _product_context(quick, tables, whole_catalog=misnamed)
     prompt = CHAT_PROMPT.format(
         language=language_name(language),
         product=product_context,
@@ -570,15 +600,28 @@ def _with_family(extraction: Extraction, texts: list[str]) -> Extraction:
     return extraction.model_copy(update={"product_family": family}) if family else extraction
 
 
-def _product_context(extraction: Extraction, tables: RefTables) -> str:
-    """답변 프롬프트의 Product 줄: 제품 이름, 제품군만 알면 그 제품군 제품 목록."""
+def _product_context(extraction: Extraction, tables: RefTables, whole_catalog: bool = False) -> str:
+    """답변 프롬프트의 Product 줄: 제품 이름, 제품군만 알면 그 제품군 제품 목록,
+    우리 제품 이야기인데 제품군도 모르면(whole_catalog) 전체 제품 목록."""
     product = tables.products.get(extraction.product_code or "")
     if product:
         return product.name
     names = [p.name for p in tables.products.values() if p.family == extraction.product_family]
     if names:
         return f"not chosen yet; {extraction.product_family} products: " + ", ".join(names)
+    if whole_catalog:
+        return "not chosen yet; " + "; ".join(
+            f"{family} products: " + ", ".join(names) for family, names in _families(tables).items()
+        )
     return "unknown"
+
+
+def _families(tables: RefTables) -> dict[str, list[str]]:
+    """제품군별 제품 이름 (기준표 순서)."""
+    families: dict[str, list[str]] = {}
+    for p in tables.products.values():
+        families.setdefault(p.family, []).append(p.name)
+    return families
 
 
 def _navigation(
@@ -675,6 +718,23 @@ def _decision_requested(llm: LLMRouter, message: str) -> bool:
         _LOGGER.warning("챗봇 결정 필요 판단 실패: %s", e)
         return True
     return judgement.model == "fake" or judgement.answer != INFO
+
+
+def _about_our_products(llm: LLMRouter, message: str, tables: RefTables) -> bool:
+    """제품 이름을 잘못 쓴 말도 우리 제품 이야기인지. 판단이 안 되면 아니라고 본다 (넘기는 쪽)."""
+    products = "\n".join(
+        f"- {family}: " + ", ".join(names) for family, names in _families(tables).items()
+    )
+    try:
+        judgement = llm.judge(
+            "chat_our_product",
+            OUR_PRODUCT_PROMPT.format(products=products, message=message),
+            [YES, NO],
+        )
+    except Exception as e:
+        _LOGGER.warning("챗봇 우리 제품 판단 실패: %s", e)
+        return False
+    return judgement.model != "fake" and judgement.answer == YES
 
 
 def _partial_answer(prompt: str, reason: str, llm: LLMRouter) -> str | None:

@@ -49,6 +49,10 @@ class IntentJudge:
         self.calls: list[str] = []
 
     def judge(self, prompt, options):
+        if "Our products:\n" in prompt:  # 우리 제품 이야기인지 (OUR_PRODUCT_PROMPT)
+            message = prompt.rsplit("(latest last):\n", 1)[1]
+            self.calls.append(("our_product", message.strip()))
+            return Judgement("YES" if "인터버" in message else "NO", 0.95, self.name)
         if "Customer's message:\n" in prompt:  # 결정 필요 판단 (DECISION_PROMPT)
             message = prompt.rsplit("Customer's message:\n", 1)[1]
             self.calls.append(("decision", message.strip()))
@@ -239,6 +243,48 @@ def test_weak_evidence_hands_off(analysis):
     out = respond(say(OUT_OF_SCOPE), [], FakeDocs([tg(score=0.5)]), live(), TABLES)
 
     assert out.handoff is True
+
+
+# 제품 이름을 잘못 쓴 말 (2026-10-30: "인터버 종류 뭐있어?" 가 근거 없음으로 상담원에게 감)
+MISSPELLED = "인터버 종류 뭐있어?"
+
+
+def test_misspelled_product_is_answered_with_whole_catalog(analysis):
+    analysis["classification"] = Classification(category=Category.TECH_SPEC, confidence=0.9)
+    analysis["extraction"] = Extraction(language="ko")  # LLM 추출도 모델명이 없으면 비운다
+    writer, judge = ScriptedWriter(), IntentJudge()
+
+    out = respond(say(MISSPELLED), [], FakeDocs([tg(score=0.6)]), live(writer, judge), TABLES)
+
+    assert out.handoff is False
+    assert ("our_product", MISSPELLED) in judge.calls
+    prompt = writer.prompts[0]
+    assert "iS7 75kW VFD" in prompt and "Solar Inverter 25kW" in prompt  # 전체 제품 목록
+
+
+def test_out_of_scope_is_still_handed_off_after_asking_jev(analysis):
+    judge = IntentJudge()
+
+    out = respond(say(OUT_OF_SCOPE), [], FakeDocs([tg(score=0.5)]), live(judge=judge), TABLES)
+
+    assert out.handoff is True
+    assert ("our_product", OUT_OF_SCOPE) in judge.calls
+
+
+def test_named_product_does_not_ask_jev_whether_it_is_ours(analysis):
+    judge = IntentJudge()
+
+    respond(say("인버터 종류 뭐있어?"), [], FakeDocs([tg(score=0.6)]), live(judge=judge), TABLES)
+
+    assert not [c for c in judge.calls if isinstance(c, tuple) and c[0] == "our_product"]
+
+
+def test_misspelled_product_is_handed_off_when_jev_is_off(analysis):
+    llm = LLMRouter(Settings(_env_file=None), writer=ScriptedWriter())  # Jev 꺼짐(fake)
+
+    out = respond(say(MISSPELLED), [], FakeDocs([tg(score=0.6)]), llm, TABLES)
+
+    assert out.handoff is True  # 판단이 안 되면 전처럼 넘긴다
 
 
 # 근거 없음 판단 점수 (2026-10-23 운영 사고: "UPS 보증기간…" 다음 "인버터 E.OC" 가 상담원으로 감)
