@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { myInquiries } from '../../lib/myInquiries'
+import { myInquiries, setInquiryEmail } from '../../lib/myInquiries'
 import {
-  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, dept, fieldLabel, fmtTime, pauseRule, split, titleOf,
+  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, dept, fieldLabel, fmtTime, mailEvents, notifyEmail, pauseRule, split, titleOf,
 } from '../lib/inquiry.js'
 
 function Long({ text, lines = 5 }) {
@@ -26,25 +26,49 @@ function Progress({ t }) {
           return (
             <li key={s.n} className={state} aria-current={state === 'now' ? 'step' : undefined}>
               <span className="c">{state === 'done' ? '✓' : s.n}</span>
-              <span className="ic" aria-hidden="true">{s.icon}</span>
               <b>{s.label}</b>
             </li>
           )
         })}
       </ol>
-      {t.status === 'ESCALATED' && <div className={`stat ${st.kind}`}><span aria-hidden="true">{st.emoji}</span><b>{st.label}</b></div>}
     </div>
   )
 }
 
-function Times({ t }) {
-  const rows = [
-    t.received_at_utc && ['1 접수', fmtTime(t.received_at_utc)],
-    t.first_response_at_utc && ['2 첫 응답', fmtTime(t.first_response_at_utc)],
-    t.resolved_at_utc && ['3 처리 완료', fmtTime(t.resolved_at_utc)],
-  ].filter(Boolean)
-  if (!rows.length) return null
-  return <ul className="times">{rows.map(([k, v]) => <li key={k}><span>{k}</span><b>{v}</b></li>)}</ul>
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// 접수 · 첫 응답(추가 정보 요청 포함) · 처리 완료가 한 목록에 모이고, 상태가 바뀔 때마다 이 메일로 알림이 간다. 메일 주소는 여기서 고칠 수 있다.
+function MailLog({ t, email, onEmail }) {
+  const [edit, setEdit] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [err, setErr] = useState('')
+  const save = () => {
+    const v = draft.trim()
+    if (!EMAIL_RE.test(v)) { setErr('메일 주소를 확인해 주세요'); return }
+    onEmail(v); setEdit(false); setErr('')
+  }
+  return (
+    <div className="blk mails"><h4>진행 내역</h4>
+      <ul className="kv">
+        {mailEvents(t).map((r) => (
+          <li key={r.step}><span>{r.step}{r.note && <em className="mnote">{r.note}</em>}</span><b>{fmtTime(r.at)}</b></li>
+        ))}
+      </ul>
+      {!edit ? (
+        <div className="mail-to"><span>알림 메일<em className="mnote">시연용</em></span><b>{email || '등록된 메일이 없어요'}</b>
+          <button type="button" className="link" onClick={() => { setDraft(''); setErr(''); setEdit(true) }}>수정</button></div>
+      ) : (
+        <div className="mail-edit">
+          <label><span>알림 받을 메일</span>
+            <input className="qin" type="email" value={draft} placeholder={email} aria-invalid={err ? true : undefined} autoFocus
+              onChange={(e) => { setDraft(e.target.value); setErr('') }} onKeyDown={(e) => { if (e.key === 'Enter') save() }} /></label>
+          {err && <small className="rep-bad" role="alert">{err}</small>}
+          <div className="qnav"><button type="button" className="gbtn" onClick={() => { setEdit(false); setErr('') }}>취소</button>
+            <button type="button" className="pbtn" onClick={save}>저장</button></div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function Sla({ t }) {
@@ -52,14 +76,15 @@ function Sla({ t }) {
   const fr = Number(t.sla_first_response_target_h), rs = Number(t.sla_resolution_target_h)
   const MET = { MET: '목표 안에 응답했어요', BREACHED: '목표보다 늦게 응답했어요' }
   return (
-    <div className="blk"><h4>⏱️ 응답 시간 안내</h4>
+    <div className="blk"><h4>응답 시간 안내</h4>
       <ul className="kv">
         <li><span>응답 목표</span><b>첫 응답 {fr}시간 · 처리 {rs}시간</b></li>
         {t.first_response_hours && <li><span>실제 첫 응답</span><b>{t.first_response_hours}시간 ({MET[t.sla_first_response_status] ?? t.sla_first_response_status})</b></li>}
         <li><span>확정 처리 예정일</span><b>기록 없음</b></li>
+        {/* 추가 정보를 기다리는 동안은 처리 시간이 흐르지 않는다 (정책 문구는 마우스를 올리면 보인다) */}
+        {t.status === 'WAITING_CUSTOMER' && <li><span>처리 시간</span><b><em className="pause-tag" title={`정책: ${pauseRule}`}>멈춤 · 추가 정보 대기 중</em></b></li>}
       </ul>
       <p className="hintline">응답 목표는 접수 시점의 기준일 뿐, 처리 완료일을 약속하는 게 아니에요.</p>
-      {t.status === 'WAITING_CUSTOMER' && <p className="pause">⏸️ 추가 정보를 보내 주실 때까지는 처리 시간 계산이 멈출 수 있어요. (정책: {pauseRule})</p>}
     </div>
   )
 }
@@ -72,9 +97,8 @@ function Sheet({ kind, t, onClose, onSend }) {
   const [copied, setCopied] = useState(false)
   const lines = kind === 'info'
     ? [`[추가 정보 보내기 초안] 문의번호 ${t.ticket_id}`, ...miss.map((k) => `${fieldLabel(k)}: ${vals[k] || '(미입력)'}`)]
-    : kind === 'more' ? [`[추가 내용 초안] 문의번호 ${t.ticket_id}`, text || '(미입력)']
-      : [`[같은 문제로 다시 문의 — 새 문의 초안] 이전 문의번호: ${t.ticket_id}`, `제품: ${t.product_name} (${t.product_code})`, `내용: ${text || '(미입력)'}`]
-  const title = { info: '📨 추가 정보 보내기', more: '✍️ 추가 내용 남기기', again: '🔁 같은 문제로 다시 문의' }[kind]
+    : [`[같은 문제로 다시 문의 — 새 문의 초안] 이전 문의번호: ${t.ticket_id}`, `제품: ${t.product_name} (${t.product_code})`, `내용: ${text || '(미입력)'}`]
+  const title = { info: '추가 정보 보내기', again: '같은 문제로 다시 문의' }[kind]
   const ok = kind === 'info' ? miss.some((k) => vals[k]?.trim()) : text.trim().length > 0
   return (
     <div className="sheet" role="dialog" aria-label={title}>
@@ -91,13 +115,13 @@ function Sheet({ kind, t, onClose, onSend }) {
               ))}
             </>
           )}
-          {kind !== 'info' && <textarea className="qin" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={kind === 'more' ? '추가로 알려 주실 내용을 적어 주세요' : '문의 내용을 적어 주세요'} aria-label="내용" />}
+          {kind !== 'info' && <textarea className="qin" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder="문의 내용을 적어 주세요" aria-label="내용" />}
           <div className="qnav"><button type="button" className="gbtn" onClick={onClose}>닫기</button>
-            <button type="button" className="pbtn" disabled={!ok} onClick={() => setDone(true)}>{kind === 'info' ? '추가 정보 보내기' : kind === 'more' ? '추가 내용 남기기' : '다시 문의하기'}</button></div>
+            <button type="button" className="pbtn" disabled={!ok} onClick={() => setDone(true)}>{kind === 'info' ? '추가 정보 보내기' : '다시 문의하기'}</button></div>
         </>
       ) : (
         <>
-          <div className="statusb"><b>⚠️ 아직 보내지 않았어요</b><p>접수·발송 기능이 연결되어 있지 않아서 저장도 전송도 되지 않았어요. 문의 상태와 기록도 바뀌지 않았어요. 정리한 내용만 AI 상담으로 보내거나 복사할 수 있어요.</p></div>
+          <div className="statusb"><b>아직 보내지 않았어요</b><p>접수·발송 기능이 연결되어 있지 않아서 저장도 전송도 되지 않았어요. 문의 상태와 기록도 바뀌지 않았어요. 정리한 내용만 AI 상담으로 보내거나 복사할 수 있어요.</p></div>
           <ul className="sumlist">{lines.map((l) => <li key={l}>{l}</li>)}</ul>
           <div className="qnav"><button type="button" className="gbtn" onClick={() => setDone(false)}>수정</button>
             <button type="button" className="gbtn" onClick={async () => { try { await navigator.clipboard.writeText(lines.join('\n')); setCopied(true) } catch { setCopied(false) } }}>{copied ? '복사했어요 ✓' : '내용 복사'}</button>
@@ -108,7 +132,7 @@ function Sheet({ kind, t, onClose, onSend }) {
   )
 }
 
-function Detail({ t, onBack, onSend, onAgain }) {
+function Detail({ t, onBack, onSend, onAgain, email, onEmail }) {
   const st = STATUS[t.status]
   const ch = CHANNEL[t.channel]
   const miss = split(t.missing_info), blocking = split(t.missing_blocking_info), prov = split(t.provided_info)
@@ -125,47 +149,46 @@ function Detail({ t, onBack, onSend, onAgain }) {
 
 
       <Progress t={t} />
-      <Times t={t} />
+      <MailLog t={t} email={email} onEmail={onEmail} />
 
       {st.kind === 'need' ? (
         <div className="needb">
-          <b>✋ 추가 정보 필요</b>
+          <b>추가 정보 필요</b>
           {miss.length > 0 ? <ul>{miss.map((k) => <li key={k}>{fieldLabel(k)}{blocking.includes(k) && <i>꼭 필요해요</i>}</li>)}</ul>
             : t.final_reply && <Long text={t.final_reply} />}
           {prov.length > 0 && <p className="done-info">✓ 이미 보내 주신 {prov.map(fieldLabel).join(', ')}은(는) 다시 쓰지 않아도 돼요.</p>}
           <button type="button" className="pbtn" onClick={() => setSheet(miss.length ? 'info' : 'more')}>추가 정보 보내기</button>
         </div>
-      ) : (
+      ) : done && (
         <div className="qnav inq-act">
-          {done ? <button type="button" className="pbtn" onClick={() => onAgain(t)}>같은 문제로 다시 문의</button>
-            : <button type="button" className="pbtn" onClick={() => setSheet('more')}>추가 내용 남기기</button>}
+          <button type="button" className="pbtn" onClick={() => onAgain(t)}>같은 문제로 다시 문의</button>
         </div>
       )}
 
       {sheet && <Sheet kind={sheet} t={t} onClose={() => setSheet(null)} onSend={onSend} key={sheet} />}
 
-      <div className="blk"><h4>📋 접수한 내용</h4>
+      <div className="blk"><h4>접수한 내용</h4>
         <ul className="kv">
           {(t.product_name || t.product_code) && <li><span>제품 · 모델</span><b>{[t.product_name, t.product_code].filter(Boolean).join(' · ')}</b></li>}
           <li><span>접수 채널</span><b>{ch.emoji} {ch.label}</b></li>
           {t.error_code_reported && <li><span>에러 코드</span><b>{t.error_code_reported}</b></li>}
         </ul>
-        {phone && <p className="phone-note">📞 전화로 접수한 <strong>상담 메모</strong>예요. 통화 녹음이나 전체 대화 내용은 기록에 없어요.</p>}
+        {phone && <p className="phone-note">전화로 접수한 <strong>상담 메모</strong>예요. 통화 녹음이나 전체 대화 내용은 기록에 없어요.</p>}
         <Long text={t.inquiry_body} />
         {att.length > 0 && <p className="atts">{att.map((a) => <span key={a}>📎 {a}<em> (파일 없음 · 이름만 기록됐어요)</em></span>)}</p>}
       </div>
 
-      {t.assigned_dept && <div className="blk"><h4>🏢 담당 부서</h4>
+      {t.assigned_dept && <div className="blk"><h4>담당 부서</h4>
         <ul className="kv">
           <li><span>담당</span><b>{dept(t.assigned_dept)}</b></li>
           {t.escalated === 'Y' && <li><span>전문 부서 확인</span><b>{dept(t.escalated_to)}{t.escalation_reason ? ` · ${ESC_REASON[t.escalation_reason] ?? t.escalation_reason}` : ''}</b></li>}
         </ul>
       </div>}
 
-      {t.final_reply && st.kind !== 'need' && <div className="blk"><h4>💬 답변</h4><Long text={t.final_reply} /></div>}
+      {t.final_reply && st.kind !== 'need' && <div className="blk"><h4>답변</h4><Long text={t.final_reply} /></div>}
 
       {done && (t.final_action || t.rma_no || t.reference_doc_id || t.resolved_at_utc) && (
-        <div className="blk res"><h4>✅ 처리 결과</h4>
+        <div className="blk res"><h4>처리 결과</h4>
           <ul className="kv">
             {t.final_action && <li><span>조치</span><b>{FINAL_ACTION[t.final_action] ?? t.final_action}</b></li>}
             {t.rma_no && <li><span>RMA 번호</span><b>{t.rma_no}</b></li>}
@@ -192,13 +215,14 @@ const fromServer = (c) => ({
 export default function Inquiries({ onNew, onSend, onAgain, extra = [], initialOpen = null }) {
   const [filter, setFilter] = useState('all')
   const [openId, setOpenId] = useState(initialOpen)
+  const [emails, setEmails] = useState({})
   // 이 브라우저에서 낸 문의를 서버(GET /api/inquiries/{id})에서 가져온다. 로그인이 생기면 고객 기준 조회로 바꾼다.
   const [real, setReal] = useState(null)
   const [failed, setFailed] = useState(0) // 불러오지 못한 문의 수 — 서버가 안 될 때 "문의 없음"으로 보이지 않게 한다
   useEffect(() => {
     let live = true
     const mine = myInquiries()
-    Promise.all(mine.map((m) => api.customerInquiry(m.ticket_id).then(fromServer, () => null)))
+    Promise.all(mine.map((m) => api.customerInquiry(m.ticket_id).then((c) => ({ ...fromServer(c), notify_email: m.notify_email ?? '' }), () => null)))
       .then((r) => {
         if (!live) return
         setFailed(r.filter((x) => !x).length)
@@ -212,7 +236,7 @@ export default function Inquiries({ onNew, onSend, onAgain, extra = [], initialO
   const shown = list.filter(fn)
   const sel = list.find((x) => x.ticket_id === openId)
 
-  if (sel) return <div className="flow inq"><Detail t={sel} onBack={() => setOpenId(null)} onSend={onSend} onAgain={onAgain} /></div>
+  if (sel) return <div className="flow inq"><Detail t={sel} onBack={() => setOpenId(null)} onSend={onSend} onAgain={onAgain} email={emails[sel.ticket_id] ?? notifyEmail(sel)} onEmail={(v) => { setEmails((c) => ({ ...c, [sel.ticket_id]: v })); setInquiryEmail(sel.ticket_id, v) }} /></div>
 
   return (
     <div className="flow inq">

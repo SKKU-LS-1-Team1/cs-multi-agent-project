@@ -49,6 +49,48 @@ const PATHS = {
       <circle cx="31.5" cy="21.5" r="2.6" fill="#fff" />
     </>
   ),
+  // 증상 단계 첨부용 (사진·영상·소리·QR)
+  photo: (
+    <>
+      <rect x="16" y="8" width="16" height="10" rx="4" fill="#3562A6" />
+      <rect x="4" y="13" width="40" height="29" rx="8" fill="#3562A6" />
+      <path d="M4 21c0-4.4 3.6-8 8-8h6v29h-6c-4.4 0-8-3.6-8-8z" fill="#0A1E5A" opacity=".18" />
+      <circle cx="24" cy="28" r="9.5" fill="#fff" />
+      <circle cx="24" cy="28" r="5.8" fill="#6F93D8" />
+      <circle cx="37" cy="20.5" r="2" fill="#fff" />
+    </>
+  ),
+  video: (
+    <>
+      <rect x="4" y="12" width="30" height="24" rx="8" fill="#3562A6" />
+      <path d="M4 20c0-4.4 3.6-8 8-8h5v24h-5c-4.4 0-8-3.6-8-8z" fill="#0A1E5A" opacity=".18" />
+      <path d="M36 21l7.2-4.7a1.5 1.5 0 012.3 1.3v12.8a1.5 1.5 0 01-2.3 1.3L36 27z" fill="#6F93D8" />
+      <path d="M17 18.5v11l9-5.5z" fill="#fff" stroke="#fff" strokeWidth="2.4" strokeLinejoin="round" />
+    </>
+  ),
+  sound: (
+    <>
+      <rect x="16.5" y="5" width="15" height="25" rx="7.5" fill="#3562A6" />
+      <path d="M16.5 12.5a7.5 7.5 0 017.5-7.5v25a7.5 7.5 0 01-7.5-7.5z" fill="#0A1E5A" opacity=".18" />
+      <rect x="21" y="10" width="3.2" height="9" rx="1.6" fill="#fff" opacity=".7" />
+      <path d="M10.5 23v1a13.5 13.5 0 0027 0v-1" stroke="#6F93D8" strokeWidth="3.8" strokeLinecap="round" fill="none" />
+      <path d="M24 37.5V43M17.5 43h13" stroke="#6F93D8" strokeWidth="3.8" strokeLinecap="round" fill="none" />
+    </>
+  ),
+  qr: (
+    <>
+      <rect x="5" y="5" width="16" height="16" rx="4.5" fill="#3562A6" />
+      <rect x="10" y="10" width="6" height="6" rx="1.8" fill="#fff" />
+      <rect x="27" y="5" width="16" height="16" rx="4.5" fill="#3562A6" />
+      <rect x="32" y="10" width="6" height="6" rx="1.8" fill="#fff" />
+      <rect x="5" y="27" width="16" height="16" rx="4.5" fill="#3562A6" />
+      <rect x="10" y="32" width="6" height="6" rx="1.8" fill="#fff" />
+      <rect x="27" y="27" width="7.5" height="7.5" rx="2.2" fill="#6F93D8" />
+      <rect x="36" y="27" width="7" height="7.5" rx="2.2" fill="#3562A6" />
+      <rect x="27" y="36" width="7.5" height="7" rx="2.2" fill="#3562A6" />
+      <rect x="36" y="36" width="7" height="7" rx="2.2" fill="#6F93D8" />
+    </>
+  ),
 }
 
 export default function CuteIcon({ name, size = 28 }) {

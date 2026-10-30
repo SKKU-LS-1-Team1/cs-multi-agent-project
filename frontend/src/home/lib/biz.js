@@ -57,8 +57,8 @@ export function questionsFor(task, a) {
     }
     return [
       { id: 'w_goal', type: 'choice', title: '무엇을 도와드릴까요?', options: [{ v: 'check', label: '보증 확인', sub: '보증 기간 · 조건 확인', emoji: '🛡️' }, { v: 'return', label: '교환 · 반품', sub: '사유를 알려 주세요', emoji: '🔁' }], src: { doc: 'POL-WARRANTY', sec: '1' } },
-      { id: 'w_ship', type: 'date', title: '제품이 출하된 날은 언제인가요?', sub: '보증은 시운전일부터 시작하지만, 늦어도 출하 6개월 뒤에는 시작돼요.', unknown: true, max: 'today', src: { doc: 'POL-WARRANTY', sec: '1' } },
-      { id: 'w_comm', type: 'date', title: '시운전한 날은 언제인가요?', sub: '처음 켜서 설정을 마친 날이에요.', unknown: true, notyet: true, max: 'today', src: { doc: 'POL-WARRANTY', sec: '1' } },
+      { id: 'w_ship', type: 'date', title: '제품이 출하된 날은 언제인가요?', sub: '보증은 시운전일부터 시작하지만, 늦어도 출하 6개월 뒤에는 시작돼요. 정확한 날짜를 모르면 대략적인 날짜를 골라 주세요.', max: 'today', src: { doc: 'POL-WARRANTY', sec: '1' } },
+      { id: 'w_comm', type: 'date', title: '시운전한 날은 언제인가요?', sub: '처음 켜서 설정을 마친 날이에요. 정확한 날짜를 모르면 대략적인 날짜를 골라 주세요.', notyet: true, max: 'today', src: { doc: 'POL-WARRANTY', sec: '1' } },
       { id: 'w_excl', type: 'multi', title: '문제가 생긴 상황에 해당하는 게 있나요?', sub: '해당하면 정책상 보증에서 제외될 수 있어서, 담당자가 확인해요.', options: [
         { v: 'spec', label: '정격 밖에서 썼어요', sub: '잘못된 전압 · 과부하 · 주변 환경' },
         { v: 'damage', label: '물이 들어갔거나 충격을 받았어요', sub: '임의로 고친 적이 있어도 해당돼요' },
@@ -73,10 +73,10 @@ export function questionsFor(task, a) {
       { id: 'o_when', type: 'choice', title: '어떤 문의인가요?', options: [{ v: 'pre', label: '구매 전 확인', sub: '수량 · 희망 수령일', emoji: '🛒' }, { v: 'existing', label: '기존 주문 문의', sub: 'PO 번호로 문의', emoji: '📑' }], src: { doc: 'POL-ORDER', sec: '1' } },
       ...(pre ? [
         { id: 'o_qty', type: 'number', title: '몇 개가 필요하세요?', min: 1, src: { doc: 'POL-ORDER', sec: '1' } },
-        { id: 'o_date', type: 'date', title: '언제까지 받고 싶으세요?', sub: '희망 수령일이에요.', unknown: true, min: 'today', src: { doc: 'POL-ORDER', sec: '1' } },
+        { id: 'o_date', type: 'date', title: '언제까지 받고 싶으세요?', sub: '희망 수령일이에요.', min: 'today', src: { doc: 'POL-ORDER', sec: '1' } },
       ] : []),
       ...(a.o_when === 'existing' ? [
-        { id: 'o_po', type: 'text', title: '주문번호 또는 PO 번호를 알려 주세요', unknown: true, placeholder: '예: PO-12345', src: { doc: 'POL-ORDER', sec: '2' } },
+        { id: 'o_po', type: 'text', title: '주문번호 또는 PO 번호를 알려 주세요', placeholder: '예: PO-12345', src: { doc: 'POL-ORDER', sec: '2' } },
         { id: 'o_topic', type: 'choice', title: '무엇이 궁금하세요?', options: opts('o_topic'), src: { doc: 'POL-ORDER', sec: '3' } },
         { id: 'o_note', type: 'text', title: '추가로 알려 주실 내용이 있나요?', optional: true, long: true, placeholder: '예: 희망 출하일, 나누어 받고 싶은 수량', src: { doc: 'POL-ORDER', sec: '3' } },
       ] : []),

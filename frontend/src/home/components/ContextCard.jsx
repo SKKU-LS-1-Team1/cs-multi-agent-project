@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { LEGACY_TOPIC } from '../lib/legacy.js'
 
 // 'AI가 어떤 제품·증상을 기준으로 상담하는지' 보여 주는 작은 카드.
 // 입력은 각 화면이 넘기는 "라벨: 값" 문장 목록 그대로 — 화면 쪽은 건드리지 않는다.
@@ -19,6 +20,9 @@ export default function ContextCard({ lines, topics = [], onRemove, active = fal
   const prev = useRef(null)
   const id = useId()
 
+  // 단종·호환은 제품의 상태라 태그(경로·문의 유형)와 위계가 다르다: 태그에서 빼고 제품 이름 옆 괄호로 보인다
+  const legacy = topics.includes(LEGACY_TOPIC)
+  const tags = topics.filter((x) => x !== LEGACY_TOPIC)
   const items = parse(lines)
   const get = (label) => items.find((x) => x.label === label)?.value
   const family = get('제품군')
@@ -58,12 +62,12 @@ export default function ContextCard({ lines, topics = [], onRemove, active = fal
         </button>
       )}
       <div className="cc-h">
-        <button type="button" className="cc-pick" aria-pressed={active} aria-label={`${title} 대화 열기`} onClick={onActivate}>
+        <button type="button" className="cc-pick" aria-pressed={active} aria-label={`${title}${legacy ? ` (${LEGACY_TOPIC})` : ''} 대화 열기`} onClick={onActivate}>
           <span className="cc-t">
             {active && <small className="cc-live"><i aria-hidden="true" />대화 중</small>}
-            <b className={`cc-name${f(titleKey)}`}>{title}</b>
-            {topics.length > 0
-              ? <span className="cc-tags">{topics.map((x) => <i key={x}>{x}</i>)}</span>
+            <b className={`cc-name${f(titleKey)}`}>{title}{legacy && <>{' '}<span className="cc-legacy">({LEGACY_TOPIC})</span></>}</b>
+            {tags.length > 0
+              ? <span className="cc-tags">{tags.map((x) => <i key={x}>{x}</i>)}</span>
               : summary && <span className={`cc-sum${open ? ' off' : ''}${f(sumKey)}`}>{summary}</span>}
           </span>
         </button>

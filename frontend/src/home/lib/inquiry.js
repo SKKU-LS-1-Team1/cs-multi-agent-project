@@ -26,6 +26,16 @@ export const STATUS = {
   RESOLVED: { stage: 3, emoji: '✅', label: '처리가 완료됐어요', note: '', kind: 'done' },
   CLOSED: { stage: 3, emoji: '✅', label: '처리가 완료됐어요', note: '', kind: 'done' },
 }
+// 상태가 바뀔 때 고객 메일로 자동 발송되는 알림. 기록에 시각이 있는 변경(접수·첫 응답·처리 완료)만 보여 준다.
+export const notifyEmail = (t) => t.notify_email ?? customer.contact_email_masked
+export function mailEvents(t) {
+  const mid = t.status === 'ESCALATED' || t.status === 'WAITING_CUSTOMER' ? t.status : 'IN_PROGRESS'
+  return [
+    { step: '접수', at: t.received_at_utc },
+    { step: '첫 응답', note: STATUS[mid].label, at: t.first_response_at_utc },
+    { step: '처리 완료', at: t.resolved_at_utc },
+  ].filter((r) => r.at)
+}
 export const STEPS = [
   { n: 1, label: '접수 완료', icon: '📥' },
   { n: 2, label: '확인 · 처리 중', icon: '🔍' },
@@ -49,6 +59,7 @@ export const FINAL_ACTION = {
   DOC_SENT_EN_ONLY: '영문 문서로 보냈어요', QUOTE_TO_DISTRIBUTOR: '견적을 대리점으로 전달했어요', EXPEDITE_APPROVED: '납기 단축이 승인됐어요',
 }
 export const FIELD_KO = {
+  manufacture_year: '제조 연도(명판)', legacy_goal: '원하는 것',
   product_model: '제품 모델명(주문 코드)', serial_no: '시리얼 번호(명판)', application: '사용 용도(전압·부하·사용 방식)', target_standard: '필요한 규격·인증서', target_country: '사용할 국가·시장',
   site_condition: '설치 환경(온도·고도·습도)', wiring_diagram: '배선도·단선도', photos: '제품·명판 사진', purchase_doc: 'PO 또는 송장 번호', install_date: '설치·시운전 날짜',
   failure_description: '고장 내용과 발생 시각', po_number: 'PO 번호', quantity: '수량', required_date: '희망 납기일', incoterms: '인도 조건과 도착지', document_type: '필요한 문서 종류',

@@ -17,7 +17,7 @@ function Evidence({ src, onOpen, label = '판단 근거 보기' }) {
   return null // 오른쪽 원문 패널을 없애서 근거 버튼도 없앴다
 }
 
-function QuestionView({ q, a, commit, back, last }) {
+function QuestionView({ q, a, commit, back, last, lastLabel = '결과 보기' }) {
   const cur = a[q.id]
   const [text, setText] = useState(cur && cur !== UNKNOWN ? String(cur) : '')
   const [sel, setSel] = useState(Array.isArray(cur) ? cur : [])
@@ -40,7 +40,7 @@ function QuestionView({ q, a, commit, back, last }) {
     return q.min === 'today' ? today_ : q.id === 'w_comm' && shipD ? shipD : undefined
   }
   const curWarn = warn || (isD(cur) ? clash(q.id, cur) : '')
-  const nextLabel = last ? '결과 보기' : '다음'
+  const nextLabel = last ? lastLabel : '다음'
 
   return (
     <div className="qv" key={q.id}>
@@ -72,7 +72,7 @@ function QuestionView({ q, a, commit, back, last }) {
           <input className="qin" type="date" value={cur && cur !== UNKNOWN && cur !== NOTYET ? cur : ''} min={bound('min')} max={bound('max')} onChange={(e) => { const v = e.target.value; if (!v) return; const m = clash(q.id, v); setWarn(m); if (!m) commit(q.id, v, false) }} aria-label={q.title} aria-invalid={!!curWarn} />
           {curWarn && <div className="datewarn" role="alert"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 8v5M12 17h.01" /><circle cx="12" cy="12" r="9.5" /></svg><span>{curWarn}</span></div>}
           <div className="chiprow">
-            {q.notyet && <button type="button" className={`opt ghost${cur === NOTYET ? ' sel' : ''}`} onClick={() => commit(q.id, NOTYET)}><b>⏳ 아직 시운전 전이에요</b></button>}
+            {q.notyet && <button type="button" className={`opt ghost${cur === NOTYET ? ' sel' : ''}`} onClick={() => commit(q.id, NOTYET)}><b>아직 시운전 전이에요</b></button>}
             {q.unknown && <button type="button" className={`opt ghost${cur === UNKNOWN ? ' sel' : ''}`} onClick={() => commit(q.id, UNKNOWN)}><b>🤔 잘 모르겠어요</b></button>}
           </div>
           <div className="qnav"><button type="button" className="gbtn" onClick={back}>이전</button><button type="button" className="pbtn" disabled={!cur || !!curWarn} onClick={() => commit(q.id, cur)} style={{ display: cur || curWarn ? '' : 'none' }}>{nextLabel}</button></div>
@@ -140,13 +140,27 @@ export default function Biz({ onExit, onContext, onSend, onInquire }) {
     const ni = nl.findIndex((x) => x.id === id) + 1
     return { ...c, a: pruned, i: ni, phase: ni >= nl.length ? 'result' : 'q', evi: null }
   })
-  // 정리한 내용을 문의 남기기 양식으로 넘긴다
-  const goInquire = () => onInquire?.({
-    type: cat, family: s.family, model: s.model,
-    vals: Object.fromEntries(fields.filter((f) => f.value && f.key !== 'product_model' && f.key !== 'photos').map((f) => [f.key, String(f.value)])),
-    subject: `${p.name} ${{ WARRANTY: '보증', RETURN: '교환·반품', ORDER_LEAD: '주문·납기', QUOTE: '견적' }[cat]} 문의`,
-    body: summary.join('\n'),
-  })
+  // 정리한 내용을 문의 남기기 양식으로 넘긴다. a 를 주면 그 답으로 정리한다 (마지막 질문에서 바로 넘어갈 때).
+  const draftOf = (a) => {
+    const c = catOf(s.task, a)
+    const fs = formFields(c, a, ctx, s.form)
+    return {
+      type: c, family: s.family, model: s.model,
+      vals: Object.fromEntries(fs.filter((f) => f.value && f.key !== 'product_model' && f.key !== 'photos').map((f) => [f.key, String(f.value)])),
+      subject: `${p.name} ${{ WARRANTY: '보증', RETURN: '교환·반품', ORDER_LEAD: '주문·납기', QUOTE: '견적' }[c]} 문의`,
+      body: summaryLines(s.task, a, ctx, fs).join('\n'),
+    }
+  }
+  const goInquire = () => onInquire?.(draftOf(s.a))
+  // 주문·납기는 결과 화면이 담당 부서 연결 안내뿐이라, 마지막 질문에서 바로 문의서로 넘어간다
+  const DIRECT = s.task === 'order'
+  const answer = (id, val, advance = true) => {
+    if (DIRECT && advance && list.findIndex((x) => x.id === id) === list.length - 1) {
+      const a = { ...s.a, [id]: val }
+      if (questionsFor(s.task, a).length === list.length) return onInquire?.(draftOf(a))
+    }
+    commit(id, val, advance)
+  }
   const back = () => {
     if (s.phase === 'sent') return setS({ ...s, phase: res?.cta?.kind === 'quote' ? 'result' : 'form', evi: null })
     if (s.phase === 'form') return setS({ ...s, phase: 'result', evi: null })
@@ -181,7 +195,7 @@ export default function Biz({ onExit, onContext, onSend, onInquire }) {
       ]} />
 
       {stage === 0 && <FamilyStep title="어떤 제품에 대해 문의하세요?" emoji="🧾" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
-      {stage === 1 && <ModelStep s={s} allowUnknown={false} pick={(m) => setS((c) => ({ ...INIT, hl: c.hl, family: c.family, model: m }))} />}
+      {stage === 1 && <ModelStep s={s} allowUnknown={false} legacy={{ onInquire }} pick={(m) => setS((c) => ({ ...INIT, hl: c.hl, family: c.family, model: m }))} />}
       {stage === 2 && (
         <>
           <Title emoji="💬" sub={`${p.name} (${p.code})`}>어떤 일을 도와드릴까요?</Title>
@@ -199,7 +213,7 @@ export default function Biz({ onExit, onContext, onSend, onInquire }) {
         <>
           <div className="prog"><div className="bar"><i style={{ width: `${((Math.min(s.i, list.length - 1) + 1) / (list.length + 1)) * 100}%` }} /></div><span>{Math.min(s.i, list.length - 1) + 1} / {list.length}</span></div>
           {headerBlock}
-          <QuestionView q={q} a={s.a} commit={commit} back={back} last={s.i >= list.length - 1} />
+          <QuestionView q={q} a={s.a} commit={answer} back={back} last={s.i >= list.length - 1} lastLabel={DIRECT ? '담당 부서에 문의하기' : '결과 보기'} />
           <Evidence src={q.src} onOpen={open} />
         </>
       )}
