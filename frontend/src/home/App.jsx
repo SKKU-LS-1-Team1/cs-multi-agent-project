@@ -10,10 +10,14 @@ import Biz from './components/Biz.jsx'
 import FaqPage from './components/FaqPage.jsx'
 import Inquiries from './components/Inquiries.jsx'
 import Inquire from './components/Inquire.jsx'
+import Replace from './components/Replace.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import { initialLang, loadChoice, saveChoice } from './lib/onboarding.js'
 import { getProduct } from './lib/catalog.js'
 import { api } from '../api/client'
+import { needsReplace } from './lib/replace.js'
+import { LEGACY_TOPIC } from './lib/legacy.js'
+import { firmwareIntent, firmwareReply, productOfKey } from './lib/firmware.js'
 
 export default function App() {
   const [onboarded, setOnboarded] = useState(() => { try { return sessionStorage.getItem('ls-onboarded') === '1' } catch { return false } })
@@ -24,7 +28,7 @@ export default function App() {
     return s || loadChoice() || initialLang({ choice: null, country: null }).lang
   })
   const changeLang = (l) => { setLang(l); saveChoice(l); try { sessionStorage.setItem('ls-lang', l) } catch { /* 무시 */ } }
-  // 제품 하나당 대화 하나: 카드 키(모델 코드 또는 fam:제품군)별 대화. 제품을 아직 모르면 '_' 대화.
+  // 제품 하나당 대화 하나: 카드 키(모델 코드, fam:제품군, 단종·호환 문의는 legacy:제품군)별 대화. 제품을 아직 모르면 '_' 대화.
   const [threads, setThreads] = useState({})
   const [activeKey, setActiveKey] = useState('_')
   const activeRef = useRef('_')
@@ -44,7 +48,12 @@ export default function App() {
   const [openMine, setOpenMine] = useState(null)
   const exit = () => { setView('home'); setContext([]); setNav(null) }
 
-  const openInquiry = (d = {}) => { setDraft(d); setView('inquire') }
+  const [replace, setReplace] = useState(null) // 대체 모델 비교·추천 화면을 연 제품군과 돌아갈 화면 { family, from }
+  const openInquiry = (d = {}) => {
+    // 단종·호환·대체 문의는 먼저 대체 모델 비교·추천 화면을 거친다. 그 화면의 "추천 없이 문의"(direct)는 문의서로 바로 간다.
+    if (needsReplace(d)) { setReplace({ family: d.family, from: view }); setView('replace'); return }
+    setDraft(d); setView('inquire')
+  }
   const chatDraft = () => {
     const user = messages.filter((m) => m.role === 'user').map((m) => m.content)
     const code = getProduct(activeKey) ? activeKey : activeKey === '_' ? context.map((l) => l.match(/\(([A-Za-z0-9-]+)\)\s*$/)?.[1]).find((c) => c && getProduct(c)) : null
@@ -64,9 +73,11 @@ export default function App() {
   })
 
   // 화면이 알려 주는 제품·모델로 "상담 중인 제품" 카드를 쌓는다 (모델을 알면 모델 기준, 아직 제품군만 알면 제품군 기준)
+  // 단종·호환 문의는 같은 제품군의 모델 상담과 다른 문의라서 따로 둔다 (legacy:제품군). 모델 카드로 합치지 않는다.
   const keyOf = (lines) => {
     const fam = lines.find((l) => l.startsWith('제품군: '))?.slice(5)
     const code = lines.find((l) => l.startsWith('모델: '))?.match(/\(([A-Za-z0-9-]+)\)\s*$/)?.[1]
+    if (fam && lines.includes(`문의 유형: ${LEGACY_TOPIC}`)) return { fam, code: null, key: `legacy:${fam}` }
     return { fam, code, key: code && getProduct(code) ? code : fam ? `fam:${fam}` : null }
   }
   useEffect(() => {
@@ -91,7 +102,8 @@ export default function App() {
     })
     activate(key)
     // 같은 제품이라도 문의 유형(고장·보증·설치 …)이 여러 개일 수 있다 — 카드에 태그로 쌓는다. 증상·에러코드는 유형이 아니라서 넣지 않는다.
-    const byView = { flow: '제품 고장', guide: '설치 · 사용 방법', info: '제품 정보 · 자료' }[view]
+    // 제품 고장은 증상을 고른 뒤에 태그로 붙인다(제품군·모델만 고른 단계에서 단종·호환 문의로 빠질 수 있다)
+    const byView = { flow: context.some((l) => l.startsWith('증상: ')) && '제품 고장', guide: '설치 · 사용 방법', info: '제품 정보 · 자료' }[view]
     const topics = byView ? [byView] : context.filter((l) => /^(업무|문의 유형): /.test(l)).map((l) => l.slice(l.indexOf(': ') + 2)).filter(Boolean)
     setCards((prev) => {
       const before = [...prev.filter((c) => c.key === key), ...(code ? prev.filter((c) => c.key === `fam:${fam}`) : [])].flatMap((c) => c.topics ?? [])
@@ -117,6 +129,9 @@ export default function App() {
     const uid = crypto.randomUUID(), pid = crypto.randomUUID()
     setThreads((p) => ({ ...p, [from]: [...(p[from] ?? []), { id: uid, role: 'user', content }] }))
     if (!opts?.reply) return
+    // 펌웨어 업데이트·고장은 문의 유형이 없어서, 알아보면 챗봇 API를 거치지 않고 그 제품의 기술팀 연락처로 바로 잇는다
+    const intent = firmwareIntent(content)
+    if (intent) { const fw = firmwareReply(productOfKey(from), intent); appendTo(from, 'assistant', fw.content, { kind: 'fw', contact: fw.contact }); return }
     const mine = epoch.current
     const pendingMsg = { id: pid, role: 'assistant', content: '답변을 확인하고 있어요…', pending: true }
     setThreads((p) => ({ ...p, [from]: [...(p[from] ?? []), pendingMsg] }))
@@ -141,7 +156,9 @@ export default function App() {
         if (code && where !== 'inquire') {
           setNav({ family: getProduct(code).family, model: code, tab: TAB_OF[n.tab] ?? 'spec', attr: n.anchor, n: Date.now() }); setView('info')
         }
-        if (form && where !== 'inquire') openInquiry({ type: form.category ?? undefined, family: form.product_code ? getProduct(form.product_code)?.family : undefined, model: form.product_code ?? undefined, vals: form.fields, subject: form.subject, body: form.body })
+        // 서버가 펌웨어 문의서(FW_UPDATE)로 넘기려 해도 문의서를 열지 않고 기술팀 연락처를 안내한다 (펌웨어는 문의 유형이 없다)
+        if (form?.category === 'FW_UPDATE') { const fw = firmwareReply(productOfKey(to), 'update'); appendTo(to, 'assistant', fw.content, { kind: 'fw', contact: fw.contact }) }
+        else if (form && where !== 'inquire') openInquiry({ type: form.category ?? undefined, family: form.product_code ? getProduct(form.product_code)?.family : undefined, model: form.product_code ?? undefined, vals: form.fields, subject: form.subject, body: form.body })
       })
   }, []) // eslint-disable-line
   // 해결 화면의 [AI 상담에서 이어서 말하기]: 고객 말풍선이 아니라 챗봇이 먼저 "어느 제품으로 이어서 도울지"만 말하고, 말풍선 테두리가 잠깐 반응한다.
@@ -174,6 +191,8 @@ export default function App() {
         ) : view === 'inquire' ? (
           <Inquire key={JSON.stringify(draft)} draft={draft} lang={lang} onContext={setContext} onExit={exit}
             onSubmitted={(t) => setSubmitted((l) => [...l, t])} onOpenMine={(id) => { setOpenMine(id); setView('mine') }} />
+        ) : view === 'replace' ? (
+          <Replace key={replace?.family} family={replace?.family} onBack={() => setView(replace?.from && replace.from !== 'replace' ? replace.from : 'home')} onContext={setContext} onInquire={openInquiry} />
         ) : view === 'faq' ? (
           <FaqPage />
         ) : view === 'biz' ? (

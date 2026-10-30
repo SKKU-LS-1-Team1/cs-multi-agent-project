@@ -28,13 +28,13 @@ export function groupByCode(pool) {
   return groups
 }
 
-export function summarize({ family, model, issue, tried }) {
+export function summarize({ family, model, issues = [], tried }) {
   const fam = family ? getFamily(family).name : null
   const prod = model ? getProduct(model) : null
   const lines = []
   if (fam) lines.push(`제품군: ${fam}`)
   lines.push(`모델: ${prod ? `${prod.name} (${prod.code})` : '모델을 잘 모르겠어요'}`)
-  if (issue) lines.push(`증상: ${issue.code ? `${issue.code} · ` : ''}${issue.symptom}`)
+  if (issues.length) lines.push(`증상: ${issues.map((x) => `${x.code ? `${x.code} · ` : ''}${x.symptom}`).join(' / ')}`)
   for (const t of tried) lines.push(`해 본 조치: ${t.action} (확인: ${t.check})`)
   return lines
 }
