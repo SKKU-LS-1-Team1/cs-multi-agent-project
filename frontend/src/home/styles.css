@@ -280,12 +280,11 @@ a { color: inherit; text-decoration: none; }
 .irow b { color: var(--grey-900); text-align: right; }
 .irow small { grid-column: 1 / -1; font-size: 12px; color: var(--grey-500); }
 .irow.sel, .fwrow.sel, .dcard.sel { border-color: var(--ls-blue-light); background: var(--ls-blue-50); }
-.dcard { border: 2px solid transparent; background: var(--grey-100); border-radius: 16px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.dmain { border: 0; background: none; display: flex; gap: 12px; align-items: center; text-align: left; flex: 1; min-width: 220px; padding: 2px; }
-.dmain b { display: block; font-size: 16px; color: var(--grey-900); }
-.dmain small { display: block; font-size: 13px; color: var(--grey-600); }
-.dmain em { font-style: normal; font-size: 12px; color: var(--grey-500); }
-.di { font-size: 26px; }
+/* 자료 탭: 문서를 한 묶음 안의 줄로 보여 준다 (카드를 따로 쌓지 않는다) */
+.dlist { border: 1px solid var(--grey-200); border-radius: 16px; background: #fff; overflow: hidden; }
+.drow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; }
+.drow + .drow { border-top: 1px solid var(--grey-100); }
+.drow > b { font-size: 16px; line-height: 24px; font-weight: 600; color: var(--grey-900); }
 .dl { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; text-decoration: none; background: #fff; border: 1px solid var(--grey-200); color: var(--ls-blue-mid); border-radius: 12px; padding: 8px 14px; font-size: 13px; font-weight: 700; flex: none; }
 .dl:hover { background: var(--ls-blue-50); }
 .dl small { font-size: 11px; font-weight: 500; color: var(--grey-500); }
@@ -601,6 +600,9 @@ textarea.qin { resize: vertical; }
 
 /* ── 안내: 세로 단계 흐름 */
 .gview { max-width: 720px; }
+.gsub { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pdfbtn { font-size: 13px; font-weight: 700; line-height: 18px; color: var(--ls-blue-mid); background: var(--ls-blue-100); border: 0; border-radius: 999px; padding: 6px 14px 6px 8px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.pdfbtn:hover { background: var(--ls-blue-200); }
 .gl { list-style: none; margin: 28px 0 0; padding: 0; }
 .gg { margin: 8px 0 18px; font-size: 14px; font-weight: 700; color: var(--ls-blue-light); }
 .gs { display: grid; grid-template-columns: 32px 1fr; column-gap: 16px; position: relative; padding-bottom: 40px; opacity: 0; transform: translateY(8px); transition: opacity .24s ease, transform .24s ease; }

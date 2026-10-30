@@ -70,7 +70,7 @@ export default function DocPanel({ code, target, download = false }) {
         <div className="doc-id">
           <span>{doc.id} · Rev. {doc.revision} · 자료 원문(영어)</span>
           {download && doc.file && (
-            <a className="dl" href={`${import.meta.env.BASE_URL}${doc.file}`} download>⬇️ 원본 다운로드 <small>{doc.fmt} · {fmtSize(doc.bytes)}</small></a>
+            <a className="dl" href={`${import.meta.env.BASE_URL}${doc.file}`} download>원본 다운로드 <small>{doc.fmt} · {fmtSize(doc.bytes)}</small></a>
           )}
         </div>
         {doc.sections.filter((s) => s.num !== '0' || s.blocks.length).map((s, i) => (
