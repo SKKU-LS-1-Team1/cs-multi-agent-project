@@ -50,6 +50,15 @@ def analyze(mail_id: str, mailbox: Mailbox, change: MailAnalyzeIn | None = None)
         return mailbox.analyze(mail_id, change)
 
 
+@router.post("/{mail_id}/copilot")
+def copilot(mail_id: str, mailbox: Mailbox, change: MailAnalyzeIn | None = None) -> dict:
+    with _errors():
+        try:
+            return mailbox.copilot(mail_id, change)
+        except ValueError as exc:
+            raise HTTPException(503, str(exc)) from None
+
+
 @router.post("/{mail_id}/register", response_model=TicketOut, status_code=201)
 def register(mail_id: str, body: MailRegisterIn, mailbox: Mailbox) -> TicketOut:
     with _errors():

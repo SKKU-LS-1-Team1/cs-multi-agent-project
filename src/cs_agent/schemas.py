@@ -244,6 +244,8 @@ class ReviewIn(BaseModel):
     feedback: str | None = None  # 한 줄
     feedback_reason: FeedbackReason | None = None
     escalate_to: str | None = None
+    draft_purpose: Literal["answer", "request"] | None = None  # rewrite의 명시적 작성 대상
+    info_plan_key: str | None = None  # 선택한 요청 항목이 현재 확인값에 기반하는지 검증
     info_items: list[str] = Field(default_factory=list)  # 요청할 항목
 
 
@@ -263,6 +265,7 @@ class TicketOut(BaseModel):
         None  # 고객 문의 원문 (회신이 오면 이어 붙인 본문). 관리자 화면 표시용
     )
     body_ko: str | None = None
+    copilot: dict | None = None
     status: TicketStatus
     manual_reply: bool = False
     processing_history: list[dict] = Field(default_factory=list)

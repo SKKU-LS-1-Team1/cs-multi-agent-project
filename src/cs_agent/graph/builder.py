@@ -274,19 +274,40 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     # ⑦ ⑧ ⑨ ⑩ --------------------------------------------------------------------------
     def info_request(state: TicketState) -> dict:
         review = _review(state)
-        if review and review.action == ReviewAction.INFO_REQUEST and review.info_items:
+        if (
+            review
+            and review.action in {ReviewAction.INFO_REQUEST, ReviewAction.REWRITE}
+            and review.info_items
+        ):
             missing = review.info_items
+        elif review and review.action == ReviewAction.REWRITE and state.get("info_request_fields"):
+            missing = state["info_request_fields"]
         else:
             missing = state["rules"].missing_blocking or state["rules"].missing_info
-        from cs_agent.rules.investigation import investigation_info
-
-        advisory = investigation_info(state, deps.tables)
-        if advisory and not (review and review.info_items):
-            missing = list(dict.fromkeys([*missing, *advisory["missing_fields"]]))
+        # Optional investigation materials are requested only when staff select them
+        # during referral preparation, never appended to every initial inquiry.
         # 고객 답변과 같이 영어로 검토하고, 승인한 문장만 finish에서 고객 언어로 바꾼다.
-        text = deps.write_info_request(missing, "en", _inquiry_text(state), deps.llm)
+        options = {}
+        if deps.write_info_request is info_request_agent.write_info_request:
+            from cs_agent.agents import copilot
+
+            detail = copilot.view(state, deps.tables)
+            if review and review.action == ReviewAction.REWRITE:
+                options["reviewer_feedback"] = review.feedback
+            reasons = {
+                r["field"]: r["text"]
+                for r in (detail.get("reading") or {}).get("request_reasons", [])
+            }
+            options["request_context"] = [
+                {**row, "reason": reasons.get(row["field"], row["reason"])}
+                for row in detail["request_plan"]
+                if row["field"] in missing
+            ]
+        text = deps.write_info_request(missing, "en", _inquiry_text(state), deps.llm, **options)
         return {
             "info_request": text,
+            "info_request_fields": list(missing),
+            "draft_specialist_revision": state.get("specialist_revision", 0),
             "draft": None,
             "draft_customer_revision": state.get("customer_revision", 0),
             "draft_information_reviewed_at": (state.get("information_review") or {}).get(
@@ -388,6 +409,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         return {
             "draft": result,
             "info_request": None,
+            "info_request_fields": [],
             "draft_specialist_revision": state.get("specialist_revision", 0),
             "draft_customer_revision": state.get("customer_revision", 0),
             "draft_information_reviewed_at": (state.get("information_review") or {}).get(
@@ -850,7 +872,18 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     g.add_conditional_edges(
         "review", after_review, ["rewrite", "info_request", "escalate", "finish", "hold"]
     )
-    g.add_edge("rewrite", "draft")
+    g.add_conditional_edges(
+        "rewrite",
+        lambda s: (
+            "draft"
+            if _review(s) and _review(s).draft_purpose == "answer"
+            else "info_request"
+            if (_review(s) and _review(s).draft_purpose == "request")
+            or s.get("pending") == "info_request"
+            else "draft"
+        ),
+        ["info_request", "draft"],
+    )
     g.add_conditional_edges(
         "finish",
         lambda s: "hold" if s.get("translation_error") or s.get("approval_error") else END,

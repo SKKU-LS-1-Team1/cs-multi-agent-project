@@ -67,7 +67,20 @@ export type SpecialistFollowup = {
     conclusion: { reply_id: string; evidence: string } | null; needs_review: boolean } | null;
   confirmation: { reviewer: string; confirmed_at: string; finding: { reply_id: string; evidence: string } } | null;
 };
+export type CopilotStatement = { text: string; references: { source_id: string; quote: string }[] };
+export type CopilotInsight = {
+  workflow?: { mode: string; next_action: string; request_fields: string[] };
+  context_key: string;
+  request_plan: { field: string; label: string; status: "confirmed" | "clarify" | "missing"; origin: "required" | "specialist" | "recommended" | "selected"; blocking: boolean; value: string; reason: string; evidence: string }[];
+  reading: { request: CopilotStatement; confirmed: CopilotStatement[]; unresolved: CopilotStatement[]; next_reason: CopilotStatement | null;
+    request_reasons: (CopilotStatement & { field: string })[];
+    cases: { case_id: string; matches: CopilotStatement[]; differences: CopilotStatement[]; unknowns: CopilotStatement[]; use_limit: CopilotStatement }[] } | null;
+  sources: Record<string, { label: string; text: string }>;
+  changes: { field: string; label: string; before: string | null; after: string | null }[];
+  generated_at: string | null;
+};
 export type Ticket = {
+  copilot?: CopilotInsight;
   ticket_id: string;
   inquiry: InquiryIn | null; // 문의 원문 (회신이 오면 이어 붙인 본문)
   body_ko: string | null; // 상담원용 한국어 번역 (CSA-57)
@@ -283,6 +296,8 @@ export const api = {
   ticket: (id: string) => request<Ticket>(`/tickets/${id}`),
   act: (id: string, body: { action: ReviewAction } & Record<string, unknown>) =>
     request<Ticket>(`/tickets/${id}/action`, { method: "POST", body: JSON.stringify(body) }),
+  copilot: (id: string) => request<CopilotInsight>(`/tickets/${id}/copilot`, { method: "POST" }),
+  mailCopilot: (id: string, review: MailReview) => request<CopilotInsight>(`/mail/${id}/copilot`, { method: "POST", body: JSON.stringify(review) }),
   mails: () => request<MailItem[]>("/mail"),
   // AI 분석 + 담당 부서·우선순위 (티켓은 만들지 않는다). 담당자가 고친 유형·제품이 있으면 그 값으로
   analyzeMail: (id: string, review: MailReview = {}) =>

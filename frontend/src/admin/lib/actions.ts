@@ -36,7 +36,10 @@ function applyGeneratedAnswer(t: Ticket, c: any, draft: string) {
 export function generate(t: Ticket, purpose?: string) {
   if (isManualReplyTicket(t)) return restoreAiDraft(t);
   if (isApiTicket(t)) { // 백엔드 티켓: 답변은 AI 초안, 추가정보 요청문은 백엔드가 만든다 (CSA-61)
-    if ((purpose ?? t.composerPurpose) === "request" && !t.apiInfoRequest) { void infoRequestViaApi(t); return; }
+    if ((purpose ?? t.composerPurpose) === "request" && !t.apiInfoRequest) {
+      if (t.copilot) openModal("request-plan", { id: t.id }); else void infoRequestViaApi(t);
+      return;
+    }
     return restoreAiDraft(t);
   }
   const full = answerContext(t, purpose);
@@ -56,6 +59,14 @@ export function generate(t: Ticket, purpose?: string) {
 }
 
 export function composeFromCopilot(t: Ticket, purpose: string) {
+  if (t.regenerating || t.expertDraftLoading) return;
+  if (purpose === "answer" && isApiTicket(t) && !isManualReplyTicket(t) && (t.apiInfoRequest || t.apiEscalationRequest)) {
+    storeComposer(t);
+    setUi({ tab: "문의·답변" });
+    void rewriteViaApi(t, "Write a customer answer using the current inquiry and available evidence. Preserve uncertainties; do not reuse the information request as the answer.", "answer");
+    return;
+  }
+  if (purpose === "request" && isApiTicket(t) && t.copilot) { openModal("request-plan", { id: t.id }); return; }
   setUi({ tab: "문의·답변" });
   t.composerOpen = true;
   switchComposer(t, purpose);
@@ -64,13 +75,15 @@ export function composeFromCopilot(t: Ticket, purpose: string) {
 }
 /** 권장 자료도 기존 질의서 작성기를 사용하며 이관 자체는 막지 않는다. */
 export function requestInvestigationInfo(t: Ticket) {
+  if (isApiTicket(t) && t.copilot) { openModal("request-plan", { id: t.id }); return; }
   setUi({ tab: "문의·답변" }); t.composerOpen = true; switchComposer(t, "request");
   void infoRequestViaApi(t); scrollToEditor();
 }
 export function openExpertComposer(t: Ticket) {
+  if (t.regenerating || t.expertDraftLoading) return;
   setUi({ tab: "문의·답변" });
   t.activeComposer = "expert"; t.reviewed = false;
-  if (isApiTicket(t) && !t.expertDraft) { commit(); scrollToEditor(); void escalationDraftViaApi(t); return; } // AI 요청서 초안 (CSA-55)
+  if (isApiTicket(t) && (!t.expertDraft || !t.apiEscalationRequest)) { commit(); scrollToEditor(); void escalationDraftViaApi(t); return; } // AI 요청서 초안 (CSA-55)
   t.expertDraft ??= buildExpertRequest(t);
   commit(); scrollToEditor();
 }
@@ -84,7 +97,7 @@ export function applyPendingAnswer(t: Ticket) {
   if (isApiTicket(t) && p.apiSpecialistRevision !== undefined) {
     Object.assign(t, { draft: p.draft, draftContext: p.context, draftContextKey: contextKey(p.context),
       draftSpecialistRevision: p.apiSpecialistRevision, draftCustomerRevision: p.apiCustomerRevision ?? 0, draftInformationReviewedAt: p.apiInformationReviewedAt ?? null, draftCited: p.cited || [], reviewed: false,
-      draftVersion: (t.draftVersion || 1) + 1, purpose: "answer", composerPurpose: "answer" });
+      draftVersion: (t.draftVersion || 1) + 1, purpose: p.context?.purpose || "answer", composerPurpose: p.context?.purpose || "answer", activeComposer: "customer", composerOpen: true });
     commit();
     return;
   }
@@ -412,10 +425,7 @@ export function nextAction(t: Ticket): Next | null {
   const reply = latestCustomerReply(t), c = answerContext(t);
   const investigation = investigationTask(t);
   if (investigation && !(t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey)) {
-    if (investigation.kind === "request") return { label: "고객 질의서 작성", run: () => {
-      setUi({ tab: "문의·답변" }); t.composerOpen = true; switchComposer(t, "request");
-      void infoRequestViaApi(t); scrollToEditor();
-    } };
+    if (investigation.kind === "request") return { label: "고객 질의서 작성", run: () => requestInvestigationInfo(t) };
     if (investigation.kind === "confirm") return { label: "검토 결과 확인", run: () => openModal("specialist-finding", { id: t.id }) };
     if (investigation.kind === "analyze" || investigation.kind === "review") return { label: "회신 확인하기", run: () => openModal("specialist-finding", { id: t.id }) };
     if (t.apiCustomerId && t.apiLanguage) return { label: "진행상황 안내 작성", externalWaiting: true, run: () => openModal("care", { customerId: t.apiCustomerId, ticketId: t.id, kind: "notice" }) };

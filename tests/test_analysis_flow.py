@@ -113,7 +113,7 @@ def test_draft_is_bound_to_customer_revision():
     assert requested.info_request
     assert requested.draft is None  # the UI and approval must select the same candidate
     assert requested.draft_customer_revision == requested.customer_revision
-    rewritten = service.act(ticket.ticket_id, ReviewIn(action="rewrite"))
+    rewritten = service.act(ticket.ticket_id, ReviewIn(action="rewrite", draft_purpose="answer"))
     assert rewritten.info_request is None
     assert rewritten.draft.text == "Reply"
     approved = service.act(ticket.ticket_id, ReviewIn(action="approve"))

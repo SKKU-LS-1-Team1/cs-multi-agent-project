@@ -636,3 +636,109 @@ def test_request_text_uses_korean_field_names_without_duplicate_product(state, l
         line.startswith(("- serial_no", "- application", "- product_model", "- error_code"))
         for line in result.text.splitlines()
     )
+
+
+@pytest.mark.parametrize("target", ["answer", "request"])
+def test_copilot_actual_request_referral_and_customer_composer_transitions(client, state, target):
+    """Use real API/graph transitions; only model outputs are test doubles."""
+    state["inquiry"] = state["inquiry"].model_copy(
+        update={
+            "category": Category.DEFECT,
+            "product_code": "INV-LSLV0075-S100",
+            "subject": "S100 trips",
+            "body": "S100 trips during acceleration.",
+            "provided_fields": {},
+        }
+    )
+    tid = submit(client, state)["ticket_id"]
+    url = f"/api/tickets/{tid}"
+    question = client.post(
+        f"{url}/action", json={"action": "info_request", "info_items": ["photos"]}
+    )
+    assert question.status_code == 200, question.text
+    question = question.json()
+    assert question["info_request"] and question["draft"] is None
+    assert question["copilot"]["workflow"]["mode"] == "customer_request"
+    assert question["copilot"]["workflow"]["request_fields"] == ["photos"]
+    referral = client.post(f"{url}/escalation-request")
+    assert referral.status_code == 200, referral.text
+    referral = referral.json()
+    assert referral["escalation_request"]
+    assert referral["copilot"]["workflow"]["mode"] == "specialist_prepare"
+    assert referral["info_request"] == question["info_request"]
+    response = client.post(f"{url}/action", json={"action": "rewrite", "draft_purpose": target})
+    assert response.status_code == 200, response.text
+    row = response.json()
+    assert row["escalation_request"] is None
+    assert row["copilot"]["workflow"]["mode"] == f"customer_{target}"
+    saved = client.app.state.tickets._state(tid).values
+    if target == "answer":
+        assert row["draft"]["text"] == "Please review."
+        assert row["draft"]["text"] != question["info_request"]
+        assert row["info_request"] is None
+        assert saved["info_request_fields"] == []
+        assert saved["pending"] == "draft"
+    else:
+        assert row["info_request"] and row["draft"] is None
+        assert saved["pending"] == "info_request"
+    assert client.get(url).json()["copilot"]["workflow"] == row["copilot"]["workflow"]
+
+
+def test_explicit_answer_leaves_selected_question_and_keeps_prior_question_history(client, state):
+    state["inquiry"] = state["inquiry"].model_copy(
+        update={
+            "category": Category.DEFECT,
+            "product_code": "INV-LSLV0075-S100",
+            "subject": "S100 trips",
+            "body": "S100 trips during acceleration.",
+            "provided_fields": {},
+        }
+    )
+    tid = submit(client, state)["ticket_id"]
+    url = f"/api/tickets/{tid}"
+    plan = client.get(url).json()["copilot"]
+    selected = [r["field"] for r in plan["request_plan"] if r["status"] != "confirmed"][:1]
+    assert selected
+    response = client.post(
+        f"{url}/action",
+        json={
+            "action": "info_request",
+            "info_items": selected,
+            "info_plan_key": plan["context_key"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    question = response.json()["info_request"]
+    response = client.post(f"{url}/action", json={"action": "rewrite", "draft_purpose": "answer"})
+    assert response.status_code == 200, response.text
+    assert response.json()["info_request"] is None
+    assert response.json()["copilot"]["workflow"]["mode"] == "customer_answer"
+    service = client.app.state.tickets
+    assert service._state(tid).values["info_request_fields"] == []
+    assert any(d["text"] == question for d in service.records.drafts[tid])
+
+
+def test_draft_target_cannot_change_approval_semantics(client, state):
+    tid = submit(client, state)["ticket_id"]
+    response = client.post(
+        f"/api/tickets/{tid}/action",
+        json={
+            "action": "approve",
+            "draft_purpose": "request",
+        },
+    )
+    assert response.status_code == 409
+    assert client.get(f"/api/tickets/{tid}").json()["status"] == "READY_FOR_REVIEW"
+
+
+def test_regular_question_rewrite_preserves_document_kind_without_plan_key(client, state):
+    tid = submit(client, state)["ticket_id"]
+    url = f"/api/tickets/{tid}/action"
+    first = client.post(url, json={"action": "info_request", "info_items": ["photos"]})
+    assert first.status_code == 200
+    result = client.post(url, json={"action": "rewrite", "feedback": "Use simpler language"})
+    assert result.status_code == 200, result.text
+    assert result.json()["info_request"]
+    assert result.json()["draft"] is None
+    assert result.json()["copilot"]["workflow"]["mode"] == "customer_request"
+    assert result.json()["copilot"]["workflow"]["request_fields"] == ["photos"]

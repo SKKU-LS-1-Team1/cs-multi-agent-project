@@ -33,6 +33,9 @@ function ago(iso: string) {
   return `${Math.floor(min / 60 / 24)}일 전`;
 }
 
+import { ReadingSummary, InsightStatus } from "../components/admin/CopilotReading";
+import type { CopilotInsight } from "../../api/client";
+
 export default function Mailbox() {
   const [mails, setMails] = useState<MailItem[] | null>(null);
   const [error, setError] = useState("");
@@ -123,6 +126,21 @@ function MailDetail({ mail, products, onRegistered }: { mail: MailItem; products
   const aiCategory = analysis?.classification?.category || "";
   const aiProduct = analysis?.extraction?.product_code || "";
   const dirty = !!analysis && (category !== aiCategory || product !== aiProduct);
+  const [insight, setInsight] = useState<CopilotInsight>();
+  const [insightBusy, setInsightBusy] = useState(false);
+  const [insightError, setInsightError] = useState("");
+  const [insightRetry, setInsightRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setInsight(undefined); setInsightError(""); setInsightBusy(false);
+    if (!analysis || analysis.error || dirty || analyzing || mail.ticket_id) return;
+    setInsightBusy(true);
+    void api.mailCopilot(mail.mail_id, { category: analysis.category_by === "reviewer" ? category : null, product_code: analysis.product_by === "reviewer" ? product : null })
+      .then((data) => { if (active) setInsight(data); })
+      .catch(() => { if (active) setInsightError("AI 요약을 확인하지 못했습니다. 원문과 분석 결과로 계속 검토할 수 있습니다."); })
+      .finally(() => { if (active) setInsightBusy(false); });
+    return () => { active = false; };
+  }, [analysis, dirty, analyzing, mail.ticket_id, insightRetry]);
   const rerun = () => run({
     category: category !== aiCategory || analysis?.category_by === "reviewer" ? category || null : null,
     product_code: product !== aiProduct || analysis?.product_by === "reviewer" ? product || null : null,
@@ -177,6 +195,8 @@ function MailDetail({ mail, products, onRegistered }: { mail: MailItem; products
           {failed && <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">분석을 요청하지 못했습니다: {failed} <Button size="sm" variant="outline" className="ml-2" onClick={() => void run()}>다시 시도</Button></p>}
           {analysis?.error && <p className="rounded-xl bg-warning/20 px-4 py-3 text-sm text-warning-ink">AI 분석에 실패했습니다 ({analysis.error}). 유형을 직접 고르고 등록하면 처리 흐름이 다시 분석합니다.</p>}
 
+          {insight?.reading && <div className="border-y border-border py-4"><ReadingSummary data={insight} /></div>}
+          <InsightStatus busy={insightBusy} error={insightError} retry={() => setInsightRetry((n) => n + 1)} />
           {(analysis || failed) && (
             <div className="grid grid-cols-2 gap-4">
               <Field label={<>유형 {analysis?.classification && <small>· {analysis.category_by === "reviewer" ? "담당자 선택" : `AI 판단 · 확신도 ${Math.round(analysis.classification.confidence * 100)}%`}</small>}</>}>

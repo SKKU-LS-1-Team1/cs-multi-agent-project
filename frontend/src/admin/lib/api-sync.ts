@@ -79,6 +79,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
   if (t && (api.customer_revision ?? 0) === (t.customerRevision ?? 0) &&
     (api.information_review?.checked_at || "") < (t.informationReviewedAt || "")) return t;
   const inquiry = api.inquiry;
+  if (t) t.copilot = api.copilot;
   const initialMessage = api.customer_messages?.find((m) => m.kind === "initial");
   const replies = (api.customer_messages || []).filter((m) => m.kind === "reply");
   const latestReply = replies.at(-1);
@@ -113,6 +114,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     translatingReply: replyTranslations.has(target),
     informationSaving: informationWrites.has(target),
     apiStatus: api.status,
+    apiEscalationRequest: api.escalation_request || null,
     manualReply: Boolean(api.manual_reply),
     apiBaselineDraft: aiDraft,
     apiSendSource: displayDraft,
@@ -122,6 +124,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     apiExtraction: api.extraction,
     apiRules: api.rules,
     fieldLabels: labels,
+    copilot: api.copilot,
     analysisReady: Boolean(api.classification && api.extraction && api.rules && api.status !== "ANALYSIS_PENDING"),
     requiredInformation: required,
     infoChecks: checks,
@@ -235,6 +238,13 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     target.draftContext = displayDraft ? answerContext(target) : null;
     target.draftContextKey = displayDraft ? contextKey(target.draftContext) : null;
   }
+  // Reload the actual pending referral, not the older customer question kept as history.
+  if (!t && canEdit && api.escalation_request && !api.specialist_requests?.length) {
+    target.expertDraft = api.escalation_request.text;
+    target.expertDraftDepartment = DEPT_LABEL[api.escalation_request.to_dept] ?? api.escalation_request.to_dept;
+    target.activeComposer = "expert";
+    target.composerOpen = true;
+  }
   if (editing && target.draft === api.approval_text && api.approval_cited !== null && api.approval_cited !== undefined) {
     target.draftCited = api.approval_cited;
   }
@@ -254,7 +264,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
   return target;
 }
 
-const snapshotKey = (t: Ticket | undefined) => JSON.stringify([t?.apiStatus, t?.aiDraft, t?.apiDraftSpecialistRevision, t?.specialistRevision, t?.customerRevision, t?.reviewedReplyKey, t?.informationReviewedAt, t?.specialistFollowup]);
+const snapshotKey = (t: Ticket | undefined) => JSON.stringify([t?.apiStatus, t?.aiDraft, t?.apiDraftSpecialistRevision, t?.specialistRevision, t?.customerRevision, t?.reviewedReplyKey, t?.informationReviewedAt, t?.specialistFollowup, t?.apiEscalationRequest]);
 
 // 완료 문의는 화면에서 선택한 동안만 갱신한다. 목록 전체를 상세 스토어에 넣지 않는다.
 const selectedDetails = new Map<string, number>();
@@ -273,7 +283,7 @@ export function loadTicketDetail(id: string): Promise<Ticket> {
   const load = (async () => {
     const row = await api.ticket(id);
     const existing = tickets.find((t) => t.id === id);
-    if (existing && (before !== snapshotKey(existing) || rewrites.has(existing) || specialistWrites.has(existing) || sends.has(existing) || informationWrites.has(existing) || replyTranslations.has(existing))) return existing;
+    if (existing && (before !== snapshotKey(existing) || existing.expertDraftLoading || rewrites.has(existing) || specialistWrites.has(existing) || sends.has(existing) || informationWrites.has(existing) || replyTranslations.has(existing))) return existing;
     const result = apply(existing, row);
     if (!existing) tickets.unshift(result);
     commit();
@@ -364,10 +374,18 @@ export function isManualReplyTicket(t: Ticket): boolean {
 export function replyPreviewKey(t: Ticket): string {
   return JSON.stringify([t.draft, t.apiLanguage, t.replyLanguage, t.purpose, t.customerRevision ?? 0, t.specialistRevision ?? 0, t.informationReviewedAt ?? null, t.apiEvidence, t.apiBaselineDraft]);
 }
+function draftKindMismatch(t: Ticket): boolean {
+  return !isManualReplyTicket(t) && typeof t.apiInfoRequest === "boolean" &&
+    ["answer", "request"].includes(t.purpose) && (t.purpose === "request") !== t.apiInfoRequest;
+}
 export function hasCurrentReplyPreview(t: Ticket): boolean {
-  return Boolean(t.replyPreview?.final_text?.trim() && t.replyPreviewKey === replyPreviewKey(t));
+  return !draftKindMismatch(t) && Boolean(t.replyPreview?.final_text?.trim() && t.replyPreviewKey === replyPreviewKey(t));
 }
 export async function prepareReplyViaApi(t: Ticket): Promise<boolean> {
+  if (draftKindMismatch(t)) {
+    toast.error("작성 중인 글과 서버의 문서 종류가 다릅니다. 새 초안을 적용하거나 작성할 문서 종류를 다시 선택해 주세요.");
+    return false;
+  }
   if (replyTranslations.has(t) || t.sending || t.regenerating || !t.draft?.trim()) return false;
   let key = replyPreviewKey(t);
   const text = t.draft;
@@ -459,6 +477,10 @@ export async function resolveViaApi(t: Ticket, input: ResolutionIn): Promise<boo
 
 /** 답변 초안 작성: 백엔드 티켓은 AI 초안을 쓴다. */
 export function restoreAiDraft(t: Ticket) {
+  if (!isManualReplyTicket(t) && t.purpose === "answer" && (t.apiInfoRequest || t.apiEscalationRequest)) {
+    void rewriteViaApi(t, "Write a customer answer using the current inquiry and available evidence. Preserve uncertainties; do not reuse the information request as the answer.", "answer");
+    return;
+  }
   if (isManualReplyTicket(t)) {
     t.draft ??= "";
     t.composerOpen = true; t.activeComposer = "customer";
@@ -516,8 +538,8 @@ export async function reassignViaApi(t: Ticket, owner: string, reason: string): 
 }
 
 /** 초안 수정 요청 → 백엔드가 같은 근거로 다시 쓴다 (rewrite). */
-export async function rewriteViaApi(t: Ticket, instruction: string): Promise<boolean> {
-  if (rewrites.has(t)) return false;
+export async function rewriteViaApi(t: Ticket, instruction: string, draftPurpose?: "answer" | "request"): Promise<boolean> {
+  if (rewrites.has(t) || t.expertDraftLoading) return false;
   if (waitingReviews(t).length) { toast("전문부서 회신을 모두 등록한 뒤 작성하세요."); return false; }
   rewrites.add(t);
   const previous = t.draft;
@@ -525,8 +547,11 @@ export async function rewriteViaApi(t: Ticket, instruction: string): Promise<boo
   t.regenerating = true;
   commit();
   try {
-    const row = await api.act(t.id, { action: "rewrite", feedback: instruction, reviewer: signedIn });
-    if (row.status !== "READY_FOR_REVIEW" || !row.draft?.text ||
+    const row = await api.act(t.id, { action: "rewrite", feedback: instruction, reviewer: signedIn,
+      ...(draftPurpose ? { draft_purpose: draftPurpose, expected_customer_revision: t.customerRevision ?? 0,
+        expected_specialist_revision: t.specialistRevision ?? 0, expected_information_reviewed_at: t.informationReviewedAt ?? null } : {}) });
+    const newText = draftPurpose === "answer" ? row.draft?.text : draftPurpose === "request" ? row.info_request : row.info_request || row.draft?.text;
+    if (row.status !== "READY_FOR_REVIEW" || !newText || (draftPurpose === "answer" && row.info_request) ||
       (row.draft_specialist_revision ?? 0) !== (row.specialist_revision ?? 0) ||
       (row.specialist_revision ?? 0) < (t.specialistRevision ?? 0) ||
       (row.draft_customer_revision ?? 0) !== (row.customer_revision ?? 0) ||
@@ -542,14 +567,15 @@ export async function rewriteViaApi(t: Ticket, instruction: string): Promise<boo
     // Keep edits typed while the network request was in flight; expose the new AI draft separately.
     if (t.draft !== previous) {
       apply(t, row);
-      t.aiDraft = row.draft?.text || "";
-      t.pendingAnswer = { context: answerContext(t), draft: t.aiDraft, previous: t.draft,
+      t.aiDraft = newText;
+      t.pendingAnswer = { context: answerContext(t, row.info_request ? "request" : "answer"), draft: t.aiDraft, previous: t.draft,
         apiSpecialistRevision: row.draft_specialist_revision ?? 0, apiCustomerRevision: row.draft_customer_revision ?? 0, apiInformationReviewedAt: row.draft_information_reviewed_at ?? null, cited: row.draft?.cited || [] };
       openModal("answer-comparison", { id: t.id });
       toast("새 AI 초안을 받았습니다. 작성 중인 글은 보존했습니다. 초안 갱신에서 비교하세요.");
       return true;
     }
     takeNewDraft(t, row);
+    if (draftPurpose) { t.activeComposer = "customer"; t.composerOpen = true; }
     t.draftVersion = version;
     t.draftRequests = [...(t.draftRequests || []), { version, instruction, applied: ["AI 재작성"] }];
     record(t, "draft-rewrite", `AI 초안 재작성 · ${instruction}`, { instruction, version });
@@ -566,8 +592,8 @@ export async function rewriteViaApi(t: Ticket, instruction: string): Promise<boo
 }
 
 /** 추가정보 요청문 초안 (info_request). 승인하면 고객에게 가고 회신 대기가 된다. */
-export async function infoRequestViaApi(t: Ticket): Promise<boolean> {
-  if (rewrites.has(t)) return false;
+export async function infoRequestViaApi(t: Ticket, selected?: string[], planKey?: string): Promise<boolean> {
+  if (rewrites.has(t) || t.expertDraftLoading) return false;
   if (isManualReplyTicket(t)) {
     toast("사람 검토 답변은 담당자가 직접 작성해 주세요.");
     return false;
@@ -576,11 +602,34 @@ export async function infoRequestViaApi(t: Ticket): Promise<boolean> {
     toast("검토 대기 또는 보류 중인 문의에서만 추가정보 요청문을 만들 수 있습니다.");
     return false;
   }
+  const previous = t.draft;
   rewrites.add(t);
   t.regenerating = true;
   commit();
   try {
-    takeNewDraft(t, await api.act(t.id, { action: "info_request", reviewer: signedIn, info_items: [...new Set([...(t.specialistFollowup?.missing_fields || []), ...(t.investigationInfo?.missing_fields || []), ...(t.requiredInformation || []).filter((item: { id: string }) => !["provided", "confirmed"].includes(t.infoChecks?.[item.id]?.status)).map((item: { id: string }) => item.id)])] }));
+    const row = await api.act(t.id, { action: "info_request", reviewer: signedIn, info_plan_key: planKey, info_items: selected ?? [...new Set([...(t.specialistFollowup?.missing_fields || []), ...(t.investigationInfo?.missing_fields || []), ...(t.requiredInformation || []).filter((item: { id: string }) => !["provided", "confirmed"].includes(t.infoChecks?.[item.id]?.status)).map((item: { id: string }) => item.id)])] });
+    if (!row.info_request || !["ON_HOLD", "READY_FOR_REVIEW"].includes(row.status) ||
+      (row.draft_customer_revision ?? 0) !== (row.customer_revision ?? 0) ||
+      (row.customer_revision ?? 0) < (t.customerRevision ?? 0) ||
+      (row.draft_information_reviewed_at ?? null) !== (row.information_review?.checked_at ?? null) ||
+      (row.information_review?.checked_at ?? "") < (t.informationReviewedAt ?? "")) {
+      apply(t, row);
+      toast.error("최신 정보로 요청문을 만들지 못했습니다. 작성 중인 글은 보존했습니다.");
+      return false;
+    }
+    if (previous) record(t, "draft-replaced", "요청문 작성 전 답변 보존", { draft: previous });
+    if (t.draft !== previous) {
+      apply(t, row);
+      t.aiDraft = row.info_request;
+      t.pendingAnswer = { context: answerContext(t, "request"), draft: row.info_request, previous: t.draft,
+        apiSpecialistRevision: row.draft_specialist_revision ?? 0, apiCustomerRevision: row.draft_customer_revision ?? 0,
+        apiInformationReviewedAt: row.draft_information_reviewed_at ?? null, cited: [] };
+      openModal("answer-comparison", { id: t.id });
+      toast("작성 중인 글을 보존했습니다. 새 요청문을 비교해 주세요.");
+      return true;
+    }
+    takeNewDraft(t, row);
+    t.activeComposer = "customer"; t.composerOpen = true;
     record(t, "draft", "추가정보 요청문 초안 생성", { purpose: "request" });
     toast("추가정보 요청문을 준비했습니다.");
     return true;
@@ -596,6 +645,7 @@ export async function infoRequestViaApi(t: Ticket): Promise<boolean> {
 
 /** 전문부서 요청서 AI 초안 (부서를 주면 그 부서용). 화면의 요청서 칸을 채운다. */
 export async function escalationDraftViaApi(t: Ticket, deptLabel?: string): Promise<boolean> {
+  if (t.expertDraftLoading || rewrites.has(t)) return false;
   t.expertDraftLoading = true;
   commit();
   try {

@@ -103,6 +103,12 @@ def get_ticket(ticket_id: str, tickets: Tickets) -> TicketOut:
         return tickets.get(ticket_id)
 
 
+@router.post("/{ticket_id}/copilot")
+def refresh_copilot(ticket_id: str, tickets: Tickets, llm: LLM) -> dict:
+    with _errors():
+        return tickets.refresh_copilot(ticket_id, llm)
+
+
 @router.post("/{ticket_id}/reply-preview")
 def prepare_reply(ticket_id: str, body: ReplyPreviewIn, tickets: Tickets, llm: LLM) -> dict:
     with _errors():
