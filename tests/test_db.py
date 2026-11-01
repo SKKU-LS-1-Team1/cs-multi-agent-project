@@ -69,6 +69,8 @@ def test_rows_keep_every_schema_field():
     assert (
         set(ReviewIn.model_fields)
         - {
+            "draft_purpose",  # 작성 대상, 그래프 입력·체크포인트 전용
+            "info_plan_key",  # 요청 항목의 원본 버전, 체크포인트 전용
             "reply_preview_id",  # 체크포인트에 저장된 변환본 식별자
             "expected_specialist_revision",
             "expected_customer_revision",

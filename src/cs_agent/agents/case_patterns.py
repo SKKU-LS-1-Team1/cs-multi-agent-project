@@ -49,7 +49,7 @@ EXAMPLE_CHARS = 1200  # 근거에 넣는 대표 사례 답변 길이
 
 
 def _norm(text: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+    return re.sub(r"[\W_]+", " ", (text or "").casefold()).strip()
 
 
 def _code(value: Any) -> str | None:
@@ -173,7 +173,11 @@ def pattern_evidence(
     return Evidence(
         source="cases",
         doc_id=example["case_id"],
-        text=f"{row['text']}\n{count}\nExample reply ({example['case_id']}): {reply}",
+        text=(
+            f"{row['text']}\n{count}\n"
+            f"Representative case summary: {example.get('summary') or 'Not recorded'}\n"
+            f"Example reply ({example['case_id']}): {reply}"
+        ),
         score=score,
         metadata={
             "pattern_id": row["pattern_id"],
@@ -208,7 +212,7 @@ class PgPatternRetriever:
         ORDER BY distance LIMIT :k
     """
     _CASES = """
-        SELECT pattern_id, case_id, final_reply, data_split FROM resolution_cases
+        SELECT pattern_id, case_id, final_reply, data_split, summary FROM resolution_cases
         WHERE active AND pattern_id = ANY(CAST(:ids AS text[]))
         ORDER BY pattern_id, (data_split = 'live') DESC, created_at DESC, case_id DESC
     """

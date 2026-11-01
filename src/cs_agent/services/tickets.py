@@ -731,10 +731,43 @@ class TicketService:
 
     @_serialized
     def act(self, ticket_id: str, review: ReviewIn) -> TicketOut:
+        if review.draft_purpose is not None and review.action != ReviewAction.REWRITE:
+            raise InvalidAction("작성 대상은 재작성 요청에서만 지정할 수 있습니다")
         if review.acknowledged_failures and not review.reviewer.strip():
             raise InvalidAction("점검 실패를 확인하고 승인하려면 담당자 이름이 필요합니다")
         requests = self._sync_specialists(ticket_id)
         snapshot = self._state(ticket_id)
+        if (
+            review.action == ReviewAction.REWRITE
+            and review.draft_purpose != "answer"
+            and snapshot.values.get("pending") == "info_request"
+            and snapshot.values.get("info_request_fields")
+        ):
+            from cs_agent.agents import copilot
+
+            plan = copilot.view(snapshot.values, load_tables())["request_plan"]
+            allowed = {row["field"] for row in plan if row["status"] != "confirmed"}
+            rules = snapshot.values.get("rules")
+            selected = snapshot.values.get("info_request_fields") or (
+                (rules.missing_blocking or rules.missing_info) if rules else []
+            )
+            remaining = [field for field in selected if field in allowed]
+            if not remaining:
+                raise InvalidAction(
+                    "선택한 정보가 모두 확인되었습니다. 답변 작성으로 진행해 주세요"
+                )
+            review = review.model_copy(update={"info_items": remaining})
+        if review.action == ReviewAction.INFO_REQUEST and review.info_plan_key is not None:
+            from cs_agent.agents import copilot
+
+            current = copilot.view(snapshot.values, load_tables())
+            allowed = {
+                row["field"] for row in current["request_plan"] if row["status"] != "confirmed"
+            }
+            if current["context_key"] != review.info_plan_key:
+                raise InvalidAction("확인된 정보가 변경되었습니다. 요청 항목을 다시 선택해 주세요")
+            if not review.info_items or not set(review.info_items) <= allowed:
+                raise InvalidAction("미확인 요청 항목만 선택해 주세요")
         if (
             review.expected_customer_revision is not None
             and review.expected_customer_revision != snapshot.values.get("customer_revision", 0)
@@ -877,6 +910,33 @@ class TicketService:
                 recovered.append(ticket_id)
         return recovered
 
+    def refresh_copilot(self, ticket_id: str, llm: LLMRouter) -> dict:
+        from cs_agent.agents import copilot
+        from cs_agent.services.progress import ProgressService
+
+        snapshot = self._state(ticket_id)
+        ProgressService._save_node(snapshot)  # 실행 중인 그래프의 다음 노드를 변경하지 않는다
+        tables = load_tables()
+        current = copilot.view(snapshot.values, tables)
+        if current["reading"]:
+            return current
+        try:
+            with ticket_scope(ticket_id):
+                result = copilot.generate(snapshot.values, tables, llm)
+        except ValueError as exc:
+            raise InvalidAction(str(exc)) from None
+        with self.records.ticket_locks([ticket_id]):
+            latest = self._state(ticket_id)
+            if copilot.context(latest.values, tables)[0] != result["context_key"]:
+                raise InvalidAction("문의 내용이 변경되었습니다. 최신 정보로 다시 확인해 주세요")
+            self.graph.update_state(
+                self._config(ticket_id),
+                {"copilot_insight": result},
+                as_node=ProgressService._save_node(latest),
+            )
+            self.records.save_state(ticket_id, self._state(ticket_id).values)
+        return copilot.view(self._state(ticket_id).values, tables)
+
     def get(self, ticket_id: str) -> TicketOut:
         v = self._state(ticket_id).values
         rules = v.get("rules")
@@ -890,7 +950,10 @@ class TicketService:
             draft = draft.model_copy(
                 update={"text": drafting.customer_text(draft.text, references)}
             )
+        from cs_agent.agents import copilot
+
         return TicketOut(
+            copilot=copilot.view(v, load_tables()),
             ticket_id=ticket_id,
             inquiry=v.get("inquiry"),
             body_ko=v.get("body_ko"),

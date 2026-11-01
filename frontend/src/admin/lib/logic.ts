@@ -227,7 +227,7 @@ export function answerContext(t: Ticket, purpose?: string): Ctx {
         .map((c) => ({ ...c, kind: "case", matches: c.raw.reference_section === "3.2", label: c.id + " · " + c.title }))
     : (t.apiEvidence || []).filter((e: any) => e.source === "cases").map((e: any) => ({
         id: e.section ? `${e.doc_id}#${e.section}` : e.doc_id, label: e.metadata?.title || e.doc_id,
-        text: e.text, kind: "case", matches: false,
+        text: e.text, kind: "case", matches: undefined, // API retrieval does not establish condition differences.
         path: e.metadata?.graph_path || "", // 지식 그래프 근거 경로 (CSA-73): 제품 → 에러코드 → 고장 → 사례 → 문서 절
       }));
   const refs: any[] = [
@@ -472,6 +472,7 @@ export function branchChoice(t: Ticket): Choice | null {
   if (t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting") return null;
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return null;
   if (waitingReviews(t).length || t.legacyReviewPending) return null;
+  if (untouchedAiDraft && t.composerOpen) return "answer";
   if (c.missingInfo.length) return "request";
   if (!c.expertResponse && !c.availableReferences.length && ["불량", "설치", "펌웨어"].includes(t.type) && !(t.customerRequestStatus === "received" && reply)) return "expert";
   return "answer";

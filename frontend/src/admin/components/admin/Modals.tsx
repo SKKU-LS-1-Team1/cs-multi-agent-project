@@ -18,16 +18,17 @@ import {
 import {
   candidates, completionDraft, customerLanguage, informationAssessment, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, referralRows, resource, resourceReason, signedIn, waitingReviews,
 } from "@admin/lib/logic";
-import { closeModal, findTicket, openModal, tickets, ui, useStore } from "@admin/lib/store";
+import { closeModal, setUi, findTicket, openModal, tickets, ui, useStore } from "@admin/lib/store";
 import { kindLabel, rememberProgressNotice, type CareKind } from "@admin/lib/care";
 import { NoticeSession, preparedNotice, type NoticeState } from "@admin/lib/progress-notice";
 import { checkBeforeSend, SendQcSession, type QcState } from "@admin/lib/send-qc";
-import { isApiTicket, replyPreviewKey, specialistFollowupViaApi } from "@admin/lib/api-sync";
+import { infoRequestViaApi, isApiTicket, replyPreviewKey, specialistFollowupViaApi } from "@admin/lib/api-sync";
 import { AI_STYLE } from "./CareButtons";
 import { SEGMENT_KO, STATUS_KO, useCustomers, type Customer } from "@admin/lib/customers";
 import type { Ticket } from "@admin/lib/types";
 
 const TITLES: Record<string, string> = {
+  "request-plan": "고객에게 확인할 정보",
   "specialist-finding": "전문부서 검토 결과 확인",
   "new-ticket": "새 문의 등록", assign: "담당자 및 리소스 확인", send: "발송 확인", "answer-comparison": "답변 초안 갱신", "review-customer": "수신 자료 확인",
   "expert-receive": "전문부서 회신 등록", completion: "문의 완료 처리", "customer-reply": "고객 회신", "department-review": "전문부서 요청·회신", file: "첨부파일",
@@ -54,6 +55,7 @@ export default function ModalHost() {
 
 function Body({ type, props, t }: { type: string; props: Record<string, any>; t?: Ticket }) {
   switch (type) {
+    case "request-plan": return t ? <RequestPlan key={t.id} t={t} /> : null;
     case "new-ticket": return <NewTicket />;
     case "assign": return t ? <Assign t={t} /> : null;
     case "answer-comparison": return t ? <Comparison t={t} /> : null;
@@ -519,4 +521,40 @@ function SpecialistFinding({ t }: { t: Ticket }) {
     {f.pending_replies && <p className="text-sm text-warning-ink">다른 전문부서의 회신을 기다리고 있습니다.</p>}
     <DialogFooter><Button variant="outline" disabled={busy} onClick={closeModal}>닫기</Button><Button disabled={busy || stale || t.followupBusy || !confirmed || f.pending_replies || !evidence.trim() || !source?.text.includes(evidence.trim())} onClick={() => void save()}>{busy ? "저장 중…" : "확인 완료"}</Button></DialogFooter>
   </div>;
+}
+
+function RequestPlan({ t }: { t: Ticket }) {
+  const [plan] = useState(() => t.copilot as import("../../../api/client").CopilotInsight);
+  const items = plan.request_plan.filter((r) => r.status !== "confirmed" &&
+    (r.origin !== "recommended" || t.activeComposer === "expert" || plan.workflow?.request_fields.includes(r.field)));
+  const known = plan.request_plan.filter((r) => r.status === "confirmed");
+  const [selected, setSelected] = useState(() => items.filter((r) => r.origin !== "recommended").map((r) => r.field));
+  const [busy, setBusy] = useState(false);
+  const stale = plan.context_key !== t.copilot?.context_key;
+  const reasons = new Map(plan.reading?.request_reasons.map((r) => [r.field, r.text]));
+  return <form className="grid gap-4" onSubmit={async (e) => {
+    e.preventDefault(); if (busy || stale || !selected.length) return;
+    setBusy(true);
+    try { if (await infoRequestViaApi(t, selected, plan.context_key)) { setUi({ tab: "문의·답변" }); if (ui.modal?.type === "request-plan") closeModal(); } }
+    finally { setBusy(false); }
+  }}>
+    <p className="text-sm leading-relaxed text-muted-foreground">이번에 확인할 항목을 선택하세요. 이미 받은 정보는 다시 요청하지 않습니다. 선택한 항목으로 영어 초안을 작성합니다.</p>
+    {stale && <p role="alert" className="text-sm text-warning-ink">문의 정보가 바뀌었습니다. 닫은 뒤 최신 항목을 확인해 주세요.</p>}
+    <div className="grid max-h-[50vh] gap-4 overflow-y-auto">
+      {!!known.length && <section aria-label="이미 받은 정보" className="rounded-xl bg-muted/60 p-4">
+        <h3 className="mb-2 text-sm font-semibold">이미 받은 정보 · {known.length}건</h3>
+        <dl className="grid gap-2 text-sm">{known.map((r) => <div key={r.field} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3"><dt className="break-words text-muted-foreground">{r.label}</dt><dd className="break-words font-medium">{r.value}</dd></div>)}</dl>
+      </section>}
+      <div className="grid gap-3">{items.map((r) => <label key={r.field} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border p-4">
+      <Checkbox className="mt-1 shrink-0" checked={selected.includes(r.field)} disabled={busy || stale}
+        onCheckedChange={(checked) => setSelected((old) => checked ? [...old, r.field] : old.filter((f) => f !== r.field))} />
+      <span className="min-w-0"><span className="flex flex-wrap items-center gap-2 font-medium">{r.label}<Tag tone={r.origin === "recommended" ? "" : "blue"}>{r.status === "clarify" ? "재확인" : r.origin === "specialist" ? "전문부서 요청" : r.origin === "recommended" ? "권장" : "필수정보"}</Tag></span>
+        <span className="mt-1 block text-sm leading-relaxed text-muted-foreground">{reasons.get(r.field) || r.reason}</span>
+        {r.evidence && <span className="mt-2 block text-xs text-muted-foreground">회신 원문: {r.evidence}</span>}
+      </span>
+    </label>)}</div></div>
+    {!items.length && <p className="text-sm">현재 요청할 미확인 항목이 없습니다.</p>}
+
+    <Footer><Close label="취소" /><Button type="submit" disabled={busy || stale || !selected.length}>{busy ? "요청문 작성 중…" : "선택 항목으로 요청문 작성"}</Button></Footer>
+  </form>;
 }

@@ -577,3 +577,19 @@ def test_work_list_pauses_sla_while_waiting_for_customer(monkeypatch):
     [row] = service.work_list(now=at(20))
     assert row["sla_due_at"] == at(target_h + 10)
     assert service.get(tid).sla_due_at == at(target_h + 10)  # 상세 화면 마감도 같이 밀린다
+
+
+def test_initial_customer_request_does_not_append_future_referral_materials(run):
+    inquiry = InquiryIn(
+        channel="email",
+        category=Category.DEFECT,
+        product_code="INV-LSLV0075-S100",
+        subject="S100 E.OC",
+        body="E.OC during acceleration.",
+    )
+    snapshot, _, calls = run(inquiry)
+    values = snapshot.values
+    assert calls.info_requests
+    expected = values["rules"].missing_blocking or values["rules"].missing_info
+    assert calls.info_requests[-1] == expected
+    assert "cable_length" not in calls.info_requests[-1]
