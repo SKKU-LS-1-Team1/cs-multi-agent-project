@@ -213,6 +213,7 @@ def test_scriptable_files_are_downloaded_not_shown(client) -> None:
 
 
 def test_attachment_upload_limits(client, monkeypatch) -> None:
+    """없는 문의 · 잘못된 id · 빈 파일 · 크기 · 개수 제한."""
     from cs_agent.api import inquiries
     from cs_agent.services import attachments
 
@@ -232,3 +233,7 @@ def test_attachment_upload_limits(client, monkeypatch) -> None:
     monkeypatch.setattr(attachments, "MAX_FILES", 1)
     assert client.post(url, params={"name": "a.png"}, content=b"12345").status_code == 201
     assert client.post(url, params={"name": "b.png"}, content=b"12345").status_code == 422
+
+    # 받다가 실패한 업로드(빈 파일 · 너무 큼 · 개수 초과)는 임시 파일을 남기지 않는다
+    store = client.app.state.attachments
+    assert not list((store.root / tid).glob(".upload-*"))

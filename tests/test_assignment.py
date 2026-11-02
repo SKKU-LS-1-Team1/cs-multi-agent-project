@@ -43,11 +43,12 @@ def _csv(tmp_path: Path, *rows: str, header: str = ",".join(COLUMNS)) -> Path:
 @pytest.mark.parametrize(
     "row, message",
     [
-        ("A-1,a,NOPE,Y,0", "없는 부서"),
-        ("A-1,a,TS_LV,yes,0", "active"),
-        ("A-1,a,TS_LV,Y,many", "max_open 은 정수"),
-        ("A-1,a,TS_LV,Y,-1", "0 이상"),
-        (",a,TS_LV,Y,0", "agent_id"),
+        ("A-1,a,NOPE,Y,0,0", "없는 부서"),
+        ("A-1,a,TS_LV,yes,0,0", "active"),
+        ("A-1,a,TS_LV,Y,many,0", "max_open 은 정수"),
+        ("A-1,a,TS_LV,Y,-1,0", "0 이상"),
+        ("A-1,a,TS_LV,Y,0,first", "priority 는 정수"),
+        (",a,TS_LV,Y,0,0", "agent_id"),
     ],
 )
 def test_load_agents_rejects_bad_rows(tmp_path, row, message) -> None:
@@ -56,7 +57,7 @@ def test_load_agents_rejects_bad_rows(tmp_path, row, message) -> None:
 
 
 def test_load_agents_rejects_duplicates_and_wrong_header(tmp_path) -> None:
-    dup = _csv(tmp_path, "A-1,a,TS_LV,Y,0", "A-1,b,TS_LV,N,0")
+    dup = _csv(tmp_path, "A-1,a,TS_LV,Y,0,0", "A-1,b,TS_LV,N,0,0")
     with pytest.raises(ValueError, match="겹친다"):
         load_agents(dup, depts={"TS_LV"})
     with pytest.raises(ValueError, match="열은"):
@@ -68,8 +69,8 @@ def test_load_agents_missing_file_is_empty(tmp_path) -> None:
 
 
 def test_load_agents_parses_values(tmp_path) -> None:
-    path = _csv(tmp_path, "A-1, 상담원 ,TS_LV,N,5")
-    assert load_agents(path, depts={"TS_LV"}) == [Agent("A-1", "상담원", "TS_LV", False, 5)]
+    path = _csv(tmp_path, "A-1, 상담원 ,TS_LV,N,5,2")
+    assert load_agents(path, depts={"TS_LV"}) == [Agent("A-1", "상담원", "TS_LV", False, 5, 2)]
 
 
 # --- 배정 규칙 ---------------------------------------------------------------------------------
@@ -84,6 +85,17 @@ def test_assign_picks_least_loaded_active_agent_in_dept() -> None:
     assert assign(None, {}, ROSTER) is None  # 부서 없는 안전 건
     full = [Agent("A-1", "one", "TS_LV", max_open=1)]
     assert assign("TS_LV", {"A-1": 1}, full) is None  # 모두 찼으면 부서 큐
+
+
+def test_assign_fills_the_first_priority_up_to_its_max_open() -> None:
+    """priority 가 작은 사람(팀장)이 정원까지 먼저 받고, 차면 다음 순위 중 열린 건 적은 사람."""
+    team = [
+        Agent("L-9", "lead", "GCS_L1", max_open=2, priority=0),
+        Agent("M-1", "m1", "GCS_L1", max_open=5, priority=1),
+        Agent("M-2", "m2", "GCS_L1", max_open=5, priority=1),
+    ]
+    assert assign("GCS_L1", {"L-9": 1, "M-1": 0}, team) == "L-9"  # 열린 건이 더 많아도 팀장 먼저
+    assert assign("GCS_L1", {"L-9": 2, "M-1": 1}, team) == "M-2"  # 팀장 정원이 찼다
 
 
 def test_suggest_and_reassign_stay_in_dept() -> None:
@@ -120,25 +132,22 @@ def client():
         yield c
 
 
-def test_new_tickets_are_spread_over_frontline_agents(client) -> None:
-    """담당자는 앞단 글로벌 C/S 센터 상담원이다. 문의 부서(TS_TRF)와 따로다."""
+def test_new_tickets_go_to_the_frontline_lead_first(client) -> None:
+    """담당자는 앞단 글로벌 C/S 센터 상담원이다. 문의 부서(TS_TRF)와 따로다.
+    팀장(priority 0)이 정원까지 먼저 받는다 (시연 때 팀장 화면에 문의가 모이게)."""
     first = client.post("/api/tickets", json=INQUIRY).json()
     second = client.post("/api/tickets", json=INQUIRY).json()
 
     assert first["assigned_dept"] == "TS_TRF"
-    assert (first["assignee"], second["assignee"]) == ("AG-GCS_L1-01", "AG-GCS_L1-02")
+    assert (first["assignee"], second["assignee"]) == ("AG-GCS_L1-01", "AG-GCS_L1-01")
     history = client.get(f"/api/tickets/{first['ticket_id']}/assignments").json()
     assert [(h["from_assignee"], h["to_assignee"], h["reason"]) for h in history] == [
         (None, "AG-GCS_L1-01", "자동 배정")
     ]
     agents = {a["agent_id"]: a for a in client.get("/api/agents?dept=GCS_L1").json()}
     assert agents["AG-GCS_L1-01"]["name"] == "Doyeon Kim"  # 관리자 화면 로그인 계정 (팀장)
-    assert {k: a["open_count"] for k, a in agents.items()} == {
-        "AG-GCS_L1-01": 1,
-        "AG-GCS_L1-02": 1,
-        "AG-GCS_L1-03": 0,
-        "AG-GCS_L1-04": 0,
-    }
+    assert len(agents) == 8
+    assert {k: a["open_count"] for k, a in agents.items() if a["open_count"]} == {"AG-GCS_L1-01": 2}
 
 
 def test_reassign_between_frontline_agents_and_reject_specialists(client) -> None:

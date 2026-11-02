@@ -17,9 +17,13 @@ export const FRONTLINE = "글로벌 C/S 센터";
 
 export const people: Person[] = [
   { name: "Minji Park", userId: ACCOUNTS.find((a) => a.name === "Minji Park")!.userId, rank: "과장", department: FRONTLINE, capacity: 6, available: true },
-  { name: "Doyeon Kim", userId: ACCOUNTS.find((a) => a.name === "Doyeon Kim")!.userId, rank: "팀장", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Doyeon Kim", userId: ACCOUNTS.find((a) => a.name === "Doyeon Kim")!.userId, rank: "팀장", department: FRONTLINE, capacity: 30, available: true },
   { name: "Jun Lee", userId: ACCOUNTS.find((a) => a.name === "Jun Lee")!.userId, rank: "대리", department: FRONTLINE, capacity: 6, available: true },
   { name: "Hana Choi", userId: ACCOUNTS.find((a) => a.name === "Hana Choi")!.userId, rank: "사원", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Sora Jung", userId: ACCOUNTS.find((a) => a.name === "Sora Jung")!.userId, rank: "대리", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Daniel Han", userId: ACCOUNTS.find((a) => a.name === "Daniel Han")!.userId, rank: "사원", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Yuna Kang", userId: ACCOUNTS.find((a) => a.name === "Yuna Kang")!.userId, rank: "사원", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Minho Seo", userId: ACCOUNTS.find((a) => a.name === "Minho Seo")!.userId, rank: "사원", department: FRONTLINE, capacity: 6, available: true },
 ];
 
 const phraseMap: Record<string, string> = {
@@ -76,13 +80,15 @@ export function resource(p: Person, excludeId?: string) {
   return { count, capacity: p.capacity, free: Math.max(0, p.capacity - count), ratio: count / p.capacity };
 }
 // BACKEND: 담당자 배정
-// 규칙: 모든 담당자가 동등하게 응대할 수 있다고 보고 수용량(부하)만 확인한다. 가득 찬 담당자와 배정 제외 상태는 막고, 추천은 미완료 건수가 가장 적은 사람.
+// 규칙: 모든 담당자가 동등하게 응대할 수 있다고 보고 수용량(부하)만 확인한다. 가득 찬 담당자와 배정 제외 상태는 막는다.
+//       추천은 팀장이 수용량까지 먼저 받고(시연, 백엔드 agents.csv priority 와 같다), 그다음 부하가 가장 낮은 사람.
 // 필요: 담당자별 미완료 건수·수용량·배정 제외 여부 조회, 담당자 변경 API(되돌리기 포함). 지금: people 상수와 로컬 문의로 계산한다.
-/** 배정 가능한 담당자: 모두 동등하게 응대할 수 있다는 전제로, 배정 제외가 아니고 수용량에 여유가 있는 사람. 부하가 가장 낮은 순. */
+/** 배정 가능한 담당자: 배정 제외가 아니고 수용량에 여유가 있는 사람. 팀장이 먼저, 그다음 부하가 가장 낮은 순. */
 export function candidates(excludeId?: string) {
+  const lead = (p: Person) => (p.name === teamLead ? 0 : 1);
   return people
     .filter((p) => p.available && resource(p, excludeId).free > 0)
-    .sort((a, b) => resource(a, excludeId).ratio - resource(b, excludeId).ratio || a.name.localeCompare(b.name));
+    .sort((a, b) => lead(a) - lead(b) || resource(a, excludeId).ratio - resource(b, excludeId).ratio || a.name.localeCompare(b.name));
 }
 /** 배정 검증은 부하만 본다(제품 역량·언어·부서는 따지지 않는다). */
 export function checkAssign(t: Ticket, p: Person): { ok: boolean; reason?: string } {

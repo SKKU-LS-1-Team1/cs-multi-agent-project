@@ -7,6 +7,8 @@ export const pauseRule = data.pause_rule.replace(/^WAITING_CUSTOMER\((.*?)\)\s*/
 export const ESC_REASON = { SPEC_INTERPRETATION: '규격 해석', ONSITE_REQUIRED: '현장 확인 필요', QUALITY_RETURN: '품질 관련 반품', RMA_REQUIRED: 'RMA 필요', COMMERCIAL_TERMS: '상업 조건 협의', CAUSE_ANALYSIS: '원인 분석', FW_UPDATE_FAILURE: '펌웨어 업데이트 실패' }
 export const dept = (c) => biz.depts[c] ?? c
 export const fieldLabel = (k) => FIELD_KO[k] ?? data.labels[k] ?? k
+// 본문에 적힌 항목 이름과 맞춰 볼 이름들(한국어·원문 영어). 문의서가 만든 본문과 샘플 본문의 이름이 달라서 둘 다 본다.
+export const fieldLabels = (k) => [FIELD_KO[k], data.labels[k], k === 'photos' ? '증상 사진 · 영상 · 소리' : null].filter(Boolean)
 
 export const CHANNEL = {
   EMAIL: { emoji: '✉️', label: '이메일' },
@@ -73,32 +75,5 @@ export const split = (s) => (s ? s.split(';').filter(Boolean) : [])
 export const fmtTime = (iso) => (iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} (UTC)` : null)
 export const titleOf = (t) => (t.inquiry_subject || `${t.inquiry_body.replace(/\s+/g, ' ').slice(0, 42)}${t.inquiry_body.length > 42 ? '…' : ''}`)
 export const attachmentsOf = (t) => [...t.inquiry_body.matchAll(/\[attachment: ([^\]]+)\]/g)].map((m) => m[1])
-
-// 웹 문의 본문(Inquire.jsx submit 이 만든 글)을 화면용으로 나눈다:
-// "[유형]\n본문\n\nDetails:\n- 항목: 값\n\nContact: 국가: … / 이메일: …" → { tag, text, details, contact }
-// 이 모양이 아닌 본문(전화·메일 접수)은 text 에 그대로 둔다.
-export function parseBody(body = '') {
-  let text = body
-  let contact = []
-  const ci = text.lastIndexOf('\n\nContact: ')
-  if (ci >= 0) {
-    contact = text.slice(ci + 11).trim().split(' / ').map((kv) => {
-      const i = kv.indexOf(': ')
-      return i > 0 ? [kv.slice(0, i), kv.slice(i + 2)] : ['', kv]
-    })
-    text = text.slice(0, ci)
-  }
-  let details = []
-  const di = text.lastIndexOf('\n\nDetails:\n')
-  if (di >= 0) {
-    details = text.slice(di + 11).split('\n').map((l) => /^- ([^:]+): (.*)$/.exec(l.trim())).filter(Boolean).map(([, label, value]) => {
-      const files = [...value.matchAll(/\[attachment: ([^\]]+)\]/g)].map((m) => m[1])
-      return { label, value: files.length ? '' : value, files }
-    })
-    text = text.slice(0, di)
-  }
-  const tm = /^\[([^\]\n]+)\]\n/.exec(text)
-  return { tag: tm?.[1] ?? '', text: (tm ? text.slice(tm[0].length) : text).trim(), details, contact }
-}
 
 export const tickets = data.tickets

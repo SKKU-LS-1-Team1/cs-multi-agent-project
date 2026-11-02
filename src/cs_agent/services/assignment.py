@@ -7,21 +7,26 @@
 # 담당 모델 (2026-10-22 팀장 결정, CSA-59 관리자 화면과 맞춤): 모든 문의의 담당자는 앞단 글로벌
 # C/S 센터(OWNER_DEPT = GCS_L1) 상담원이다. 문의의 부서(assigned_dept · escalated_to)는 전문부서
 # 요청·이관 대상이고, 이관해도 담당자는 그대로다 (앞단이 고객 소통을 끝까지 맡는다).
-# 관리자 화면 로그인 계정(frontend/src/admin/lib/auth.ts) 4명이 GCS_L1 명단이다 (팀장 Doyeon Kim).
+# 관리자 화면 로그인 계정(frontend/src/admin/lib/auth.ts) 8명이 GCS_L1 명단이다 (팀장 Doyeon Kim).
 #
 # 정해 둔 것
-# - 담당자 명단: data/ref/agents.csv (agent_id, name, dept_code, active, max_open). 시작할 때 읽고
-#   (main.py), 표가 틀리면(없는 부서 코드·겹치는 agent_id·active 가 Y/N 아님) 시작을 멈춘다.
+# - 담당자 명단: data/ref/agents.csv (agent_id, name, dept_code, active, max_open, priority).
+#   시작할 때 읽고 (main.py), 표가 틀리면(없는 부서 코드·겹치는 agent_id·active 가 Y/N 아님)
+#   시작을 멈춘다.
 #   파일이 없으면 빈 명단 → 배정하지 않는다 (assignee NULL, 부서 큐에 남음).
-# - 시연용 명단 (이름은 지어낸 것): GCS_L1 은 관리자 화면 계정 4명 (담당자). 전문부서는 인원이
+# - 시연용 명단 (이름은 지어낸 것): GCS_L1 은 관리자 화면 계정 8명 (담당자). 전문부서는 인원이
 #   tickets 부서별 유입량에 비례 — 많은 부서(TS_AUTO·TS_LV·SCM·SALES_OPS·CERT) 3명, 나머지 2명.
 #   max_open 은 난이도: L1 15, L2 10(적은 부서 TS_MV·TS_TRF 8), L3·현장(QA_CLAIM·RND_FW·
 #   FIELD_SVC) 6. 부서 수용량
 #   (인원 × max_open)이 tickets 로 추정한 동시 열린 건(유입 × 처리 시간 상위 10%, 최대 11건)보다
 #   모두 커서 평소엔 안 걸리고, 시연·평가처럼 한꺼번에 몰릴 때만 부서 큐로 넘친다.
 #   AG-TS_AUTO-04 는 휴직(active=N) 예시.
-# - 자동 배정 assign(dept=OWNER_DEPT): 활성 담당자 중 지금 열린 건이 가장 적은 사람. 같으면
-#   agent_id 순. max_open(0 이면 제한 없음)에 이미 찬 사람은 뺀다. 다 찼으면 None (앞단 큐).
+# - 배정 순위 priority (2026-11-02 팀장 결정, 시연): 작을수록 먼저 받는다. 팀장 Doyeon Kim 이 0 ·
+#   max_open 30 이라 정원이 찰 때까지 새 문의를 먼저 받고, 다 차면 나머지(1) 중 열린 건
+#   적은 사람이 받는다.
+# - 자동 배정 assign(dept=OWNER_DEPT): 활성 담당자 중 priority 가 가장 작은 사람, 그 안에서 지금
+#   열린 건이 가장 적은 사람. 같으면 agent_id 순. max_open(0 이면 제한 없음)에 이미 찬 사람은
+#   뺀다. 다 찼으면 None (앞단 큐).
 #   services/tickets.py 가 그래프를 돌린 뒤마다 부른다: 아직 담당자가 없거나 담당자가 비활성일 때.
 #   안전 건(사람 큐)도 배정한다. 닫힌 건은 배정하지 않는다.
 # - 재배정 reassign(OWNER_DEPT, …): 앞단 활성 담당자만 (전문부서로 보내는 건 이관 ESCALATE).
@@ -42,7 +47,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-COLUMNS = ("agent_id", "name", "dept_code", "active", "max_open")
+COLUMNS = ("agent_id", "name", "dept_code", "active", "max_open", "priority")
 OWNER_DEPT = "GCS_L1"  # 문의 담당자를 고르는 부서 (위 담당 모델)
 
 
@@ -53,6 +58,7 @@ class Agent:
     dept: str
     active: bool = True
     max_open: int = 0  # 0 이면 제한 없음
+    priority: int = 0  # 작을수록 먼저 배정받는다
 
 
 def load_agents(path: Path | None = None, depts: set[str] | None = None) -> list[Agent]:
@@ -89,9 +95,15 @@ def load_agents(path: Path | None = None, depts: set[str] | None = None) -> list
             raise ValueError(f"{where}: max_open 은 정수: {r['max_open']!r}") from None
         if max_open < 0:
             raise ValueError(f"{where}: max_open 은 0 이상: {max_open}")
+        try:
+            priority = int(r["priority"] or 0)
+        except ValueError:
+            raise ValueError(f"{where}: priority 는 정수: {r['priority']!r}") from None
         seen.add(agent_id)
         agents.append(
-            Agent(agent_id, r["name"].strip(), r["dept_code"], r["active"] == "Y", max_open)
+            Agent(
+                agent_id, r["name"].strip(), r["dept_code"], r["active"] == "Y", max_open, priority
+            )
         )
     return agents
 
@@ -101,7 +113,8 @@ def _in_dept(dept: str, agents: Sequence[Agent]) -> list[Agent]:
 
 
 def assign(dept: str | None, open_counts: Mapping[str, int], agents: Sequence[Agent]) -> str | None:
-    """부서 안에서 열린 건이 가장 적은 활성 담당자 agent_id. 없거나 모두 찼으면 None."""
+    """부서 안에서 priority 가 가장 작고, 그중 열린 건이 가장 적은 활성 담당자 agent_id.
+    없거나 모두 찼으면 None."""
     if not dept:
         return None
     candidates = [
@@ -111,7 +124,9 @@ def assign(dept: str | None, open_counts: Mapping[str, int], agents: Sequence[Ag
     ]
     if not candidates:
         return None
-    return min(candidates, key=lambda a: (open_counts.get(a.agent_id, 0), a.agent_id)).agent_id
+    return min(
+        candidates, key=lambda a: (a.priority, open_counts.get(a.agent_id, 0), a.agent_id)
+    ).agent_id
 
 
 def suggest(

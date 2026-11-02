@@ -90,6 +90,8 @@ function completionFixture() {
     './auth': { currentAccount: () => undefined, ACCOUNTS: [
       { userId: '1', name: 'Doyeon Kim', role: 'LEAD' }, { userId: '2', name: 'Minji Park' },
       { userId: '3', name: 'Jun Lee' }, { userId: '4', name: 'Hana Choi' },
+      { userId: '5', name: 'Sora Jung' }, { userId: '6', name: 'Daniel Han' },
+      { userId: '7', name: 'Yuna Kang' }, { userId: '8', name: 'Minho Seo' },
     ] },
     './store': { tickets: [], onBeforeCommit: noop, save: noop },
   }).completionDraft;
@@ -241,6 +243,8 @@ test('Copilot keeps all server replies and only labels actually cited replies as
     './auth': { currentAccount: () => undefined, ACCOUNTS: [
       { userId: '1', name: 'Doyeon Kim', role: 'LEAD' }, { userId: '2', name: 'Minji Park' },
       { userId: '3', name: 'Jun Lee' }, { userId: '4', name: 'Hana Choi' },
+      { userId: '5', name: 'Sora Jung' }, { userId: '6', name: 'Daniel Han' },
+      { userId: '7', name: 'Yuna Kang' }, { userId: '8', name: 'Minho Seo' },
     ] }, './store': { tickets: [], onBeforeCommit: noop, save: noop },
   });
   const t = { ...ticket(), product: 'iS7', events: [
@@ -331,6 +335,8 @@ function fullLogicFixture(rows = []) {
     './auth': { currentAccount: () => undefined, ACCOUNTS: [
       { userId: '1', name: 'Doyeon Kim', role: 'LEAD' }, { userId: '2', name: 'Minji Park' },
       { userId: '3', name: 'Jun Lee' }, { userId: '4', name: 'Hana Choi' },
+      { userId: '5', name: 'Sora Jung' }, { userId: '6', name: 'Daniel Han' },
+      { userId: '7', name: 'Yuna Kang' }, { userId: '8', name: 'Minho Seo' },
     ] }, './store': { tickets: rows, onBeforeCommit: noop, save: noop },
   });
 }

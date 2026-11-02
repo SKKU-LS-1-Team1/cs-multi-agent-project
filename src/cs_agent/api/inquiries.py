@@ -86,16 +86,25 @@ async def upload_attachment(
     ticket_id: str, name: str, request: Request, tickets: Tickets, store: Attachments
 ) -> Attachment:
     _known(tickets, ticket_id)
-    if int(request.headers.get("content-length") or 0) > MAX_BYTES:
+    length = request.headers.get("content-length") or "0"
+    if length.isdigit() and int(length) > MAX_BYTES:
         raise HTTPException(413, "file too large")
-    data = bytearray()
-    async for chunk in request.stream():
-        data += chunk
-        if len(data) > MAX_BYTES:
-            raise HTTPException(413, "file too large")
+    # 큰 영상도 메모리에 다 올리지 않게 받으면서 임시 파일에 쓴다
+    tmp = store.upload_path(ticket_id)
+    try:
+        size = 0
+        with tmp.open("wb") as out:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_BYTES:
+                    raise HTTPException(413, "file too large")
+                out.write(chunk)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     content_type = request.headers.get("content-type") or "application/octet-stream"
     try:
-        return store.save(ticket_id, name, content_type, bytes(data))
+        return store.commit(ticket_id, tmp, name, content_type)
     except AttachmentError as e:
         raise HTTPException(422, str(e)) from e
 
