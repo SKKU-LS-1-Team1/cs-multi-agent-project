@@ -14,7 +14,8 @@ const QR_NOTE = {
 }
 
 // kinds = 보여 줄 첨부 종류(기본은 전부), title = 제목, hints = 종류별 설명 바꾸기 { qr: '...' }
-export default function MediaAttach({ value, onChange, kinds = KINDS.map((k) => k.key), title = '고장 모습을 보여 주세요', hints = {} }) {
+// compact = 제목·타일·목록 없이 종류마다 작은 버튼 하나씩만 보여 준다(올린 결과는 부모가 카드로 보여 준다)
+export default function MediaAttach({ value, onChange, kinds = KINDS.map((k) => k.key), title = '고장 모습을 보여 주세요', hints = {}, compact = false, labels = {} }) {
   const shown = KINDS.filter((k) => kinds.includes(k.key))
   const MB = { photo: '사진 20MB', video: '영상 200MB', sound: '소리 50MB', qr: 'QR 10MB' }
   const id = useId()
@@ -45,6 +46,23 @@ export default function MediaAttach({ value, onChange, kinds = KINDS.map((k) => 
     setNotes([])
   }
 
+  if (compact) {
+    const qrNote = value.filter((x) => x.kind === 'qr').at(-1)?.qr
+    return (
+      <div className="media-compact">
+        {shown.map((k) => (
+          <button type="button" key={k.key} className="mbtn" onClick={() => refs.current[k.key]?.click()} aria-label={`${k.label} 올리기`}>
+            <CuteIcon name={k.icon} size={22} />{labels[k.key] ?? k.label}
+          </button>
+        ))}
+        {shown.map((k) => (
+          <input key={k.key} ref={(el) => { refs.current[k.key] = el }} type="file" hidden multiple accept={k.accept} tabIndex={-1}
+            aria-label={`${k.label} 파일 선택`} onChange={(e) => { add(k.key, [...e.target.files]); e.target.value = '' }} />
+        ))}
+        <p className="m-note" role="status" aria-live="polite">{[...notes, ...(qrNote && qrNote.status !== 'read' && qrNote.status !== 'checking' ? [QR_NOTE[qrNote.status]] : [])].join(' · ')}</p>
+      </div>
+    )
+  }
   return (
     <section className="media" aria-labelledby={id}>
       <div className="media-h">

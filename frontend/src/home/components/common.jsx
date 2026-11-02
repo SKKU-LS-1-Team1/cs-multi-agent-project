@@ -41,13 +41,42 @@ export function Stepper({ step, onGo, labels = STEPS }) {
   )
 }
 
-export function FamilyStep({ s, pick, title = '어떤 제품에 문제가 생겼나요?', emoji }) {
+// pickModel(제품군, 모델)을 주면 제목 아래에 QR·외관 사진 올리기를 보여 준다. 찾은 모델로 제품군과 모델을 한 번에 고른다.
+export function FamilyStep({ s, pick, title = '어떤 제품에 문제가 생겼나요?', emoji, pickModel }) {
+  const [list, setList] = useState([])
+  const { found, guess, checking } = useIdentify(list, Object.keys(products))
+  const go = (c) => pickModel(getProduct(c).family, c)
   return (
     <>
       <Title>{title}</Title>
       <FamilyCarousel selected={s.family} onPick={pick} />
+      {pickModel && (
+        <div className="model-id fam-id">
+          <p className="fam-ask">제품군을 잘 모르겠다면</p>
+          <MediaAttach compact value={list} onChange={setList} kinds={['photo', 'qr']} labels={{ photo: '사진으로 찾기', qr: 'QR로 찾기' }} />
+          {checking && <p className="photo-check" role="status">사진에서 제품을 찾는 중이에요…</p>}
+          {guess && !found.includes(guess) && <FoundCard code={guess} by="사진으로 찾은 제품" note="시연용 결과예요" family onPick={go} />}
+          {found.map((c) => <FoundCard key={c} code={c} by="QR에서 찾은 제품" family onPick={go} />)}
+        </div>
+      )}
     </>
   )
+}
+
+// 올린 QR·사진으로 모델을 찾는다 (ModelStep·FamilyStep 공용). candidates = 찾을 수 있는 모델 코드 목록.
+// QR: 읽은 글자에 들어 있는 모델 코드. 사진: 시연용 — 실제 인식 모델이 없어서 올린 사진(이름·크기)으로 candidates 중 하나를 고정해서 고른다.
+// 같은 사진은 늘 같은 모델이 나오고, 잠깐 "확인 중"을 보여 준 뒤 결과를 낸다.
+function useIdentify(list, candidates) {
+  const found = [...new Set(list.filter((x) => x.kind === 'qr' && x.qr?.status === 'read').map((x) => modelFromQr(x.qr.text)).filter(Boolean))]
+  const photo = list.filter((x) => x.kind === 'photo').at(-1)
+  const [seen, setSeen] = useState(null) // 결과를 낸 사진 id
+  useEffect(() => {
+    if (!photo || photo.id === seen) return
+    const t = setTimeout(() => setSeen(photo.id), 1200)
+    return () => clearTimeout(t)
+  }, [photo?.id]) // eslint-disable-line
+  const guess = photo && photo.id === seen ? candidates[[...`${photo.file.name}${photo.file.size}`].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % candidates.length] : null
+  return { found, guess, checking: !!photo && !guess }
 }
 
 // legacy = { onInquire }를 주면 변압기·차단기 제품군에서 제목 바로 아래, 모델 목록 위에 "단종 · 호환 · 대체 문의" 버튼을 보여 준다.
@@ -57,7 +86,7 @@ const CODES = Object.keys(products).sort((a, b) => b.length - a.length)
 export const modelFromQr = (text) => CODES.find((c) => text.toUpperCase().includes(c.toUpperCase())) ?? null
 
 // QR·사진으로 찾은 모델: 썸네일 · 모델명 · 고르기 버튼만 담은 작은 결과 카드
-function FoundCard({ code, by, note, onPick }) {
+function FoundCard({ code, by, note, onPick, family = false }) {
   const p = getProduct(code)
   return (
     <div className="found" role="status">
@@ -65,44 +94,23 @@ function FoundCard({ code, by, note, onPick }) {
       <div className="found-t">
         <small>{by}{note && <i>{note}</i>}</small>
         <b>{p.name}</b>
-        <span>{code}</span>
+        <span>{family ? `${getFamily(p.family).name} · ${code}` : code}</span>
       </div>
-      <button type="button" className="found-go" onClick={() => onPick(code)}>이 모델로 고르기</button>
+      <button type="button" className="found-go" onClick={() => onPick(code)}>{family ? '이 제품으로 시작하기' : '이 모델로 고르기'}</button>
     </div>
   )
 }
 
 // media/onMedia 를 주면 부모의 첨부 목록을 같이 쓴다 (제품 고장에서는 다음 단계 첨부로 이어진다). 안 주면 이 단계 안에서만 쓴다.
-export function ModelStep({ s, pick, allowUnknown = true, legacy = null, media, onMedia }) {
+export function ModelStep({ s, pick, allowUnknown = true, unknownNote, legacy = null, media, onMedia }) {
   const fam = getFamily(s.family)
   const [own, setOwn] = useState([])
   const list = media ?? own
   const setList = onMedia ?? setOwn
-  const found = [...new Set(list.filter((x) => x.kind === 'qr' && x.qr?.status === 'read').map((x) => modelFromQr(x.qr.text)).filter(Boolean))]
-  // 시연용 사진 인식: 실제 인식 모델이 없어서, 올린 사진(이름·크기)으로 이 제품군 모델 하나를 고정해서 고른다.
-  // 같은 사진은 늘 같은 모델이 나온다. 잠깐 "확인 중"을 보여 준 뒤 결과를 낸다.
-  const photo = list.filter((x) => x.kind === 'photo').at(-1)
-  const [seen, setSeen] = useState(null) // 결과를 낸 사진 id
-  useEffect(() => {
-    if (!photo || photo.id === seen) return
-    const t = setTimeout(() => setSeen(photo.id), 1200)
-    return () => clearTimeout(t)
-  }, [photo?.id]) // eslint-disable-line
-  const guess = photo && photo.id === seen ? fam.models[[...`${photo.file.name}${photo.file.size}`].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % fam.models.length] : null
+  const { found, guess, checking } = useIdentify(list, fam.models)
   return (
     <>
       <Title emoji="🔎" sub={`${fam.name}에서 문제가 생긴 모델을 골라 주세요.`}>어떤 모델인가요?</Title>
-      <div className="model-id">
-        <MediaAttach value={list} onChange={setList} kinds={['qr', 'photo']} title="모델을 찾기 어려우면 QR이나 외관 사진을 올려 주세요"
-          hints={{ qr: '제품에 붙은 QR 사진', photo: '제품 외관 사진' }} />
-        {photo && !guess && <p className="photo-check" role="status">사진에서 모델을 찾는 중이에요…</p>}
-        {guess && !found.includes(guess) && (
-          <FoundCard code={guess} by="사진으로 찾은 모델" note="시연용 결과예요" onPick={pick} />
-        )}
-        {found.map((c) => (getProduct(c).family === s.family
-          ? <FoundCard key={c} code={c} by="QR에서 찾은 모델" onPick={pick} />
-          : <p key={c} className="m-note">QR에서 찾은 모델 {getProduct(c).name} ({c})은 {getFamily(getProduct(c).family).name} 제품이에요. 제품군을 다시 골라 주세요.</p>))}
-      </div>
       <div className="opt-list">
         {fam.models.map((c) => {
           const p = getProduct(c)
@@ -114,7 +122,7 @@ export function ModelStep({ s, pick, allowUnknown = true, legacy = null, media, 
         })}
         {allowUnknown && (
           <button type="button" className={`opt ghost${s.model === UNKNOWN ? ' sel' : ''}`} onClick={() => pick(UNKNOWN)}>
-            <b>모델을 잘 모르겠어요</b><small>{fam.name} 전체에서 증상으로 찾아볼게요</small>
+            <b>모델을 잘 모르겠어요</b><small>{unknownNote ?? `${fam.name} 전체에서 증상으로 찾아볼게요`}</small>
           </button>
         )}
       </div>
@@ -124,6 +132,17 @@ export function ModelStep({ s, pick, allowUnknown = true, legacy = null, media, 
           <svg className="lc-go" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
         </button>
       )}
+      <div className="model-id fam-id">
+        <p className="fam-ask">모델을 찾기 어렵다면</p>
+        <MediaAttach compact value={list} onChange={setList} kinds={['photo', 'qr']} labels={{ photo: '사진으로 찾기', qr: 'QR로 찾기' }} />
+        {checking && <p className="photo-check" role="status">사진에서 모델을 찾는 중이에요…</p>}
+        {guess && !found.includes(guess) && (
+          <FoundCard code={guess} by="사진으로 찾은 모델" note="시연용 결과예요" onPick={pick} />
+        )}
+        {found.map((c) => (getProduct(c).family === s.family
+          ? <FoundCard key={c} code={c} by="QR에서 찾은 모델" onPick={pick} />
+          : <p key={c} className="m-note">QR에서 찾은 모델 {getProduct(c).name} ({c})은 {getFamily(getProduct(c).family).name} 제품이에요. 제품군을 다시 골라 주세요.</p>))}
+      </div>
     </>
   )
 }
