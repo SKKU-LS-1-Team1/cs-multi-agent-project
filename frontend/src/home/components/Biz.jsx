@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getFamily, getProduct } from '../lib/catalog.js'
 import { LABEL, NOTYET, UNKNOWN, answerText, catOf, dept, formFields, questionsFor, resultFor, summaryLines, ymd, today } from '../lib/biz.js'
-import { FamilyStep, ModelStep, PathTags, Stepper, Title } from './common.jsx'
+import { FamilyStep, ModelStep, PathTags, Stepper, Title, UNKNOWN as UNKNOWN_MODEL } from './common.jsx'
 import info from '../data/info.json'
 
 const LABELS = ['제품군', '모델', '업무', '진행']
@@ -110,8 +110,9 @@ export default function Biz({ onExit, onContext, onSend, onInquire }) {
   const [n, setN] = useState(0)
   const [copied, setCopied] = useState(false)
   const stage = stageOf(s)
-  const p = s.model ? getProduct(s.model) : null
-  const master = s.model ? info[s.model].master : null
+  const unknownModel = s.model === UNKNOWN_MODEL
+  const p = s.model && !unknownModel ? getProduct(s.model) : null
+  const master = p ? info[s.model].master : null
   const ctx = useMemo(() => p && ({ code: p.code, name: p.name, family: s.family, familyName: getFamily(s.family).name, master }), [p, s.family, master])
   const list = useMemo(() => (s.task ? questionsFor(s.task, s.a) : []), [s.task, s.a])
   const q = s.phase === 'q' ? list[Math.min(s.i, list.length - 1)] : null
@@ -125,6 +126,7 @@ export default function Biz({ onExit, onContext, onSend, onInquire }) {
     if (!s.family) return onContext([])
     const lines = [`제품군: ${getFamily(s.family).name}`]
     if (p) lines.push(`모델: ${p.name} (${p.code})`)
+    else if (unknownModel) lines.push('모델: 모델을 잘 모르겠어요')
     if (s.task) lines.push(`업무: ${TASKS.find((t) => t.id === s.task).label}`)
     if (q) lines.push(`지금 질문: ${q.title}`)
     if (res) lines.push(`지금 화면: ${s.phase === 'result' ? '결과 확인' : s.phase === 'form' ? '접수 내용 확인' : '접수 상태'}`)
@@ -151,6 +153,8 @@ export default function Biz({ onExit, onContext, onSend, onInquire }) {
       body: summaryLines(s.task, a, ctx, fs).join('\n'),
     }
   }
+  // 모델을 모르면 모델 기준 판단(보증 기간·납기)을 할 수 없어서, 고른 일에 맞는 유형으로 문의서에 바로 간다
+  const unknownDraft = (t) => ({ type: { warranty: 'WARRANTY', order: 'ORDER_LEAD', quote: 'QUOTE' }[t.id], family: s.family, model: UNKNOWN_MODEL, vals: {}, subject: `${getFamily(s.family).name} ${t.label} 문의`.slice(0, 100), body: '' })
   const goInquire = () => onInquire?.(draftOf(s.a))
   // 주문·납기는 결과 화면이 담당 부서 연결 안내뿐이라, 마지막 질문에서 바로 문의서로 넘어간다
   const DIRECT = s.task === 'order'
@@ -189,19 +193,20 @@ export default function Biz({ onExit, onContext, onSend, onInquire }) {
       </div>
 
       <PathTags items={[
+        { key: '유형', label: '보증 · 주문 · 견적' },
         { key: '제품군', label: s.family ? getFamily(s.family).name : '', onClick: stage > 0 ? () => goStage(0) : undefined },
-        { key: '모델', label: p ? p.name : '', onClick: stage > 1 ? () => goStage(1) : undefined },
+        { key: '모델', label: p ? p.name : unknownModel ? '모델 모름' : '', onClick: stage > 1 ? () => goStage(1) : undefined },
         { key: '업무', label: s.task ? TASKS.find((x) => x.id === s.task).label : '', onClick: stage > 2 ? () => goStage(2) : undefined },
       ]} />
 
-      {stage === 0 && <FamilyStep title="어떤 제품에 대해 문의하세요?" emoji="🧾" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
-      {stage === 1 && <ModelStep s={s} allowUnknown={false} legacy={{ onInquire }} pick={(m) => setS((c) => ({ ...INIT, hl: c.hl, family: c.family, model: m }))} />}
+      {stage === 0 && <FamilyStep title="어떤 제품에 대해 문의하세요?" emoji="🧾" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} pickModel={(fam, m) => setS({ ...INIT, hl: fam, family: fam, model: m })} />}
+      {stage === 1 && <ModelStep s={s} unknownNote="모델을 몰라도 문의서로 바로 이어져요. 담당자가 모델을 확인해요" legacy={{ onInquire }} pick={(m) => setS((c) => ({ ...INIT, hl: c.hl, family: c.family, model: m }))} />}
       {stage === 2 && (
         <>
-          <Title emoji="💬" sub={`${p.name} (${p.code})`}>어떤 일을 도와드릴까요?</Title>
+          <Title emoji="💬" sub={p ? `${p.name} (${p.code})` : `${getFamily(s.family).name} · 모델 모름`}>어떤 일을 도와드릴까요?</Title>
           <div className="opt-list">
             {TASKS.map((t) => (
-              <button type="button" key={t.id} className="opt big" onClick={() => setS({ ...s, task: t.id, a: {}, i: 0, phase: 'q', evi: null })}>
+              <button type="button" key={t.id} className="opt big" onClick={() => (unknownModel ? onInquire?.(unknownDraft(t)) : setS({ ...s, task: t.id, a: {}, i: 0, phase: 'q', evi: null }))}>
                 <b>{t.label}</b><small>{t.sub}</small>
               </button>
             ))}

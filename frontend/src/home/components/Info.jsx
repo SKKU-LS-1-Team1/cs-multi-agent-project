@@ -96,11 +96,12 @@ export default function Info({ onExit, onContext, onInquire, nav, onNavDone }) {
         <Stepper step={stage} onGo={goStage} labels={LABELS} />
       </div>
       <PathTags items={[
+        { key: '유형', label: '제품 정보 · 자료' },
         { key: '제품군', label: s.family ? getFamily(s.family).name : '' },
         { key: '모델', label: s.model ? getProduct(s.model).name : '' },
       ]} />
 
-      {stage === 0 && <FamilyStep title="어떤 제품이 궁금하세요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
+      {stage === 0 && <FamilyStep title="어떤 제품이 궁금하세요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} pickModel={(fam, m) => setS({ ...INIT, hl: fam, family: fam, model: m })} />}
       {stage === 1 && <ModelStep s={s} allowUnknown={false} legacy={{ onInquire }} pick={(m) => setS((c) => ({ ...c, model: m, sel: null, tab: 'spec' }))} />}
 
       {stage === 2 && (!data || !mdocs ? <p className="faq-sub">자료를 불러오는 중이에요…</p> : (

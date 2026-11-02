@@ -126,12 +126,13 @@ export default function Guide({ onExit, onContext, onInquire }) {
         <Stepper step={stage} onGo={goStage} labels={LABELS} />
       </div>
       <PathTags items={[
+        { key: '유형', label: '설치 · 사용 방법' },
         { key: '제품군', label: s.family ? getFamily(s.family).name : '' },
         { key: '모델', label: s.model ? getProduct(s.model).name : '' },
         { key: '목적', label: s.purpose ? PURPOSE[s.purpose] : '' },
       ]} />
 
-      {stage === 0 && <FamilyStep title="어떤 제품을 설치·사용하시나요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} />}
+      {stage === 0 && <FamilyStep title="어떤 제품을 설치·사용하시나요?" emoji="📘" s={{ family: s.hl }} pick={(f) => setS({ ...INIT, hl: f, family: f })} pickModel={(fam, m) => setS({ ...INIT, hl: fam, family: fam, model: m })} />}
       {stage === 1 && <ModelStep s={s} allowUnknown={false} legacy={{ onInquire }} pick={(m) => setS((c) => ({ ...c, model: m, purpose: null }))} />}
 
       {stage === 2 && (
