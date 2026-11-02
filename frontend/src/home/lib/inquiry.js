@@ -74,4 +74,31 @@ export const fmtTime = (iso) => (iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}
 export const titleOf = (t) => (t.inquiry_subject || `${t.inquiry_body.replace(/\s+/g, ' ').slice(0, 42)}${t.inquiry_body.length > 42 ? '…' : ''}`)
 export const attachmentsOf = (t) => [...t.inquiry_body.matchAll(/\[attachment: ([^\]]+)\]/g)].map((m) => m[1])
 
+// 웹 문의 본문(Inquire.jsx submit 이 만든 글)을 화면용으로 나눈다:
+// "[유형]\n본문\n\nDetails:\n- 항목: 값\n\nContact: 국가: … / 이메일: …" → { tag, text, details, contact }
+// 이 모양이 아닌 본문(전화·메일 접수)은 text 에 그대로 둔다.
+export function parseBody(body = '') {
+  let text = body
+  let contact = []
+  const ci = text.lastIndexOf('\n\nContact: ')
+  if (ci >= 0) {
+    contact = text.slice(ci + 11).trim().split(' / ').map((kv) => {
+      const i = kv.indexOf(': ')
+      return i > 0 ? [kv.slice(0, i), kv.slice(i + 2)] : ['', kv]
+    })
+    text = text.slice(0, ci)
+  }
+  let details = []
+  const di = text.lastIndexOf('\n\nDetails:\n')
+  if (di >= 0) {
+    details = text.slice(di + 11).split('\n').map((l) => /^- ([^:]+): (.*)$/.exec(l.trim())).filter(Boolean).map(([, label, value]) => {
+      const files = [...value.matchAll(/\[attachment: ([^\]]+)\]/g)].map((m) => m[1])
+      return { label, value: files.length ? '' : value, files }
+    })
+    text = text.slice(0, di)
+  }
+  const tm = /^\[([^\]\n]+)\]\n/.exec(text)
+  return { tag: tm?.[1] ?? '', text: (tm ? text.slice(tm[0].length) : text).trim(), details, contact }
+}
+
 export const tickets = data.tickets

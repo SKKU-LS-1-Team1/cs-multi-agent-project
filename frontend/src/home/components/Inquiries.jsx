@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { myInquiries, setInquiryEmail } from '../../lib/myInquiries'
 import {
-  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, dept, fieldLabel, fmtTime, mailEvents, notifyEmail, pauseRule, split, titleOf,
+  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, dept, fieldLabel, fmtTime, mailEvents, notifyEmail, parseBody, pauseRule, split, titleOf,
 } from '../lib/inquiry.js'
+import Attachments from './Attachments.jsx'
 
 function Long({ text, lines = 5 }) {
   const [open, setOpen] = useState(false)
@@ -132,12 +133,67 @@ function Sheet({ kind, t, onClose, onSend }) {
   )
 }
 
+// 서버에 올린 첨부 파일(GET /api/inquiries/{id}/attachments)을 본문의 이름 순서에 맞춘다.
+// 서버에 없는 이름(전화·메일 접수, 업로드 전 문의)은 이름만 보인다.
+function useAttachments(ticketId, names) {
+  const [stored, setStored] = useState([])
+  useEffect(() => {
+    let live = true
+    api.inquiryAttachments(ticketId).then((rows) => {
+      if (live) setStored(rows.map((r) => ({ name: r.name, size: r.size, type: r.content_type, url: api.attachmentUrl(ticketId, r.attachment_id) })))
+    }, () => {})
+    return () => { live = false }
+  }, [ticketId])
+  const left = [...stored]
+  const items = names.map((name) => {
+    const i = left.findIndex((r) => r.name === name)
+    return i >= 0 ? left.splice(i, 1)[0] : { name }
+  })
+  return [...items, ...left]
+}
+
+// 접수한 내용: 문의 본문 · 입력한 항목 표 · 연락처 표 · 첨부 사진
+function Submitted({ t, phone }) {
+  const ch = CHANNEL[t.channel]
+  const body = parseBody(t.inquiry_body)
+  const names = body.details.flatMap((d) => d.files)
+  const files = useAttachments(t.ticket_id, names.length ? names : [...t.inquiry_body.matchAll(/\[attachment: ([^\]]+)\]/g)].map((m) => m[1]))
+  const rows = [
+    (t.product_name || t.product_code) && ['제품 · 모델', [t.product_name, t.product_code].filter(Boolean).join(' · ')],
+    ['접수 채널', `${ch.emoji} ${ch.label}`],
+    t.received_at_utc && ['접수 시각', fmtTime(t.received_at_utc)],
+    t.error_code_reported && ['에러 코드', t.error_code_reported],
+    ...body.details.map((d) => [d.label, d.files.length ? `첨부 ${d.files.length}개 · 아래에서 볼 수 있어요` : d.value]),
+  ].filter(Boolean)
+  return (
+    <div className="blk sub"><h4>접수한 내용</h4>
+      {phone && <p className="phone-note">전화로 접수한 <strong>상담 메모</strong>예요. 통화 녹음이나 전체 대화 내용은 기록에 없어요.</p>}
+      <div className="sub-msg">
+        {body.tag && <span className="sub-tag">{body.tag}</span>}
+        {t.inquiry_subject && <b>{t.inquiry_subject}</b>}
+        <Long text={body.text} />
+      </div>
+      <table className="sub-tbl">
+        <caption>문의 정보</caption>
+        <tbody>{rows.map(([k, v]) => <tr key={k}><th scope="row">{k}</th><td>{v}</td></tr>)}</tbody>
+      </table>
+      {body.contact.length > 0 && (
+        <table className="sub-tbl">
+          <caption>연락처</caption>
+          <tbody>{body.contact.map(([k, v]) => <tr key={k + v}><th scope="row">{k}</th><td>{v}</td></tr>)}</tbody>
+        </table>
+      )}
+      {files.length > 0 && (
+        <div className="sub-att"><h5>첨부 파일 <em>{files.length}</em></h5><Attachments items={files} /></div>
+      )}
+    </div>
+  )
+}
+
 function Detail({ t, onBack, onSend, onAgain, email, onEmail }) {
   const st = STATUS[t.status]
-  const ch = CHANNEL[t.channel]
   const miss = split(t.missing_info), blocking = split(t.missing_blocking_info), prov = split(t.provided_info)
   const [sheet, setSheet] = useState(null)
-  const att = attachmentsOf(t)
   const done = st.kind === 'done'
   const phone = t.channel === 'PHONE'
 
@@ -167,16 +223,7 @@ function Detail({ t, onBack, onSend, onAgain, email, onEmail }) {
 
       {sheet && <Sheet kind={sheet} t={t} onClose={() => setSheet(null)} onSend={onSend} key={sheet} />}
 
-      <div className="blk"><h4>접수한 내용</h4>
-        <ul className="kv">
-          {(t.product_name || t.product_code) && <li><span>제품 · 모델</span><b>{[t.product_name, t.product_code].filter(Boolean).join(' · ')}</b></li>}
-          <li><span>접수 채널</span><b>{ch.emoji} {ch.label}</b></li>
-          {t.error_code_reported && <li><span>에러 코드</span><b>{t.error_code_reported}</b></li>}
-        </ul>
-        {phone && <p className="phone-note">전화로 접수한 <strong>상담 메모</strong>예요. 통화 녹음이나 전체 대화 내용은 기록에 없어요.</p>}
-        <Long text={t.inquiry_body} />
-        {att.length > 0 && <p className="atts">{att.map((a) => <span key={a}>📎 {a}<em> (파일 없음 · 이름만 기록됐어요)</em></span>)}</p>}
-      </div>
+      <Submitted t={t} phone={phone} />
 
       {t.assigned_dept && <div className="blk"><h4>담당 부서</h4>
         <ul className="kv">

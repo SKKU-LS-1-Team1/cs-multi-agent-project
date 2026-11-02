@@ -131,6 +131,9 @@ export type WorkItem = Pick<Ticket, "ticket_id" | "status" | "category" | "prior
 };
 // 고객용 문의 조회 (GET /api/inquiries/{id}, CSA-61). 내부 초안·근거·담당자는 오지 않는다.
 export type CustomerStatus = "RECEIVED" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "ANSWERED" | "CLOSED";
+// 문의 첨부 파일 (services/attachments.py). 파일 주소는 api.attachmentUrl 로 만든다
+export type InquiryAttachment = { attachment_id: string; name: string; content_type: string; size: number; uploaded_at: string };
+
 export type CustomerInquiry = {
   ticket_id: string;
   subject: string;
@@ -268,6 +271,13 @@ export const api = {
   // 고객 화면은 이것으로 문의·회신을 보낸다 (고객 도메인은 /api/tickets 를 막는다, CSA-46)
   createInquiry: (body: InquiryIn) => request<CustomerInquiry>("/inquiries", { method: "POST", body: JSON.stringify(body) }),
   customerInquiry: (id: string) => request<CustomerInquiry>(`/inquiries/${id}`),
+  // 본문이 파일 내용 그대로다 (multipart 아님). 형식은 Content-Type 으로 보낸다
+  uploadAttachment: (id: string, file: File) =>
+    request<InquiryAttachment>(`/inquiries/${id}/attachments?name=${encodeURIComponent(file.name)}`, {
+      method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" },
+    }),
+  inquiryAttachments: (id: string) => request<InquiryAttachment[]>(`/inquiries/${id}/attachments`),
+  attachmentUrl: (id: string, attachmentId: string) => `/api/inquiries/${id}/attachments/${attachmentId}`,
   resolve: (id: string, body?: ResolutionIn) => request<Ticket>(`/tickets/${id}/resolve`, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
   agents: (dept?: string) => request<Agent[]>(`/agents${dept ? `?dept=${dept}` : ""}`),
   workList: (dept?: string) => request<WorkItem[]>(`/tickets${dept ? `?dept=${dept}` : ""}`),
