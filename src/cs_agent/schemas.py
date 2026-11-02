@@ -277,6 +277,8 @@ class TicketOut(BaseModel):
     assigned_dept: str | None = None  # 이관됐으면 이관 부서
     assignee: str | None = None  # 담당 상담원 agent_id (CSA-53). 없으면 부서 큐
     sla_due_at: datetime | None = None
+    sla_first_response_h: float | None = None  # 첫 응답 목표 (규칙 판정 전이면 None)
+    sla_resolution_h: float | None = None
     draft: Draft | None = None
     info_request: str | None = None
     escalation_request: EscalationRequest | None = None

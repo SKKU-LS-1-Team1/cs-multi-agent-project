@@ -46,6 +46,9 @@ class CustomerInquiry(BaseModel):
     status: CustomerStatus
     message: str | None = None  # 상담원이 보낸 회신 (고객 언어)
     message_language: str | None = None
+    # 예상 소요시간 안내용 SLA 목표 (시간). 고객 대기 시간은 빠진다
+    first_response_target_h: float | None = None
+    resolution_target_h: float | None = None
 
 
 @router.post("", response_model=CustomerInquiry, status_code=201)
@@ -72,4 +75,6 @@ def _customer_view(ticket: TicketOut) -> CustomerInquiry:
         status=_STATUS.get(ticket.status, "IN_PROGRESS"),
         message=ticket.final_reply if sent else None,
         message_language=ticket.final_reply_language if sent else None,
+        first_response_target_h=ticket.sla_first_response_h,
+        resolution_target_h=ticket.sla_resolution_h,
     )

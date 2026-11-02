@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getFamily, getProduct, issuePool } from '../lib/catalog.js'
-import { customer, dept } from '../lib/inquiry.js'
+import { familyImage, getFamily, getProduct, issuePool } from '../lib/catalog.js'
+import { STEPS, customer, dept } from '../lib/inquiry.js'
 import { LEGACY_TYPE } from '../lib/legacy.js'
 import {
   CATEGORIES, EXAMPLES, LANGUAGES, TYPE_NAME, confOf, errorText, fieldsFor, filled, humanSize, isDate, missingOf, routeOf, typeInfo,
@@ -63,6 +63,123 @@ function Dropzone({ f, files, setFiles, error, onTouch }) {
             <button type="button" aria-label={`${x.file.name} 삭제`} onClick={() => setFiles(files.filter((y) => y.id !== x.id))}>삭제</button></li>
         ))}</ul>
       )}
+    </div>
+  )
+}
+
+// 제출 직후 접수 확인 화면: 문의번호 · 예상 소요시간 · 진행 단계 · 접수 내용 · 이후 진행 안내
+const span = (h) => (h < 48 ? `${Math.round(h)}시간 이내` : `${Math.round(h / 24)}일 이내`)
+const when = (iso, h, withTime) => new Date(new Date(iso).getTime() + h * 3600e3).toLocaleString('ko-KR', {
+  month: 'long', day: 'numeric', weekday: 'short', ...(withTime ? { hour: 'numeric', minute: '2-digit' } : {}),
+})
+const Ico = ({ d }) => <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d={d} fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
+const ICON = {
+  reply: 'M4 5h16v10H8l-4 4V5z',
+  done: 'M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3zm-3 9l2 2 4-4',
+  file: 'M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5zm0 0v5h5',
+  team: 'M16 19v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 10a3 3 0 100-6 3 3 0 000 6zM21 19v-1a4 4 0 00-3-3.9M15 4.1a3 3 0 010 5.8',
+  globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z',
+  mail: 'M4 6h16v12H4zM4 7l8 6 8-6',
+}
+
+function Receipt({ s, fields, route, onExit, onOpenMine }) {
+  const t = s.done
+  const [copied, setCopied] = useState(false)
+  const [open, setOpen] = useState(false)
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(t.ticket_id); setCopied(true); setTimeout(() => setCopied(false), 1800) } catch { /* 복사 권한이 없으면 번호를 직접 보고 적는다 */ }
+  }
+  const fam = s.family ? getFamily(s.family) : null
+  const files = Object.values(s.files).flat()
+  // 고객이 채운 항목 (제품 모델은 위 제품 카드에, 파일은 첨부에 따로 보여 준다)
+  const details = fields.filter((f) => f.key !== 'product_model' && confOf(f.key).type !== 'file' && filled(f, s.vals, s.files))
+  const first = Number(t.sla_first_response_target_h) || 0, done = Number(t.sla_resolution_target_h) || 0
+  const longBody = t.inquiry_body.length > 160 || t.inquiry_body.split('\n').length > 4
+  return (
+    <div className="flow inquire">
+      <div className="rcpt">
+        <header className="rcpt-hero">
+          <span className="rcpt-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="28" height="28"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
+          <h2>문의가 정상적으로 접수되었습니다</h2>
+          <p>담당 부서에서 내용을 확인한 뒤 순서대로 답변드릴게요.</p>
+          <div className="rcpt-no">
+            <div><small>문의번호</small><b>{t.ticket_id}</b></div>
+            <button type="button" onClick={copy}>{copied ? '복사됐어요 ✓' : '번호 복사'}</button>
+          </div>
+          <small className="rcpt-at">접수 {when(t.received_at_utc, 0, true)}</small>
+        </header>
+
+        <section className="rcpt-eta" aria-label="예상 소요시간">
+          {first > 0 ? (
+            <>
+              <div className="eta"><span className="eta-i"><Ico d={ICON.reply} /></span>
+                <small>첫 답변 예상</small><b>{span(first)}</b><span>{when(t.received_at_utc, first, true)}까지</span></div>
+              <div className="eta"><span className="eta-i"><Ico d={ICON.done} /></span>
+                <small>처리 완료 목표</small><b>{span(done)}</b><span>{when(t.received_at_utc, done, false)}까지</span></div>
+              <p className="eta-note">추가 정보를 요청드린 경우, 회신을 기다리는 시간은 소요시간에서 빠져요.</p>
+            </>
+          ) : <p className="eta-note">예상 소요시간은 담당자가 내용을 확인한 뒤 메일로 안내드려요.</p>}
+        </section>
+
+        <ol className="rcpt-steps" aria-label="처리 단계">
+          {STEPS.map((x) => (
+            <li key={x.n} className={x.n === 1 ? 'done' : x.n === 2 ? 'next' : ''}>
+              <span className="dot">{x.n === 1 ? '✓' : x.n}</span>
+              <b>{x.label}</b>
+              <small>{x.n === 1 ? '방금 전' : x.n === 2 ? (first ? `${span(first)} 시작` : '담당자 확인 대기') : '답변 메일 발송'}</small>
+            </li>
+          ))}
+        </ol>
+
+        <section className="rcpt-card">
+          <h3>접수 내용</h3>
+          {fam && (
+            <div className="rcpt-prod">
+              {familyImage(fam.id) && <img src={familyImage(fam.id)} alt="" />}
+              <div><small>{fam.name}</small><b>{t.product_code ? t.product_name : '모델 미확인'}</b>{t.product_code && <code>{t.product_code}</code>}</div>
+              <span className="rcpt-type">{TYPE_NAME[s.type]}</span>
+            </div>
+          )}
+          <div className="rcpt-msg">
+            <b>{t.inquiry_subject}</b>
+            <p className={longBody && !open ? 'clamp' : ''}>{t.inquiry_body}</p>
+            {longBody && <button type="button" onClick={() => setOpen(!open)}>{open ? '접기' : '전체 보기'}</button>}
+          </div>
+          {details.length > 0 && (
+            <dl className="rcpt-fields">{details.map((f) => <div key={f.key}><dt>{f.label}</dt><dd>{s.vals[f.key]}</dd></div>)}</dl>
+          )}
+          {files.length > 0 && (
+            <ul className="rcpt-files">{files.map((x) => <li key={x.id}><Ico d={ICON.file} /><span>{x.file.name}</span><small>{humanSize(x.file.size)}</small></li>)}</ul>
+          )}
+          <ul className="rcpt-meta">
+            <li><Ico d={ICON.team} /><small>담당 부서</small><span>{route ? `${dept(route.primary)} (배정 예정)` : '확인 후 배정'}</span></li>
+            <li><Ico d={ICON.globe} /><small>답변 언어</small><span>{LANGUAGES.find(([c]) => c === t.language)?.[1] ?? t.language}</span></li>
+            <li><Ico d={ICON.mail} /><small>알림 메일</small><span>{t.notify_email}</span></li>
+          </ul>
+        </section>
+
+        <section className="rcpt-card">
+          <h3>앞으로 이렇게 진행돼요</h3>
+          <ol className="rcpt-next">
+            <li><b>담당 부서 배정 · 검토</b><span>문의 유형과 제품을 기준으로 담당 부서가 정해지고, 담당자가 내용을 검토해요.</span></li>
+            <li><b>추가 정보 요청 <em>필요한 경우</em></b><span>확인에 필요한 정보가 있으면 메일로 요청드려요. 그 메일에 회신하시면 같은 문의로 이어서 처리돼요.</span></li>
+            <li><b>답변 · 처리 완료</b><span>처리가 끝나면 <b>{t.notify_email}</b>로 결과를 보내 드려요.</span></li>
+          </ol>
+        </section>
+
+        <aside className="rcpt-note">
+          <ul>
+            <li>문의번호를 메모해 두시면 문의 내역 확인과 상담이 빨라져요.</li>
+            <li>같은 내용으로 다시 접수하시면 처리가 늦어질 수 있어요. 내용을 보태려면 내 문의에서 이어서 남겨 주세요.</li>
+            <li>시연 화면이라 실제 메일은 아직 발송되지 않아요.</li>
+          </ul>
+        </aside>
+
+        <div className="rcpt-actions">
+          <button type="button" className="gbtn" onClick={onExit}>처음 화면으로</button>
+          <button type="button" className="pbtn" onClick={() => onOpenMine(t.ticket_id)}>내 문의에서 확인하기</button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -157,7 +274,7 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
         inquiry_subject: subject, inquiry_body: s.body.trim(), error_code_reported: '', fw_version_reported: '', priority: '',
         assigned_dept: route?.primary ?? 'GCS_L1', escalated: 'N', escalated_to: '', escalation_reason: '', required_info: fields.map((f) => f.key).join(';'),
         provided_info: provided.map((f) => f.key).join(';'), missing_info: '', missing_blocking_info: '', info_request_sent: 'N', info_request_message: '', status: 'NEW',
-        first_response_at_utc: '', resolved_at_utc: '', first_response_hours: '', sla_first_response_target_h: '', sla_resolution_target_h: '', sla_elapsed_hours: '',
+        first_response_at_utc: '', resolved_at_utc: '', first_response_hours: '', sla_first_response_target_h: sent.first_response_target_h ?? '', sla_resolution_target_h: sent.resolution_target_h ?? '', sla_elapsed_hours: '',
         sla_first_response_status: '', sla_resolution_status: '', final_action: '', final_reply: '', rma_no: '', reference_doc_id: '', reference_section: '',
         thread_from: draft?.fromTicket ?? '',
       }
@@ -179,19 +296,7 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
   }
   const goStage = (i) => set((c) => (i === 0 ? { stage: 1, model: null } : { stage: i + 1 }))
 
-  if (s.done) {
-    return (
-      <div className="flow inquire">
-        <div className="done-box">
-          <h2>접수 완료</h2>
-          <p>문의번호 <b>{s.done.ticket_id}</b></p>
-          <p>상태가 바뀌면 <b>{s.done.notify_email}</b>로 메일을 보내 드릴 예정이에요.</p>
-          <p className="hintline">시연 화면이라 실제 메일은 아직 발송되지 않아요.</p>
-          <div className="row"><button type="button" className="gbtn" onClick={onExit}>처음 화면으로</button>
-            <button type="button" className="pbtn" onClick={() => onOpenMine(s.done.ticket_id)}>내 문의에서 확인하기</button></div></div>
-      </div>
-    )
-  }
+  if (s.done) return <Receipt s={s} fields={fields} route={route} onExit={onExit} onOpenMine={onOpenMine} />
 
   const tInfo = s.type ? typeInfo(s.type) : null
   const cat = CATEGORIES.find((c) => c.id === s.catId)
