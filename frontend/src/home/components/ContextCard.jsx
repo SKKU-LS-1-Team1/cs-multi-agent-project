@@ -65,7 +65,7 @@ export default function ContextCard({ lines, topics = [], onRemove, active = fal
         <button type="button" className="cc-pick" aria-pressed={active} aria-label={`${title}${legacy ? ` (${LEGACY_TOPIC})` : ''} 대화 열기`} onClick={onActivate}>
           <span className="cc-t">
             {active && <small className="cc-live"><i aria-hidden="true" />대화 중</small>}
-            <b className={`cc-name${f(titleKey)}`}>{title}{legacy && <>{' '}<span className="cc-legacy">({LEGACY_TOPIC})</span></>}</b>
+            <b className={`cc-name${f(titleKey)}`}>{title}{legacy && <>{' '}<span className="cc-legacy">({LEGACY_TOPIC})</span></>}{model && family && <small className={`cc-fam${f('제품군')}`}>{family}</small>}</b>
             {tags.length > 0
               ? <span className="cc-tags">{tags.map((x) => <i key={x}>{x}</i>)}</span>
               : summary && <span className={`cc-sum${open ? ' off' : ''}${f(sumKey)}`}>{summary}</span>}

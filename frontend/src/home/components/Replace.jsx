@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import { getFamily, getProduct } from '../lib/catalog.js'
+import { getFamily } from '../lib/catalog.js'
 import { LEGACY_TOPIC, legacyDraft } from '../lib/legacy.js'
-import { CRITERIA, LIFECYCLE, STATUS, compare, fromProduct, loadInfo, quoteDraft } from '../lib/replace.js'
+import { CRITERIA, LIFECYCLE, STATUS, compare, loadInfo, quoteDraft } from '../lib/replace.js'
 import { Title } from './common.jsx'
 
 // 단종 · 호환 · 대체 문의의 첫 화면: 쓰던 제품의 정격을 알려 주면 현재 판매 중인 모델과 비교해 대체 모델을 추천한다.
@@ -79,29 +79,16 @@ export default function Replace({ family, onBack, onContext, onInquire, data = n
   const fam = getFamily(family)
   const [info, setInfo] = useState(data)
   const [values, setValues] = useState(initial?.values ?? {})
-  const [ref, setRef] = useState(initial?.ref ?? '')
   const [chosen, setChosen] = useState(null) // 견적 문의 버튼을 보여 줄 카드 (고르기 전에는 가장 비슷한 모델)
-  const [old, setOld] = useState(initial?.ref ? getProduct(initial.ref)?.name ?? '' : '') // 쓰던 모델 (직접 적거나 카탈로그에서 고른다)
   useEffect(() => { if (!data) loadInfo().then(setInfo) }, [data])
   // 챗봇 상단 카드: 모델은 아직 모르고, 단종·호환 문의 중이라고 알린다
   useEffect(() => { onContext?.([`제품군: ${fam.name}`, '모델: 모델을 잘 모르겠어요', `문의 유형: ${LEGACY_TOPIC}`]) }, [fam.name, onContext])
 
   const res = useMemo(() => compare(family, values, info), [family, values, info])
   const sel = res.rows.some((r) => r.code === chosen) ? chosen : res.fits[0]?.code ?? null
-  const set = (key, v) => { setValues((c) => ({ ...c, [key]: v })); setRef('') }
-  const fill = (code) => { setRef(code); setValues(code ? fromProduct(family, code, info) : {}) }
-  // 적은 값이 카탈로그 모델 이름이나 코드와 같으면 그 모델 정격으로 채운다. 아니면 직접 적은 모델명으로 두고 정격은 직접 입력한다.
-  const catalog = fam.models.filter((c) => info?.[c])
-  const typeOld = (v) => {
-    setOld(v)
-    const t = v.trim().toLowerCase()
-    const hit = catalog.find((c) => c.toLowerCase() === t || getProduct(c).name.toLowerCase() === t)
-    if (hit) fill(hit)
-    else if (ref) setRef('')
-  }
-  const oldLine = old.trim() ? [`기존 제품 모델: ${old.trim()}`] : []
-  const pick = (row) => { const d = quoteDraft({ family, row, entered: res.entered }); onInquire?.(oldLine.length ? { ...d, body: d.body.replace('\n', `\n${oldLine[0]}\n`) } : d) }
-  const direct = () => onInquire?.({ ...legacyDraft({ family, familyName: fam.name }), direct: true, ...(old.trim() ? { vals: { product_model: old.trim() } } : {}) })
+  const set = (key, v) => setValues((c) => ({ ...c, [key]: v }))
+  const pick = (row) => onInquire?.(quoteDraft({ family, row, entered: res.entered }))
+  const direct = () => onInquire?.({ ...legacyDraft({ family, familyName: fam.name }), direct: true })
 
   return (
     <div className="flow replace">
@@ -111,15 +98,6 @@ export default function Replace({ family, onBack, onContext, onInquire, data = n
       <section className="rep-sec" aria-label="쓰던 제품 정격">
         <h3>쓰던 {fam.name}의 정격</h3>
         <div className="rep-form">
-          <div className="fld rep-fill">
-            <label htmlFor="rep-ref"><span>쓰던 모델</span><small>명판에 적힌 모델명을 적어 주세요. 목록에 있는 모델을 고르면 정격이 자동으로 채워져요.</small></label>
-            <input id="rep-ref" className="qin" list="rep-ref-list" value={old} maxLength={60} autoComplete="off"
-              placeholder="예: ABS-103b, 또는 목록에서 고르기" onChange={(e) => typeOld(e.target.value)} />
-            <datalist id="rep-ref-list">
-              {catalog.map((c) => <option key={c} value={getProduct(c).name}>{c}</option>)}
-            </datalist>
-            {ref && <small className="rep-filled">카탈로그 모델 {getProduct(ref).name} ({ref})의 정격으로 채웠어요. 고쳐도 돼요.</small>}
-          </div>
           <div className="rep-grid">
             {(CRITERIA[family] ?? []).map((c) => <Field key={c.key} c={c} value={values[c.key] ?? ''} bad={res.invalid.includes(c.key)} onChange={(v) => set(c.key, v)} />)}
           </div>
