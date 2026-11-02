@@ -7,6 +7,8 @@ export const pauseRule = data.pause_rule.replace(/^WAITING_CUSTOMER\((.*?)\)\s*/
 export const ESC_REASON = { SPEC_INTERPRETATION: '규격 해석', ONSITE_REQUIRED: '현장 확인 필요', QUALITY_RETURN: '품질 관련 반품', RMA_REQUIRED: 'RMA 필요', COMMERCIAL_TERMS: '상업 조건 협의', CAUSE_ANALYSIS: '원인 분석', FW_UPDATE_FAILURE: '펌웨어 업데이트 실패' }
 export const dept = (c) => biz.depts[c] ?? c
 export const fieldLabel = (k) => FIELD_KO[k] ?? data.labels[k] ?? k
+// 본문에 적힌 항목 이름과 맞춰 볼 이름들(한국어·원문 영어). 문의서가 만든 본문과 샘플 본문의 이름이 달라서 둘 다 본다.
+export const fieldLabels = (k) => [FIELD_KO[k], data.labels[k], k === 'photos' ? '증상 사진 · 영상 · 소리' : null].filter(Boolean)
 
 export const CHANNEL = {
   EMAIL: { emoji: '✉️', label: '이메일' },
