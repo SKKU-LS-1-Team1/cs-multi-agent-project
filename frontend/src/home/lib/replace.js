@@ -17,7 +17,7 @@ const attr = (re) => (p) => p.specs.find((s) => re.test(s.attr))?.value
 const near = (a, b) => Math.abs(a - b) <= Math.max(1e-9, Math.abs(b) * 0.001)
 
 // 제품군별 비교 기준. mode — list: 정해진 정격 중 하나(차단기 정격전류) · cover: 후보가 같거나 커야 한다 · same: 같아야 한다
-//   near: 비슷하면 된다(임피던스) · has: 후보가 지원하는 항목에 들어 있어야 한다 · text: 글자가 같아야 한다
+//   range: 후보의 전압 범위 안에 들어야 한다(입력 전압) · near: 비슷하면 된다(임피던스) · has: 후보가 지원하는 항목에 들어 있어야 한다 · text: 글자가 같아야 한다
 export const CRITERIA = {
   LV_BREAKER: [
     { key: 'current', label: '정격전류', unit: 'A', kind: 'number', mode: 'list', read: attr(/^Rated current \(In\)/i), placeholder: '예: 100' },
@@ -28,6 +28,14 @@ export const CRITERIA = {
     { key: 'voltage', label: '정격전압', unit: 'kV', kind: 'number', mode: 'cover', read: attr(/^Rated voltage$/i), placeholder: '예: 24' },
     { key: 'current', label: '정격전류', unit: 'A', kind: 'number', mode: 'cover', read: attr(/^Rated (normal|busbar) current/i), placeholder: '예: 1250' },
     { key: 'shortTime', label: '단시간 내전류', unit: 'kA', kind: 'number', mode: 'cover', read: attr(/^Rated short-time withstand/i), placeholder: '예: 25' },
+  ],
+  // 인버터: 바꿔 달 때 반드시 맞춰야 하는 것 — 용량(kW·A), 입력 전압, 제어 방식, 통신
+  DRIVE: [
+    { key: 'kw', label: '정격 출력', unit: 'kW', kind: 'number', mode: 'cover', read: attr(/^Rated output/i), pick: (raw) => numbers(raw).slice(0, 1), placeholder: '예: 7.5' },
+    { key: 'amp', label: '정격 전류', unit: 'A', kind: 'number', mode: 'cover', read: attr(/^Rated output/i), pick: (raw) => numbers(raw).slice(1, 2), placeholder: '예: 16' },
+    { key: 'volt', label: '입력 전압', unit: 'V', kind: 'number', mode: 'range', read: attr(/^Input voltage/i), pick: (raw) => { const m = String(raw).match(/(\d{3})\s*-\s*(\d{3})\s*V/); return m ? [Number(m[1]), Number(m[2])] : [] }, placeholder: '예: 380 (3상 400V급)' },
+    { key: 'ctrl', label: '제어 방식', kind: 'select', options: ['V/F', 'sensorless vector', 'sensored vector'], mode: 'has', read: attr(/^Control method/i) },
+    { key: 'comm', label: '통신', kind: 'select', options: ['Modbus', 'BACnet', 'Profibus', 'EtherNet/IP', 'CANopen'], mode: 'has', read: attr(/communication/i) },
   ],
   TRANSFORMER: [
     { key: 'kva', label: '용량', unit: 'kVA', kind: 'number', mode: 'cover', read: attr(/^Rated power/i), placeholder: '예: 630' },
@@ -73,6 +81,11 @@ function judge(c, mine, p) {
       if (v.some((x) => near(x, mine))) return { status: 'same', theirs }
       if (mine > min && mine < max) return { status: 'near', theirs, note: '정격 범위 안이라 설정값을 확인해야 해요' }
       return { status: 'low', theirs, note: mine > max ? '정격이 부족해요' : '정격이 너무 커요' }
+    }
+    if (c.mode === 'range') {
+      if (v.length < 2) return missing
+      theirs = `${v[0]}–${v[1]} V`
+      return mine >= v[0] && mine <= v[1] ? { status: 'same', theirs } : { status: 'low', theirs, note: mine < v[0] ? '입력 전압이 낮아요' : '입력 전압이 높아요' }
     }
     if (c.mode === 'cover') {
       if (near(base, mine)) return { status: 'same', theirs }
