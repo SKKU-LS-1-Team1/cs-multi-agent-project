@@ -139,6 +139,8 @@ export type CustomerInquiry = {
   status: CustomerStatus;
   message: string | null; // 상담원이 보낸 회신 · 추가정보 요청
   message_language: string | null;
+  first_response_target_h?: number | null; // 예상 소요시간 안내용 SLA 목표 (시간)
+  resolution_target_h?: number | null;
 };
 export type Agent = { agent_id: string; name: string; dept: string; active: boolean; max_open: number; open_count: number };
 export type Navigation = { product_code: string | null; tab: string | null; anchor: string | null; candidates: string[] };

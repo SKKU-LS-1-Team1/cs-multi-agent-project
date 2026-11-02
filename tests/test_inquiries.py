@@ -46,6 +46,8 @@ def test_customer_sees_status_and_reply_but_not_the_ai_draft(client) -> None:
         "status",
         "message",
         "message_language",
+        "first_response_target_h",
+        "resolution_target_h",
     }  # 초안·근거·점검·담당자는 내보내지 않는다
 
     held = client.post(
@@ -148,6 +150,8 @@ def test_customer_submits_and_replies_without_seeing_internal_fields(client) -> 
         "status",
         "message",
         "message_language",
+        "first_response_target_h",
+        "resolution_target_h",
     }  # AI 초안·근거·점검·담당자는 응답에도 없다
     tid = body["ticket_id"]
     client.post(f"/api/tickets/{tid}/action", json={"action": "info_request"})
@@ -156,3 +160,10 @@ def test_customer_submits_and_replies_without_seeing_internal_fields(client) -> 
     reply = {"channel": "WEB_FORM", "body": "Serial SN-1.", "thread_ref": INQUIRY["thread_ref"]}
     again = client.post("/api/inquiries", json=reply).json()
     assert again["ticket_id"] == tid  # 같은 문의로 이어진다
+
+
+def test_customer_sees_expected_response_times(client) -> None:
+    """접수 화면의 예상 소요시간: 규칙이 정한 SLA 목표 시간을 고객 응답에 싣는다."""
+    sent = client.post("/api/inquiries", json=INQUIRY).json()
+    assert sent["first_response_target_h"] > 0
+    assert sent["resolution_target_h"] >= sent["first_response_target_h"]

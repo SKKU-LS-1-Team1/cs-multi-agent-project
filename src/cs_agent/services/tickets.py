@@ -976,6 +976,8 @@ class TicketService:
                 if rules
                 else None
             ),
+            sla_first_response_h=rules.sla_first_response_h if rules else None,
+            sla_resolution_h=rules.sla_resolution_h if rules else None,
             draft=draft,
             info_request=v.get("info_request"),
             escalation_request=v.get("escalation_request"),
