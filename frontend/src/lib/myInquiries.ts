@@ -1,6 +1,6 @@
 // 이 브라우저에서 낸 문의 목록 (CSA-61). 로그인이 아직 없어 내 문의 내역은 여기 남긴 ticket_id 로 찾는다.
 // 로그인이 생기면 customer_id 기준 조회 API 로 바꾼다.
-export type MyInquiry = { ticket_id: string; thread_ref: string; subject: string; submitted_at: string; notify_email?: string };
+export type MyInquiry = { ticket_id: string; thread_ref: string; subject: string; submitted_at: string; notify_email?: string; category_code?: string; product_code?: string };
 
 const KEY = "cs-agent-my-inquiries-v1";
 
