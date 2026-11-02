@@ -94,7 +94,7 @@ export function ModelStep({ s, pick, allowUnknown = true, legacy = null, media, 
       <Title emoji="🔎" sub={`${fam.name}에서 문제가 생긴 모델을 골라 주세요.`}>어떤 모델인가요?</Title>
       <div className="model-id">
         <MediaAttach value={list} onChange={setList} kinds={['qr', 'photo']} title="모델을 찾기 어려우면 QR이나 외관 사진을 올려 주세요"
-          hints={{ qr: '제품에 붙은 QR 사진', photo: '제품 전체 · 명판 사진' }} />
+          hints={{ qr: '제품에 붙은 QR 사진', photo: '제품 외관 사진' }} />
         {photo && !guess && <p className="photo-check" role="status">사진에서 모델을 찾는 중이에요…</p>}
         {guess && !found.includes(guess) && (
           <FoundCard code={guess} by="사진으로 찾은 모델" note="시연용 결과예요" onPick={pick} />

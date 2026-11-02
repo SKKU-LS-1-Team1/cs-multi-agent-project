@@ -24,7 +24,6 @@ export const LEGACY_FIELDS = [
   { key: 'product_model', blocking: false },
   { key: 'manufacture_year', blocking: false },
   { key: 'legacy_goal', blocking: true },
-  { key: 'photos', blocking: false },
 ]
 
 // 모델 선택에서 문의서로 넘길 초안. model을 주지 않으면(모델을 아직 고르지 않았다) 문의서에서 모델을 묻는다.
