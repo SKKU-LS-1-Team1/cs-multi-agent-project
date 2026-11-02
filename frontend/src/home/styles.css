@@ -521,10 +521,10 @@ textarea.qin { resize: vertical; }
 .krow { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; font-size: 15px; padding: 12px 0; }
 .known .krow { border-top: 1px solid rgba(0, 0, 0, .06); }
 .known > b + .krow, .known > b + div .krow { border-top: 0; } /* 첫 줄은 구분선 없이 */
-.krow span { color: var(--grey-600); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.krow span { color: var(--grey-600); display: flex; gap: 6px; align-items: center; white-space: nowrap; }
 .krow em { font-style: normal; font-weight: 600; color: var(--grey-900); }
 .krow .ktag { display: inline-flex; color: var(--ls-blue-mid); background: var(--ls-blue-100); border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 700; }
-.krow .ksel { grid-column: 2 / -1; justify-self: end; max-width: min(460px, 100%); appearance: auto; border: 1px solid var(--grey-200); border-radius: 10px; background: #fff; padding: 9px 12px; font: inherit; font-size: 15px; font-weight: 600; color: var(--grey-900); cursor: pointer; }
+.krow .ksel { grid-column: 2 / -1; justify-self: end; width: 168px; max-width: 100%; appearance: auto; border: 1px solid var(--grey-200); border-radius: 10px; background: #fff; padding: 9px 12px; font: inherit; font-size: 15px; font-weight: 600; color: var(--grey-900); cursor: pointer; }
 .krow .ksel:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .krow button { border: 0; background: none; color: var(--ls-blue-mid); font-weight: 700; font-size: 13px; }
 .cust { background: var(--grey-100); border-radius: 18px; padding: 16px 18px; display: grid; gap: 4px; margin-top: 8px; }
@@ -691,7 +691,7 @@ textarea.qin { resize: vertical; }
 @media (prefers-reduced-motion: reduce) { .irow.hit { animation: none; background-color: var(--ls-blue-100); } }
 
 /* 해결 완료 화면: 영역 가운데에 두고, 체크가 한 번 그려진다 */
-.done-center { min-height: 58vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 0 56px; }
+.done-center { min-height: calc(100vh - 230px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 0 56px; }
 .done-center h2 { margin-top: 20px; opacity: 0; animation: ck-rise .4s ease .75s forwards; }
 .done-center .pbtn { margin-top: 28px; opacity: 0; animation: ck-rise .4s ease .9s forwards; }
 .done-ck { animation: ck-pop .5s cubic-bezier(.3, 1.4, .5, 1) both; }
@@ -1064,3 +1064,10 @@ textarea.qin { resize: vertical; }
   .rcpt-actions { flex-direction: column-reverse; }
   .rcpt-actions button { width: 100%; }
 }
+/* 접수 완료 / 에러 코드·증상 여러 개 */
+.ccount { font-style: normal; font-size: 12px; font-weight: 700; color: var(--ls-blue-mid); background: var(--ls-blue-50); border-radius: 999px; padding: 1px 9px; }
+.cchips { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.cchips li { display: inline-flex; align-items: center; gap: 6px; background: var(--ls-blue-50); color: var(--grey-900); border-radius: 999px; padding: 5px 6px 5px 12px; font-size: 14px; font-weight: 600; }
+.cchips li button { border: 0; background: rgba(0, 0, 0, .08); color: var(--grey-700, #444); width: 20px; height: 20px; border-radius: 50%; line-height: 1; font-size: 14px; cursor: pointer; padding: 0; }
+.ccustom { display: flex; gap: 8px; align-items: center; padding: 4px 0 8px; }
+.ccustom .qin { flex: 1; }
