@@ -6,14 +6,14 @@ export const LEGACY_NAME = '단종 · 호환 · 대체'
 // 상담 중인 제품 카드에서는 문의 유형 태그가 아니라 제품 이름 옆 괄호로 표시한다(제품의 상태라서 '제품 고장' 같은 경로와 같은 위계가 아니다).
 export const LEGACY_TOPIC = '단종·호환'
 
-// 선택지를 보여 주는 제품군: 저압차단기·고압전력기기(VCB·MV 스위치기어)·변압기. 현업 확인 후 늘리거나 줄인다.
-export const LEGACY_FAMILIES = ['LV_BREAKER', 'MV_EQUIP', 'TRANSFORMER']
+// 선택지를 보여 주는 제품군: 저압차단기·고압전력기기(VCB·MV 스위치기어)·변압기·인버터. 현업 확인 후 늘리거나 줄인다.
+export const LEGACY_FAMILIES = ['LV_BREAKER', 'MV_EQUIP', 'TRANSFORMER', 'DRIVE']
 export const hasLegacy = (family) => LEGACY_FAMILIES.includes(family)
 
 // ---- 문의서: 단종·호환 유형의 담당 부서와 질문 (생성 파일 biz.json은 고치지 않고 여기서 덧붙인다)
 // 담당 부서·에스컬레이션은 목업 가정이다(현업 확정 필요). 제품군별 기술지원이 받고, 교체 견적이 필요하면 해외영업 운영으로 넘긴다.
 const ROUTE = (primary) => ({ primary, escalation: 'SALES_OPS', cond: '교체 견적·대체 모델 주문이 필요한 경우', source: 'LEGACY_OVERLAY' })
-export const LEGACY_ROUTING = { LV_BREAKER: ROUTE('TS_LV'), MV_EQUIP: ROUTE('TS_MV'), TRANSFORMER: ROUTE('TS_TRF') }
+export const LEGACY_ROUTING = { LV_BREAKER: ROUTE('TS_LV'), MV_EQUIP: ROUTE('TS_MV'), TRANSFORMER: ROUTE('TS_TRF'), DRIVE: ROUTE('TS_AUTO') }
 // 대상이 아닌 제품군에서 이 유형을 고른 경우: 담당을 정하지 못하므로 글로벌 C/S 센터가 먼저 받는다
 export const LEGACY_FALLBACK_ROUTE = { primary: 'GCS_L1', escalation: null, cond: '담당 제품 확인이 필요한 경우', source: 'LEGACY_OVERLAY' }
 export const legacyRoute = (family) => LEGACY_ROUTING[family] ?? LEGACY_FALLBACK_ROUTE

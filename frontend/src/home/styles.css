@@ -1138,3 +1138,13 @@ textarea.qin { resize: vertical; }
 .fam-id { margin: 64px 0 40px; padding-top: 0; display: flex; flex-direction: column; gap: 28px; align-items: center; }
 .fam-ask { margin: 0; font-size: 14px; font-weight: 600; color: var(--grey-500); }
 .fam-id .found { width: min(560px, 100%); box-sizing: border-box; }
+/* 상담 카드: 모델 이름 오른쪽에 제품군(1차 분류)을 작게 보여 준다 */
+.cc-fam { display: inline; margin-left: 8px; font-size: 12px; font-weight: 600; color: var(--grey-500); white-space: nowrap; }
+
+/* 처음 인사 말풍선 속 자주 묻는 질문 */
+.chat .bub-greet { max-width: 78%; width: 78%; margin: 0; align-self: flex-start; padding: 16px 14px 14px; }
+.chat .bub-greet .chips { margin-top: 14px; display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.chat .bub-greet .chip { background: var(--grey-100); border: 0; border-radius: 12px; padding: 12px 14px; font-size: 14px; line-height: 21px; color: var(--grey-900); font-weight: 600; text-align: center; }
+.chat .bub-greet .chip:hover { background: var(--grey-200); }
+.chat .bub-greet .chip i { font-style: normal; font-size: 11px; margin-right: 8px; color: var(--grey-500); }
+
