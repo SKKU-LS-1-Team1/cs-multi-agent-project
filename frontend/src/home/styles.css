@@ -174,13 +174,13 @@ a { color: inherit; text-decoration: none; }
 .car-view { position: relative; }
 /* 좌우 끝은 배경(흰색)으로 서서히 사라진다. 제품 이미지 영역에만 적용 — 제품명·버튼은 이 밖에 있다. */
 .car-fade { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16%, #000 84%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 16%, #000 84%, transparent 100%); }
-.car-stage { position: relative; height: 360px; perspective: 1200px; perspective-origin: 50% 45%; touch-action: pan-y; cursor: grab; overflow: hidden; }
+.car-stage { position: relative; height: 282px; perspective: 1200px; perspective-origin: 50% 45%; touch-action: pan-y; cursor: grab; overflow: hidden; }
 .car-stage.dragging { cursor: grabbing; }
 .car-item { position: absolute; left: 50%; top: 20px; width: 250px; height: 250px; margin-left: -125px; border: 0; padding: 0; background: none; will-change: transform, opacity, filter; backface-visibility: hidden; }
 .car-item img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; pointer-events: none; -webkit-mask-image: radial-gradient(closest-side, #000 82%, transparent 100%); mask-image: radial-gradient(closest-side, #000 82%, transparent 100%); }
 .car-item:not(.center) { cursor: pointer; }
 .car-item.center { cursor: default; }
-.car-arrow { position: absolute; top: 118px; z-index: 200; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--grey-200); background: #fff; color: var(--grey-700); font-size: 26px; line-height: 1; padding-bottom: 3px; box-shadow: 0 2px 10px rgba(0,23,51,.08); }
+.car-arrow { position: absolute; top: 108px; z-index: 200; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--grey-200); background: #fff; color: var(--grey-700); font-size: 26px; line-height: 1; padding-bottom: 3px; box-shadow: 0 2px 10px rgba(0,23,51,.08); }
 .car-arrow:hover { background: var(--grey-50); color: var(--ls-blue); }
 .car-arrow.l { left: 4px; }
 .car-arrow.r { right: 4px; }
@@ -192,7 +192,7 @@ a { color: inherit; text-decoration: none; }
 .car-item { border-radius: 24px; }
 .car-item:focus-visible { outline-offset: -4px; }
 
-.car-jump { margin: 20px 0 4px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.car-jump { margin: 14px 0 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .car-jump button { min-height: 44px; height: 44px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--grey-100); color: var(--grey-700); font-size: 14px; font-weight: 600; transition: background .15s, color .15s; }
 .car-jump button:hover { background: var(--grey-200); }
 .car-jump button.sel { background: var(--ls-blue); color: #fff; }
@@ -277,10 +277,12 @@ a { color: inherit; text-decoration: none; }
 .qf div { background: #fff; border: 1px solid var(--grey-200); border-radius: 14px; padding: 10px 14px; min-width: 0; }
 .qf dt { font-size: 12px; color: var(--grey-500); }
 .qf dd { margin: 2px 0 0; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--grey-900); overflow-wrap: anywhere; }
-.itabs { margin: 24px 0 14px; display: flex; gap: 8px; flex-wrap: wrap; }
-.itabs button { border: 0; border-radius: 999px; height: 42px; padding: 0 20px; background: var(--grey-100); color: var(--grey-700); font-size: 15px; font-weight: 600; }
-.itabs button:hover { background: var(--grey-200); }
-.itabs button.on { background: var(--ls-blue); color: #fff; }
+.itabs { margin: 24px 0 14px; display: flex; gap: 28px; border-bottom: 1px solid var(--grey-200); }
+.itabs button { position: relative; border: 0; border-radius: 0; height: 46px; padding: 0 2px; background: none; color: var(--grey-500); font-size: 16px; font-weight: 600; }
+.itabs button::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; border-radius: 3px 3px 0 0; background: transparent; }
+.itabs button:hover { color: var(--grey-800); }
+.itabs button.on { background: none; color: var(--ls-blue); font-weight: 700; }
+.itabs button.on::after { background: var(--ls-blue); }
 .ilist { display: grid; gap: 8px; }
 .hintline { font-size: 13px; color: var(--grey-500); }
 .irow { border: 2px solid transparent; background: var(--grey-100); border-radius: 14px; padding: 12px 16px; text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 2px 16px; font-size: 15px; line-height: 22px; color: var(--grey-700); }
@@ -1124,3 +1126,15 @@ textarea.qin { resize: vertical; }
 .ib-files li { display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 12px; padding: 10px 14px; }
 .ibf-i { width: 40px; height: 40px; border-radius: 10px; background: var(--grey-100); display: grid; place-items: center; flex: none; }
 .ib-files b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; color: var(--grey-900); }
+.unsure { display: block; margin: 18px 0 0; padding: 4px 2px; border: 0; background: none; text-align: left; font: inherit; font-size: 14px; font-weight: 600; color: var(--grey-600); cursor: pointer; }
+.unsure:hover { color: var(--ls-blue-mid); text-decoration: underline; text-underline-offset: 3px; }
+
+.media-compact { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: min(560px, 100%); }
+.media-compact .mbtn { display: flex; align-items: center; justify-content: center; gap: 10px; height: 60px; padding: 0 16px; border: 0; border-radius: 16px; background: var(--grey-100); color: var(--grey-900); font-size: 16px; font-weight: 700; cursor: pointer; transition: background .15s; }
+.media-compact .mbtn:hover { background: var(--grey-200); }
+.media-compact .mbtn svg { width: 28px; height: 28px; }
+.media-compact .m-note { grid-column: 1 / -1; margin: 0; text-align: center; }
+.media-compact .m-note:empty { display: none; }
+.fam-id { margin: 64px 0 40px; padding-top: 0; display: flex; flex-direction: column; gap: 28px; align-items: center; }
+.fam-ask { margin: 0; font-size: 14px; font-weight: 600; color: var(--grey-500); }
+.fam-id .found { width: min(560px, 100%); box-sizing: border-box; }
