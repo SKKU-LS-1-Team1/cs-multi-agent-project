@@ -2,7 +2,7 @@
 // BACKEND: 인증
 // 필요: POST /auth/login → { userId, name, role: "LEAD" | "MEMBER" }(세션·토큰), POST /auth/logout, GET /auth/me.
 //        역할(팀장/팀원)에 따라 서버도 배정 API(PATCH /tickets/{id}/owner 등)를 팀장에게만 허용해야 한다.
-// 지금: DB 없이 아래 시연 계정 4개(아이디·비밀번호·역할)를 코드에 두고 맞춰 본다. 역할(팀장/팀원)은 계정에 들어 있어, 로그인하면 자동으로 정해진다.
+// 지금: DB 없이 아래 시연 계정 8개(아이디·비밀번호·역할)를 코드에 두고 맞춰 본다. 역할(팀장/팀원)은 계정에 들어 있어, 로그인하면 자동으로 정해진다.
 //       실제 서비스에서는 비밀번호를 화면 코드에 두지 않고 서버가 확인한다.
 // 키: 사람은 바뀌지 않는 고유번호(userId, 예: EMP-0001)로 가리킨다. 이름·아이디(loginId)·직급은 그 번호에 붙은 정보다.
 //      BACKEND: users 테이블의 기본키가 userId 이고, 문의의 담당자(owner)·이력의 작성자(actor)도 나중에 이름 대신 userId 로 바꾼다(lib/types.ts 참고).
@@ -16,6 +16,10 @@ export const ACCOUNTS: Account[] = [
   { userId: "EMP-0002", loginId: "minji.park", password: "1234", name: "Minji Park", role: "MEMBER" },
   { userId: "EMP-0003", loginId: "jun.lee", password: "1234", name: "Jun Lee", role: "MEMBER" },
   { userId: "EMP-0004", loginId: "hana.choi", password: "1234", name: "Hana Choi", role: "MEMBER" },
+  { userId: "EMP-0005", loginId: "sora.jung", password: "1234", name: "Sora Jung", role: "MEMBER" },
+  { userId: "EMP-0006", loginId: "daniel.han", password: "1234", name: "Daniel Han", role: "MEMBER" },
+  { userId: "EMP-0007", loginId: "yuna.kang", password: "1234", name: "Yuna Kang", role: "MEMBER" },
+  { userId: "EMP-0008", loginId: "minho.seo", password: "1234", name: "Minho Seo", role: "MEMBER" },
 ];
 /** 아이디·비밀번호가 맞으면 세션을 시작하고 계정을 돌려준다. 틀리면 null. */
 export function login(loginId: string, password: string): Account | null {
