@@ -63,7 +63,7 @@ export default function App() {
     const symptom = picked.find((l) => l.startsWith('증상: '))?.slice(4)
     openInquiry({
       family: p?.family, model: p?.code, subject: (user[0] ?? symptom ?? '').split('\n')[0].slice(0, 100),
-      body: `${user.length ? `고객 메시지:\n${user.map((x) => `- ${x}`).join('\n')}` : ''}${picked.length ? `${user.length ? '\n\n' : ''}선택한 내용 · 해 본 조치:\n${picked.map((x) => `- ${x}`).join('\n')}` : ''}${asked.length ? `\n\n챗봇에서 이미 안내받은 조치:\n${asked.map((x) => `- ${x}`).join('\n')}` : ''}`,
+      body: `${user.length ? `문의 내용:\n${user.map((x) => `- ${x}`).join('\n')}` : ''}${picked.length ? `${user.length ? '\n\n' : ''}선택한 내용 · 해 본 조치:\n${picked.map((x) => `- ${x}`).join('\n')}` : ''}${asked.length ? `\n\n챗봇에서 안내받은 내용:\n${asked.map((x) => `- ${x}`).join('\n')}` : ''}`,
       chat: { messages: messages.map(({ role, content }) => ({ role, content })), docs: [] },
     })
   }
