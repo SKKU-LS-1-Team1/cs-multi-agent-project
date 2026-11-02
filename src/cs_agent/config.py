@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # 데이터 경로
     ref_dir: Path = REPO_ROOT / "data" / "ref"  # 기준표
     raw_data_dir: Path = REPO_ROOT / "data" / "raw"  # 원천 데이터
+    # 문의 첨부 파일 (services/attachments.py)
+    attachments_dir: Path = REPO_ROOT / "data" / "attachments"
 
     # LLM (기획서 9.2). live: Jev + Gemini 호출 / fake: LLM 끔
     llm_provider: Literal["live", "fake"] = "fake"

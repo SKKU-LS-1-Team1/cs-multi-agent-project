@@ -10,6 +10,11 @@ server {
         root /var/www/certbot;
     }
 
+    # 문의 첨부 업로드만 큰 파일을 받는다 (api-upload.conf). 정규식이라 아래 /api 보다 먼저 맞는다
+    location ~ ^/api/inquiries/[^/]+/attachments$ {
+        include /etc/nginx/snippets/api-upload.conf;
+    }
+
     location /api/ {
         include /etc/nginx/snippets/api-proxy.conf;
     }

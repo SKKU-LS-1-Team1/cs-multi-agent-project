@@ -5,6 +5,7 @@ import {
   FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, fieldLabel, fmtTime, mailEvents, notifyEmail, pauseRule, split, titleOf,
 } from '../lib/inquiry.js'
 import InquiryBody from './InquiryBody.jsx'
+import Attachments from './Attachments.jsx'
 import { familyImage, getFamily, getProduct } from '../lib/catalog.js'
 import { CATEGORIES, typeInfo } from '../lib/inquiryForm.js'
 import { LEGACY_TYPE } from '../lib/legacy.js'
@@ -163,11 +164,31 @@ function Sheet({ kind, t, onClose, onSend }) {
   )
 }
 
+// 서버에 올린 첨부 파일(GET /api/inquiries/{id}/attachments)을 본문의 이름 순서에 맞춘다.
+// 서버에 없는 이름(전화·메일 접수, 업로드 전 문의)은 이름만 보인다.
+function useAttachments(ticketId, names) {
+  const [stored, setStored] = useState([])
+  useEffect(() => {
+    let live = true
+    api.inquiryAttachments(ticketId).then((rows) => {
+      if (live) setStored(rows.map((r) => ({ name: r.name, size: r.size, type: r.content_type, url: api.attachmentUrl(ticketId, r.attachment_id) })))
+    }, () => {})
+    return () => { live = false }
+  }, [ticketId])
+  const left = [...stored]
+  const items = names.map((name) => {
+    const i = left.findIndex((r) => r.name === name)
+    return i >= 0 ? left.splice(i, 1)[0] : { name }
+  })
+  return [...items, ...left]
+}
+
 function Detail({ t, onBack, onSend, onAgain, email, onEmail }) {
   const st = STATUS[t.status]
   const miss = split(t.missing_info), blocking = split(t.missing_blocking_info), prov = split(t.provided_info)
   const [sheet, setSheet] = useState(null)
   const att = attachmentsOf(t)
+  const media = useAttachments(t.ticket_id, att)
   const done = st.kind === 'done'
 
   return (
@@ -206,7 +227,7 @@ function Detail({ t, onBack, onSend, onAgain, email, onEmail }) {
       <div className="blk"><h4>접수한 내용</h4>
         <ProductTag t={t} />
         {t.error_code_reported && <ul className="kv"><li><span>에러 코드</span><b>{t.error_code_reported}</b></li></ul>}
-        <InquiryBody text={t.inquiry_body} files={att} required={split(t.required_info)} provided={split(t.provided_info)} fallback={{ product_model: [t.product_name, t.product_code].filter(Boolean).join(' · '), error_code: t.error_code_reported }} />
+        <InquiryBody text={t.inquiry_body} files={media.map((x) => x.name)} media={media.some((x) => x.url) ? media : null} required={split(t.required_info)} provided={split(t.provided_info)} fallback={{ product_model: [t.product_name, t.product_code].filter(Boolean).join(' · '), error_code: t.error_code_reported }} />
       </div>
 
       {t.final_reply && st.kind !== 'need' && <div className="blk"><h4>답변</h4><div className="ib-notes"><Long text={t.final_reply} /></div></div>}

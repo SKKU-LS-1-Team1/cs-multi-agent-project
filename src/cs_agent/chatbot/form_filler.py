@@ -9,6 +9,9 @@
 #    빈 필수 항목은 missing_required 에 넣는다 (화면에서 빨간 칸, 채우기 전 제출 불가).
 # 3. subject·body: Gemini로 대화를 요약한다. 이미 안내받은 조치와 그 결과를 꼭 넣는다
 #    ("가속 시간 조정 후에도 재발") — 상담원이 같은 조치를 다시 안내하지 않게.
+#    문의서는 고객이 직접 내는 글이라 고객 1인칭으로 쓴다 ("챗봇이 발생 시점을 확인해 보라고
+#    안내했는데 아직 확인하지 못했습니다"). "상담원이 안내했으나 고객이 요청하여 …" 같은
+#    3인칭 상담 기록 말투가 나와 SUMMARY_PROMPT 에 시점을 못박았다 (2026-11-02).
 # 4. 국가·언어·회사·연락처는 로그인 고객 정보에서 (화면 쪽에서 합친다).
 #
 # 완료 기준: 기획서 5.5 예시(불량 문의)대로 채워진 문의서가 나온다
@@ -62,16 +65,22 @@ _FALLBACK_LABELS = {
     "ar": ("رسائل العميل:", "ما تم اقتراحه في المحادثة:"),
 }
 
-SUMMARY_PROMPT = """You prepare the inquiry form a customer will review and submit to support.
-Summarize the chat below into a subject and a message body.
+SUMMARY_PROMPT = """You draft the inquiry form that a customer will review and submit to support.
+The customer is the author: write the subject and body as the customer, in the first person,
+as if they typed it themselves after chatting with the support chatbot.
 
 Rules:
-- Write in the customer's language ({language}).
+- Write in the customer's language ({language}), in a polite tone.
 - Output the subject on the first line, a blank line, then the body. No labels, no markdown.
-- The subject is one short line. The body states the problem and the facts the customer gave.
-- The body MUST say which steps the assistant already advised and what happened after them,
-  so the support engineer does not repeat them.
-- Use only facts from the chat and the known fields. Do not invent values or promise anything.
+- The subject is one short line naming the product and the problem.
+- The body states the problem and the facts the customer gave ("I", "my unit", "we").
+- Never describe the customer in the third person ("the customer requested …") and never
+  write as the support side or as a summary of the chat ("the agent advised …").
+- Mention what the chatbot already suggested and what the customer did or found after it,
+  from the customer's point of view (for example: "The chatbot suggested checking when the
+  trip occurs. I have not checked this yet."), so the support engineer does not repeat it.
+- Use only facts from the chat and the known fields. Do not invent values, results or
+  checks the customer did not report. Do not promise anything.
 
 Inquiry type: {category}
 Product: {product}
@@ -80,7 +89,7 @@ Known fields: {fields}
 Customer messages:
 {customer}
 
-Assistant advice already given:
+Chatbot advice already given:
 {advice}
 """
 

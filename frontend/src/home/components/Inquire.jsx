@@ -6,6 +6,7 @@ import {
   CATEGORIES, EXAMPLES, LANGUAGES, TYPE_NAME, confOf, errorText, fieldsFor, filled, humanSize, isDate, missingOf, routeOf, typeInfo,
 } from '../lib/inquiryForm.js'
 import CuteIcon from './CuteIcon.jsx'
+import Attachments from './Attachments.jsx'
 import { api } from '../../api/client'
 import { newThreadRef, rememberInquiry } from '../../lib/myInquiries'
 import MediaAttach from './MediaAttach.jsx'
@@ -93,6 +94,12 @@ function Receipt({ s, fields, route, onExit, onOpenMine }) {
   }
   const fam = s.family ? getFamily(s.family) : null
   const files = Object.values(s.files).flat()
+  const [previews, setPreviews] = useState([])
+  useEffect(() => {
+    const p = files.map((x) => ({ name: x.file.name, size: x.file.size, type: x.file.type, url: URL.createObjectURL(x.file) }))
+    setPreviews(p)
+    return () => p.forEach((x) => URL.revokeObjectURL(x.url))
+  }, [s.files]) // eslint-disable-line
   // 고객이 채운 항목 (제품 모델은 위 제품 카드에, 파일은 첨부에 따로 보여 준다)
   const details = fields.filter((f) => f.key !== 'product_model' && confOf(f.key).type !== 'file' && filled(f, s.vals, s.files))
   const first = Number(t.sla_first_response_target_h) || 0, done = Number(t.sla_resolution_target_h) || 0
@@ -151,7 +158,8 @@ function Receipt({ s, fields, route, onExit, onOpenMine }) {
             <dl className="rcpt-fields">{details.map((f) => <div key={f.key}><dt>{f.label}</dt><dd>{s.vals[f.key]}</dd></div>)}</dl>
           )}
           {files.length > 0 && (
-            <ul className="rcpt-files">{files.map((x) => <li key={x.id}><Ico d={ICON.file} /><span>{x.file.name}</span><small>{humanSize(x.file.size)}</small></li>)}</ul>
+            <div className="sub-att"><h5>첨부 파일 <em>{files.length}</em></h5><Attachments items={previews} />
+              {t.upload_failed?.length > 0 && <p className="ferr" role="alert">{t.upload_failed.join(', ')} 파일을 올리지 못했어요. 내 문의에서 이어서 남겨 주세요.</p>}</div>
           )}
           <ul className="rcpt-meta">
             <li><Ico d={ICON.team} /><small>담당 부서</small><span>{route ? `${dept(route.primary)} (배정 예정)` : '확인 후 배정'}</span></li>
@@ -271,6 +279,10 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
         language: c.lang || null,
       })
       rememberInquiry({ ticket_id: sent.ticket_id, thread_ref: threadRef, subject, notify_email: s.contact.email.trim(), category_code: s.type, product_code: p?.code })
+      // 첨부는 문의번호가 나온 뒤 하나씩 올린다. 못 올린 파일은 접수 화면에 알린다 (문의 자체는 접수됐다)
+      const toUpload = provided.flatMap((f) => (confOf(f.key).type === 'file' ? (s.files[f.key] ?? []).map((x) => x.file) : []))
+      const uploaded = await Promise.all(toUpload.map((file) => api.uploadAttachment(sent.ticket_id, file).then(() => null, () => file.name)))
+      const uploadFailed = uploaded.filter(Boolean)
       const t = {
         demoSubmit: true, notify_email: s.contact.email.trim(), ticket_id: sent.ticket_id, received_at_utc: (sent.received_at ?? now.toISOString()).slice(0, 19) + 'Z', channel: 'WEB_FORM', language: c.lang, body_language: c.lang, customer_tier: customer.tier,
         product_code: p?.code ?? '', product_name: p?.name ?? '(모델 미확인)', product_family: s.family, category_code: s.type === 'USAGE' ? '' : s.type,
@@ -279,7 +291,7 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
         provided_info: provided.map((f) => f.key).join(';'), missing_info: '', missing_blocking_info: '', info_request_sent: 'N', info_request_message: '', status: 'NEW',
         first_response_at_utc: '', resolved_at_utc: '', first_response_hours: '', sla_first_response_target_h: sent.first_response_target_h ?? '', sla_resolution_target_h: sent.resolution_target_h ?? '', sla_elapsed_hours: '',
         sla_first_response_status: '', sla_resolution_status: '', final_action: '', final_reply: '', rma_no: '', reference_doc_id: '', reference_section: '',
-        thread_from: draft?.fromTicket ?? '',
+        thread_from: draft?.fromTicket ?? '', upload_failed: uploadFailed,
       }
       onSubmitted(t)
       set({ submitting: false, done: t })

@@ -9,6 +9,7 @@
 # | LLM | llm/router.LLMRouter | main.py |
 # | Docs · Cases | agents/retrieval.Retriever (없으면 None) | agents/retrieval.default_retrievers |
 # | ChatSessions | cache/store.ChatSessionStore (Redis, 없으면 메모리) | main.py |
+# | Attachments | services/attachments.AttachmentStore (문의 첨부 파일) | main.py |
 # | DB | sqlalchemy Session (요청 끝나면 닫음). DB 없이 켜졌으면 503 | db/session.py |
 from collections.abc import Iterator
 from typing import Annotated, Any
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from cs_agent.cache.store import ChatSessionStore
 from cs_agent.llm.router import LLMRouter
+from cs_agent.services.attachments import AttachmentStore
 from cs_agent.services.mailbox import Mailbox as MailboxService
 from cs_agent.services.tickets import TicketService
 
@@ -46,6 +48,10 @@ def _chat_sessions(request: Request) -> ChatSessionStore:
     return request.app.state.chat_sessions
 
 
+def _attachments(request: Request) -> AttachmentStore:
+    return request.app.state.attachments
+
+
 def _db(request: Request) -> Iterator[Session]:
     sessionmaker = request.app.state.sessionmaker
     if sessionmaker is None:
@@ -55,6 +61,7 @@ def _db(request: Request) -> Iterator[Session]:
 
 
 Tickets = Annotated[TicketService, Depends(_tickets)]
+Attachments = Annotated[AttachmentStore, Depends(_attachments)]
 LLM = Annotated[LLMRouter, Depends(_llm)]
 Docs = Annotated[Any, Depends(_docs)]
 Cases = Annotated[Any, Depends(_cases)]

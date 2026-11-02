@@ -4,7 +4,7 @@ import { investigationTask, copilotPresentation, referralSuggestions } from "@ad
 import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Paperclip, Send, User, type LucideIcon } from "lucide-react";
-import { Button } from "@admin/components/ui/button";
+import { Button, buttonVariants } from "@admin/components/ui/button";
 import { Card } from "@admin/components/ui/card";
 import { Checkbox } from "@admin/components/ui/checkbox";
 import { Input } from "@admin/components/ui/input";
@@ -21,6 +21,7 @@ import { loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentRep
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
+import { api, type InquiryAttachment } from "../../api/client";
 
 type Choice = "answer" | "expert" | "request";
 const SAMPLE = "CSV1-000050";
@@ -176,6 +177,36 @@ const Attachments = ({ files, t }: { files: string[]; t: Ticket }) => (
   </div>
 );
 
+// 고객이 문의서에 올린 파일 (GET /api/inquiries/{id}/attachments). 사진은 썸네일, 누르면 새 탭에서 원본
+const INLINE = /^image\/(png|jpeg|gif|webp|bmp)$/;
+function UploadedFiles({ ticketId }: { ticketId: string }) {
+  const [rows, setRows] = useState<InquiryAttachment[]>([]);
+  useEffect(() => {
+    let live = true;
+    api.inquiryAttachments(ticketId).then((r) => { if (live) setRows(r); }, () => {});
+    return () => { live = false; };
+  }, [ticketId]);
+  if (!rows.length) return null;
+  return (
+    <div className="grid gap-2">
+      <small className="text-muted-foreground">고객 첨부 {rows.length}건</small>
+      <div className="flex flex-wrap gap-3">
+        {rows.map((a) => {
+          const url = api.attachmentUrl(ticketId, a.attachment_id);
+          return INLINE.test(a.content_type) ? (
+            <a key={a.attachment_id} href={url} target="_blank" rel="noreferrer" title={a.name} className="block w-28 overflow-hidden rounded-xl ring-1 ring-black/10 hover:ring-primary">
+              <img src={url} alt={a.name} loading="lazy" className="aspect-square w-full object-cover" />
+              <span className="block truncate px-2 py-1 text-xs text-muted-foreground">{a.name}</span>
+            </a>
+          ) : (
+            <a key={a.attachment_id} href={url} download={a.name} className={buttonVariants({ size: "sm", variant: "outline" })}><Paperclip />{a.name}</a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Original({ t }: { t: Ticket }) {
   const sample = t.source !== "api" && t.id === SAMPLE;
   const text = t.translate ? (sample ? "iS7 75kW가 운전 명령 직후 E.OC로 트립합니다. 재시작해도 같은 현상이 발생합니다." : t.bodyKo || "한국어 번역이 아직 준비되지 않았습니다. 원문을 확인해 주세요.") : sourceInquiry(t);
@@ -184,6 +215,7 @@ function Original({ t }: { t: Ticket }) {
       <div className="flex items-center gap-3"><Tag className="rounded-md">원문 · {t.language}</Tag><button className="text-xs text-info hover:underline" onClick={() => toggleTranslate(t)}>{t.translate ? "원문 보기" : "한국어 번역"}</button></div>
       <p className="leading-relaxed">{text}</p>
       {sample && <><p className="text-muted-foreground">FW 4.00 · 부하 69% · 재시작 후 반복</p><Attachments t={t} files={["event_log.csv", "params.bak"]} /></>}
+      {t.source === "api" && <UploadedFiles ticketId={t.id} />}
     </Message>
   );
 }

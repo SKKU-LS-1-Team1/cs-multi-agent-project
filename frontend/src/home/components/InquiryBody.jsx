@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import CuteIcon from './CuteIcon.jsx'
+import Attachments from './Attachments.jsx'
 import { fieldLabel, fieldLabels } from '../lib/inquiry.js'
 
 // 접수한 내용(문의 본문)을 읽기 쉽게 나눠 보여 준다.
@@ -56,7 +57,8 @@ function infoRows(b, { required, fallback, files }) {
   return [...rows, ...b.details.filter((_, n) => !used.has(n)).map((d) => ({ label: d.k, value: clean(d.v), state: 'value' }))]
 }
 
-export default function InquiryBody({ text, required = [], fallback = {}, files = [], contact = [] }) {
+// media: 서버에 올린 첨부([{ name, size, type, url }], Inquiries.jsx useAttachments). 있으면 사진을 썸네일로 보여 준다
+export default function InquiryBody({ text, required = [], fallback = {}, files = [], contact = [], media = null }) {
   const b = parseBody(text)
   const rows = infoRows(b, { required, fallback, files })
   const [more, setMore] = useState(false)
@@ -88,8 +90,8 @@ export default function InquiryBody({ text, required = [], fallback = {}, files 
         )}
         {files.length > 0 && (
           <section className="ib-sec"><h5>첨부 자료 <em>{files.length}</em></h5>
-            <ul className="ib-files">{files.map((n) => { const k = kindOfName(n); return (
-              <li key={n}><span className="ibf-i"><CuteIcon name={k} size={22} /></span><b title={n}>{n}</b></li>) })}</ul></section>
+            {media ? <Attachments items={media} /> : <ul className="ib-files">{files.map((n) => { const k = kindOfName(n); return (
+              <li key={n}><span className="ibf-i"><CuteIcon name={k} size={22} /></span><b title={n}>{n}</b></li>) })}</ul>}</section>
         )}
         {shownContact.length > 0 && (
           <section className="ib-sec"><h5>연락처</h5>
