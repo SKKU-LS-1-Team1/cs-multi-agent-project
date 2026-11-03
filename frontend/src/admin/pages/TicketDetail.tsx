@@ -3,7 +3,8 @@ import { investigationTask, copilotPresentation, referralSuggestions } from "@ad
 // 문의 상세: 대기열 · 문의 요약 · 처리 상황 · 문의·답변/처리 이력/고객·제품 정보 · AI Copilot.
 import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
-import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Paperclip, Send, User, type LucideIcon } from "lucide-react";
+import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Headset, Image as ImageIcon, Paperclip, Send, User, type LucideIcon } from "lucide-react";
+import { FAMILY_KO } from "@admin/lib/customers";
 import { Button, buttonVariants } from "@admin/components/ui/button";
 import { Card } from "@admin/components/ui/card";
 import { Checkbox } from "@admin/components/ui/checkbox";
@@ -207,15 +208,39 @@ function UploadedFiles({ ticketId }: { ticketId: string }) {
   );
 }
 
+/** 제품군 코드: 서버 분석 값이 있으면 그것, 없으면(로컬 샘플) 제품명으로 짐작한다. */
+const familyCode = (t: Ticket): string => t.apiExtraction?.product_family
+  || (/MCCB|ACB|Breaker/i.test(t.product) ? "LV_BREAKER" : /Transformer/i.test(t.product) ? "TRANSFORMER" : /XGI|PLC/i.test(t.product) ? "PLC" : /HMI/i.test(t.product) ? "HMI" : /ESS/i.test(t.product) ? "ESS" : /Contactor/i.test(t.product) ? "CONTROL" : /iS7|S100|H100|inverter/i.test(t.product) ? "DRIVE" : "");
+const imageName = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
 function Original({ t }: { t: Ticket }) {
   const sample = t.source !== "api" && t.id === SAMPLE;
   const text = t.translate ? (sample ? "iS7 75kW가 운전 명령 직후 E.OC로 트립합니다. 재시작해도 같은 현상이 발생합니다." : t.bodyKo || "한국어 번역이 아직 준비되지 않았습니다. 원문을 확인해 주세요.") : sourceInquiry(t);
+  const family = familyCode(t), files = [...new Set([...(t.files || []), ...(sample ? ["event_log.csv", "params.bak"] : [])])];
   return (
     <Message role="customer" label="고객 문의" title={t.company} right={<small className="text-muted-foreground">{t.receivedLabel || (t.source === "api" ? "접수 시각 미기록" : `${INQUIRY_AT} UTC`)}</small>}>
-      <div className="flex items-center gap-3"><Tag className="rounded-md">원문 · {t.language}</Tag><button className="text-xs text-info hover:underline" onClick={() => toggleTranslate(t)}>{t.translate ? "원문 보기" : "한국어 번역"}</button></div>
-      <p className="leading-relaxed">{text}</p>
-      {sample && <><p className="text-muted-foreground">FW 4.00 · 부하 69% · 재시작 후 반복</p><Attachments t={t} files={["event_log.csv", "params.bak"]} /></>}
-      {t.source === "api" && <UploadedFiles ticketId={t.id} />}
+      <div className="mt-3 grid gap-8">
+        <dl className="grid grid-cols-3 gap-4 rounded-2xl bg-muted/60 px-6 py-5 text-sm max-[900px]:grid-cols-1">
+          <div className="grid gap-1"><dt className="text-xs text-muted-foreground">제품군</dt><dd className="font-semibold">{(family && FAMILY_KO[family]) || "제품군 미확인"}</dd></div>
+          <div className="grid gap-1"><dt className="text-xs text-muted-foreground">제품</dt><dd className="font-semibold">{t.product}</dd></div>
+          <div className="grid gap-1"><dt className="text-xs text-muted-foreground">문의 유형</dt><dd className="font-semibold">{t.type || "미분류"}</dd></div>
+        </dl>
+        <section aria-label="문의 내용" className="grid gap-3.5">
+          <div className="flex items-center gap-3"><h3 className="text-sm font-medium">문의 내용</h3><Tag className="rounded-md">원문 · {t.language}</Tag><button className="text-xs text-info hover:underline" onClick={() => toggleTranslate(t)}>{t.translate ? "원문 보기" : "한국어 번역"}</button></div>
+          <div className="rounded-2xl bg-muted/60 px-5 py-4 text-base leading-[1.8]">{text}</div>
+          {sample && <p className="text-sm text-muted-foreground">FW 4.00 · 부하 69% · 재시작 후 반복</p>}
+        </section>
+        {t.source === "api" ? <UploadedFiles ticketId={t.id} /> : (
+          <section aria-label="첨부 자료" className="grid gap-3.5">
+            <h3 className="text-sm font-medium">첨부 자료 {files.length ? `${files.length}건` : ""}</h3>
+            {files.length ? (
+              <div className="flex flex-wrap gap-2">
+                {files.map((f) => <Button key={f} size="sm" variant="outline" onClick={() => openModal("file", { file: f, id: t.id })}>{imageName.test(f) ? <ImageIcon /> : <Paperclip />}{f}</Button>)}
+              </div>
+            ) : <p className="text-sm text-muted-foreground">고객이 첨부한 자료가 없습니다.</p>}
+          </section>
+        )}
+      </div>
     </Message>
   );
 }
@@ -297,7 +322,7 @@ function Editor({ t }: { t: Ticket }) {
   return (
     <Card id="answer-editor" className="min-w-0 scroll-mt-6 gap-0 p-0 shadow-float ring-1 ring-black/5">
       <div className="flex items-center justify-between gap-4 px-8 pb-3 pt-7">
-        <h2 className="flex items-center gap-3 text-xl font-bold">{isRequest ? "고객 질의서 작성" : "고객 답변 작성"}
+        <h2 className="flex items-center gap-3 text-base font-semibold"><span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-[#d6336c]/10 px-3 text-[13px] font-medium text-[#c2255c]"><Headset className="size-3.5" aria-hidden />{isRequest ? "관리자 질의" : "관리자 답변"}</span>{isRequest ? "고객 질의서 작성" : "고객 답변 작성"}
           {t.draft && <button type="button" aria-expanded={!folded} onClick={() => setFolded((v) => !v)} className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"><ChevronDown className={cn("size-3.5 transition-transform", folded && "-rotate-90")} aria-hidden />{folded ? "펼치기" : "접기"}</button>}
         </h2>
         <div className="flex items-center gap-2 text-sm text-muted-foreground"><span>작성 English</span><span>→ 고객 언어 <b className="font-medium text-foreground">{lang}</b></span></div>
