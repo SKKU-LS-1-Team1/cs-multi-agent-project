@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { api, type MailAnalysis, type MailItem } from "../../api/client";
 import { CATEGORY_LABEL, DEPT_LABEL, syncFromApi } from "@admin/lib/api-sync";
 import { signedIn } from "@admin/lib/logic";
+import { CASE_GROUPS, groupOfCategory } from "@admin/lib/customers";
 import { Button } from "@admin/components/ui/button";
 import { Card } from "@admin/components/ui/card";
 import { AiMark, Empty, Facts, Field, Mono, NativeSelect, PageHeader, PriorityTag, Tag, TierTag, UnderlineTabs, useGo } from "@admin/components/admin/common";
@@ -68,7 +69,7 @@ export default function Mailbox() {
       </PageHeader>
       {error && <p className="mx-10 mb-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">메일함을 불러오지 못했습니다: {error}</p>}
       <div className="grid h-[calc(100dvh-17.5rem)] min-h-96 grid-cols-[360px_minmax(0,1fr)] gap-4 px-10 pb-6">
-        <div className="grid min-h-0 content-start gap-2 overflow-y-auto pr-2">
+        <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-2">
           {mails === null && !error && <Empty>메일을 불러오는 중입니다…</Empty>}
           {shown.map((m) => <MailRow key={m.mail_id} mail={m} active={m === chosen} onClick={() => setSelected(m.mail_id)} />)}
           {mails !== null && !shown.length && <Empty>{tab === "pending" ? "처리할 메일이 없습니다." : "아직 등록한 메일이 없습니다."}</Empty>}
@@ -84,12 +85,12 @@ export default function Mailbox() {
 
 function MailRow({ mail, active, onClick }: { mail: MailItem; active: boolean; onClick: () => void }) {
   return (
-    <button onClick={onClick} className={cn("grid gap-1 rounded-xl bg-card p-3.5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:shadow-float", active && "ring-2 ring-inset ring-[#003377]/45")}>
-      <span className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span className="truncate">{mail.sender}</span><span className="shrink-0 tabular-nums">{ago(mail.received_at)}</span>
+    <button onClick={onClick} className={cn("grid rounded-xl bg-card px-5 py-5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:shadow-float", active && "ring-2 ring-inset ring-[#003377]/45")}>
+      <span className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span className="truncate">{mail.sender}</span><span className="shrink-0 tabular-nums text-muted-foreground/80">{ago(mail.received_at)}</span>
       </span>
-      <strong className="line-clamp-2 text-sm leading-snug">{mail.subject}</strong>
-      <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+      <strong className="line-clamp-2 text-[15px] font-semibold leading-snug text-foreground">{mail.subject}</strong>
+      <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <TierTag tier={mail.customer_tier} /><Mono>{(mail.language || "-").toUpperCase()}</Mono>
         {mail.ticket_id ? <Tag tone="green">티켓 <Mono>{mail.ticket_id}</Mono></Tag> : mail.analyzed || analyses.has(mail.mail_id) ? <Tag tone="blue">AI 분석됨</Tag> : null}
       </span>
@@ -105,6 +106,15 @@ function MailDetail({ mail, products, onRegistered }: { mail: MailItem; products
   const [category, setCategory] = useState(analysis?.classification?.category || "");
   const [product, setProduct] = useState(analysis?.extraction?.product_code || "");
   const [registering, setRegistering] = useState(false);
+  // 유형은 고객 화면의 4개 분류로 고르고, 분류 안에 유형이 여러 개면 세부 유형을 한 번 더 고른다(백엔드는 세부 코드로 우선순위·부서를 정한다).
+  const [pickedGroup, setPickedGroup] = useState("");
+  const group = category ? groupOfCategory(category) : pickedGroup;
+  const groupCodes = CASE_GROUPS.find(([key]) => key === group)?.[2] || [];
+  const pickGroup = (key: string) => {
+    setPickedGroup(key);
+    const codes = CASE_GROUPS.find(([k]) => k === key)?.[2] || [];
+    setCategory(codes.includes(category) ? category : codes.length === 1 ? codes[0] : "");
+  };
   const [korean, setKorean] = useState(false);
 
   const run = async (review: { category?: string | null; product_code?: string | null } = {}) => {
@@ -200,10 +210,18 @@ function MailDetail({ mail, products, onRegistered }: { mail: MailItem; products
           {(analysis || failed) && (
             <div className="grid grid-cols-2 gap-4">
               <Field label={<>유형 {analysis?.classification && <small>· {analysis.category_by === "reviewer" ? "담당자 선택" : `AI 판단 · 확신도 ${Math.round(analysis.classification.confidence * 100)}%`}</small>}</>}>
-                <NativeSelect value={category} onChange={(e) => setCategory(e.target.value)} disabled={analyzing || registering}>
-                  <option value="">유형 선택</option>
-                  {Object.entries(CATEGORY_LABEL).map(([code, label]) => <option key={code} value={code}>{label} ({code})</option>)}
-                </NativeSelect>
+                <div className="grid gap-2">
+                  <NativeSelect value={group} onChange={(e) => pickGroup(e.target.value)} disabled={analyzing || registering}>
+                    <option value="">유형 선택</option>
+                    {CASE_GROUPS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                  </NativeSelect>
+                  {groupCodes.length > 1 && (
+                    <NativeSelect aria-label="세부 유형" value={category} onChange={(e) => setCategory(e.target.value)} disabled={analyzing || registering}>
+                      <option value="">세부 유형 선택</option>
+                      {groupCodes.map((code) => <option key={code} value={code}>{CATEGORY_LABEL[code] || code}</option>)}
+                    </NativeSelect>
+                  )}
+                </div>
               </Field>
               <Field label={<>제품 {extraction && <small>· {analysis?.product_by === "reviewer" ? "담당자 선택" : aiProduct ? "AI 추출" : "AI가 찾지 못함"}</small>}</>}>
                 <NativeSelect value={product} onChange={(e) => setProduct(e.target.value)} disabled={analyzing || registering}>

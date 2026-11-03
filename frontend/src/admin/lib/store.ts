@@ -31,6 +31,9 @@ export const ui = {
   departmentFilter: "전체",
   knowledge: 0,
   knowledgeTab: "해결 사례",
+  caseFamily: "", // 해결 사례 탭의 제품군 필터(분류를 고른 뒤 한 번 더 좁힌다)
+  caseGroup: "", // 해결 사례 탭의 분류 필터(빈 값 = 전체). 고객 화면의 4개 분류와 같다
+  docFamily: "", // 기술문서 탭의 제품군 필터(빈 값 = 전체, "COMMON" = 제품군 없는 공통·정책 문서)
   kquery: "",
   completedFilter: "전체 기록",
   completedTicket: null as string | null,
