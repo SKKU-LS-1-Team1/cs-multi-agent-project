@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   answerContext, buildExpertRequest, canAssign, checkAssign, composeAnswer, composerKey, composerLanguage, contextIsNew, contextKey, customerLanguage, FRONTLINE, isEdited, needsLocalization, runChecks, translateText,
   informationAssessment, people, recommend, record, requiredInformation, resourceReason, signedIn, storeComposer, ticketProgress,
-  waitingReviews, latestCustomerReply, ownedTickets, departmentRank, slaMinutes, branchChoice, pendingCustomerInfo,
+  waitingReviews, expertPhase, expertReviewModal, latestCustomerReply, ownedTickets, departmentRank, slaMinutes, branchChoice, pendingCustomerInfo,
 } from "./logic";
 import { closeModal, commit, openModal, setUi, tickets } from "./store";
 import type { Ticket } from "./types";
@@ -81,6 +81,7 @@ export function requestInvestigationInfo(t: Ticket) {
 }
 export function openExpertComposer(t: Ticket) {
   if (t.regenerating || t.expertDraftLoading) return;
+  if (expertPhase(t) === "waiting") { toast.error(`이미 ${waitingReviews(t).at(-1)?.department || "전문부서"}에 요청했습니다. 회신을 받은 뒤 요청할 수 있습니다.`); return; } // 전문부서는 한 번에 한 곳에만 요청한다
   const left = pendingCustomerInfo(t);
   if (left > 0) { toast.error(`고객 정보를 먼저 확인해야 전문부서에 요청할 수 있습니다. 남은 자료 ${left}건`); return; }
   setUi({ tab: "문의·답변" });
@@ -88,6 +89,25 @@ export function openExpertComposer(t: Ticket) {
   if (isApiTicket(t) && (!t.expertDraft || !t.apiEscalationRequest)) { commit(); scrollToEditor(); void escalationDraftViaApi(t); return; } // AI 요청서 초안 (CSA-55)
   t.expertDraft ??= buildExpertRequest(t);
   commit(); scrollToEditor();
+}
+/* ───────── 전문부서 회신 검토 (3단계 C: 회신 도착 → 담당자가 확인) ───────── */
+/** 회신 검토 화면을 연다. 서버 분석(specialistFollowup)이 있는 문의는 기존 검토 결과 확인 화면을, 그 외에는 요청·회신 비교 화면을 연다. */
+export function openExpertReview(t: Ticket) { const m = expertReviewModal(t); if (m) openModal(m[0], m[1]); }
+/** 담당자가 회신을 확인했다고 남긴다. next: answer(반영하고 답변 작성) · followup(같은 부서에 추가 질의) · customer(고객 자료 추가 요청). */
+export function confirmExpertReview(t: Ticket, next: "answer" | "followup" | "customer") {
+  const replies = t.events.filter((e) => e.kind === "expert" && !e.reviewed);
+  if (next === "followup") {
+    const dept = replies.at(-1)?.department;
+    openExpertComposer(t);
+    if (t.activeComposer !== "expert") return; // 고객 정보 확인이 먼저인 경우 등
+    if (dept) t.expertDraftDepartment = dept;
+  }
+  const at = new Date().toISOString();
+  replies.forEach((e) => { e.reviewed = true; e.reviewedBy = signedIn; e.reviewedAt = at; });
+  t.reviewed = false;
+  closeModal(); commit();
+  if (next === "customer") composeFromCopilot(t, "request");
+  else if (next === "answer") toast("회신을 반영했습니다. 답변을 작성하세요.");
 }
 export function closeComposer(t: Ticket) { t.activeComposer = null; t.composerOpen = false; commit(); }
 
@@ -435,6 +455,7 @@ export function nextAction(t: Ticket): Next | null {
   }
   if (t.customerRequestStatus === "waiting") return { label: "고객 회신 대기 중", waiting: true };
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) };
+  if (expertPhase(t) === "review" && t.purpose !== "request") return { label: "전문부서 회신 검토", run: () => openExpertReview(t) };
   if (t.draft && t.purpose !== "request" && (waitingReviews(t).length || t.legacyReviewPending)) return { label: "전문부서 회신 등록", externalWaiting: true, run: () => openModal("expert-receive", { id: t.id }) };
   // 사람 검토 문의는 초안이 없으면 아래(자료 요청 → 전문부서 회신 → 직접 작성) 순서를 일반 문의와 똑같이 따른다
   if (isManualReplyTicket(t) && t.draft && ((t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0)
@@ -478,6 +499,7 @@ export function judgment(t: Ticket): Judgment {
     title: "담당자 검토 필요", task: "문의와 근거를 확인하고 영어 답변을 직접 작성하세요.",
     note: "", reason: "작성한 답변은 고객 언어 변환과 최종 점검을 거칩니다.", missing: none,
   };
+  if (expertPhase(t) === "review" && t.purpose !== "request" && !t.sent && t.stage !== 5 && !t.specialistFollowup) return { title: "전문부서 회신 도착", task: "회신이 요청에 맞는지 확인하고, 답변에 반영하세요.", note: "", reason: "확인하기 전에는 고객 답변을 쓰지 않습니다. 부족하면 추가 질의나 고객 자료 요청으로 돌아갈 수 있습니다.", missing: none };
   const reply0 = latestCustomerReply(t);
   // nextAction 과 같은 순서: 고객 회신을 기다리거나 확인할 일이 있으면 초안이 있어도 그 일이 먼저다.
   const customerFirst = t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting" || (t.customerRequestStatus === "received" && !!reply0 && requiredInformation(t).length > 0 && reply0.id !== t.reviewedReplyKey);
