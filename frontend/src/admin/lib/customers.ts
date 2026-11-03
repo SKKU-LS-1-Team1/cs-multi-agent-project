@@ -25,11 +25,11 @@ export const STATUS_KO: Record<string, string> = { CLOSED: "종료", RESOLVED: "
 export const flag = (code: string) => /^[A-Za-z]{2}$/.test(code) ? String.fromCodePoint(...[...code.toUpperCase()].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65)) : "—";
 
 /** 대응 판단에 사용하는 사실(이슈 기준). 같은 고객이 여러 개에 해당할 수 있다. 예측이 아니라 확인된 사실만 쓴다. */
-export type Reason = "safety" | "urgent" | "breach" | "repeat";
-export const hasReason = (c: Customer, r: Reason) => (r === "safety" ? c.safety.length > 0 : r === "urgent" ? c.urgentN > 0 : r === "breach" ? c.breach >= 4 : (c.fam[0]?.[1] ?? 0) >= 4);
-export const reasonsOf = (c: Customer): Reason[] => (["safety", "urgent", "breach", "repeat"] as Reason[]).filter((r) => hasReason(c, r));
+export type Reason = "urgent" | "breach" | "repeat";
+export const hasReason = (c: Customer, r: Reason) => (r === "urgent" ? c.urgentN > 0 : r === "breach" ? c.breach >= 4 : (c.fam[0]?.[1] ?? 0) >= 4);
+export const reasonsOf = (c: Customer): Reason[] => (["urgent", "breach", "repeat"] as Reason[]).filter((r) => hasReason(c, r));
 /** 줄에 보여 줄 대표 사실 하나: 지연·임박 문의(대응 버튼 있음) > 반복 문의 > 지연 이력(참고용). */
-export const primaryReason = (c: Customer): Reason | undefined => (["safety", "urgent", "repeat", "breach"] as Reason[]).find((r) => hasReason(c, r)); // 대응 버튼이 있는 이유(지연·임박 문의)를 먼저
+export const primaryReason = (c: Customer): Reason | undefined => (["urgent", "repeat", "breach"] as Reason[]).find((r) => hasReason(c, r)); // 대응 버튼이 있는 이유(지연·임박 문의)를 먼저
 
 /** 사실 한 줄(상세의 대응 항목). */
 export function factText(c: Customer, r: Reason): string {
@@ -47,22 +47,21 @@ export const maxLate = (c: Customer) => Math.max(0, ...c.urgent.filter(isLate).m
 export const SEVERE_DAYS = 7;
 
 /** 카드용 사실: 색(red 위급 · amber 주의 · blue 참고) + 짧은 이름 + 값. 문장으로 풀지 않고 이름과 값으로 나눠 쓴다. */
-export function factParts(c: Customer, r: Reason): { tone: "severe" | "red" | "amber" | "blue"; title: string; value: string } {
-  if (r === "safety") return { tone: "red", title: `안전 검토 문의 ${c.safety.length}건`, value: "미완료" };
+export function factParts(c: Customer, r: Reason): { tone: "severe" | "red" | "amber" | "blue"; title: string; value: string; count: string } {
   if (r === "urgent") {
     const late = c.urgent.filter(isLate);
-    if (late.length) { const d = Math.max(1, maxLate(c)); return { tone: d >= SEVERE_DAYS ? "severe" : "red", title: `지연 문의 ${late.length}건`, value: `최대 ${d}일 지연` }; }
+    if (late.length) { const d = Math.max(1, maxLate(c)); return { tone: d >= SEVERE_DAYS ? "severe" : "red", title: `지연 문의 ${late.length}건`, value: `최대 ${d}일 지연`, count: `${late.length}건` }; }
     const soon = Math.min(...c.urgent.map((u) => u[3] - u[4]));
-    return { tone: "amber", title: `임박 문의 ${c.urgentN}건`, value: `${Math.max(1, Math.round(soon))}시간 남음` };
+    return { tone: "amber", title: `임박 문의 ${c.urgentN}건`, value: `${Math.max(1, Math.round(soon))}시간 남음`, count: `${c.urgentN}건` };
   }
-  if (r === "breach") return { tone: "amber", title: `지연 이력 ${c.breach}회`, value: "최근 12개월" };
-  return { tone: "blue", title: `${FAMILY_KO[c.fam[0][0]] || c.fam[0][0]} ${c.fam[0][1]}회 반복`, value: "최근 12개월" };
+  if (r === "breach") return { tone: "amber", title: `지연 이력 ${c.breach}회`, value: "최근 12개월", count: `${c.breach}회` };
+  return { tone: "blue", title: `${FAMILY_KO[c.fam[0][0]] || c.fam[0][0]} ${c.fam[0][1]}회 반복`, value: "최근 12개월", count: `${c.fam[0][1]}회` };
 }
 
-/** 미완료 안전 문의 또는 GOLD·PLATINUM 지연 문의. 고객 대응 종결은 실제 문의 사유를 해제하지 않는다. */
+/** GOLD·PLATINUM 고객의 지연 문의. 고객 대응 종결은 실제 문의 사유를 해제하지 않는다. */
 export type Focus = "issue" | "pinned" | null;
 export function focusOf(c: Customer, rec?: { resolved?: boolean; pinned?: boolean }): Focus {
-  if (c.safety.length > 0 || (["GOLD", "PLATINUM"].includes(c.tier) && c.urgent.some(isLate))) return "issue";
+  if (["GOLD", "PLATINUM"].includes(c.tier) && c.urgent.some(isLate)) return "issue";
   return rec?.pinned ? "pinned" : null;
 }
 /** 정렬 점수: 등급이 높고 SLA 초과가 많을수록 위로. */

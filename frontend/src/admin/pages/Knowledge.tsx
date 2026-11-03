@@ -113,8 +113,7 @@ function CaseDetail({ c }: { c: CaseRow }) {
         <div><dt className="text-muted-foreground">펌웨어</dt><dd className="font-semibold">{r.fw_version_at_issue || "미기록"}</dd></div>
         <div><dt className="text-muted-foreground">원본 문의</dt><dd><Mono className="font-semibold">{c.ticketId}</Mono></dd></div>
       </dl>
-      <section className="grid gap-3 rounded-xl bg-accent/70 p-4"><h2 className="font-semibold">해결 요약</h2>
-        <Facts className="gap-y-4 [&_dt]:font-bold [&_dt]:text-foreground" rows={[["확인된 원인", <strong key="c">{c.cause}</strong>], ["수행 조치", c.action], ["확인 결과", <span key="r" className="text-success">{c.result}</span>]]} /></section>
+      <section className="grid gap-3 rounded-xl bg-accent/70 p-4">        <Facts className="gap-y-4 [&_dt]:font-bold [&_dt]:text-foreground" rows={[["확인된 원인", <strong key="c">{c.cause}</strong>], ["수행 조치", c.action], ["확인 결과", <span key="r" className="text-success">{c.result}</span>]]} /></section>
       <Section title="증상과 발생 조건">
         <div className="rounded-2xl bg-muted/60 px-5 py-4 text-base leading-[1.8]">{c.symptom}</div>
         {c.symptom !== r.symptom && <Fold title="증상 원문"><p>{r.symptom}</p></Fold>}
@@ -132,7 +131,6 @@ function CaseDetail({ c }: { c: CaseRow }) {
         <button className="w-fit text-info hover:underline" onClick={() => openModal("knowledge-document", { docId: r.reference_doc_id })}><Mono>{r.reference_doc_id}</Mono> · §{r.reference_section}</button>
         <Fold title="원본 처리 기록"><p>{r.case_summary}</p></Fold>
       </Section>
-      <div className="rounded-lg bg-secondary px-4 py-3 text-sm text-muted-foreground">과거의 진단·조치 기록입니다. 현재 문의의 제품·발생 조건과 비교한 뒤 적용 여부를 판단합니다.</div>
     </Card>
   );
 }

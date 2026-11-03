@@ -1,5 +1,5 @@
 // 처리 단계(접수·분석 → 고객 정보 → 전문부서 → 답변 작성 → 발송 → 완료): 문의 상세의 진행 막대와 문의 목록의 "3/6 전문부서" 표시가 같이 쓴다.
-import { informationAssessment, informationSummary, latestCustomerReply, requiredInformation, waitingReviews } from "./logic";
+import { informationAssessment, informationSummary, latestCustomerReply, pendingCustomerInfo, requiredInformation, waitingReviews } from "./logic";
 import { openModal } from "./store";
 import type { Ticket } from "./types";
 
@@ -33,7 +33,8 @@ export function flowSteps(t: Ticket): Step[] {
   const live = steps.map((x, i) => (x.state === "current" ? i : -1)).filter((i) => i >= 0);
   if (live.length > 1) {
     // 전문부서 회신을 기다리는 중이면 그 단계가 지금 단계(답변 초안이 있어도 회신 전에는 발송하지 못한다).
-    const focus = live.find((i) => steps[i].key === (pending || writingExpert ? "expert" : "answer")) ?? live[0];
+    // 고객 정보가 끝나지 않았으면 그 단계가 먼저다(고객 정보 확인 → 전문부서). 그 외에는 아래 규칙.
+    const focus = (pendingCustomerInfo(t) > 0 ? live.find((i) => steps[i].key === "info") : undefined) ?? live.find((i) => steps[i].key === (pending || writingExpert ? "expert" : "answer")) ?? live[0];
     live.forEach((i) => { if (i !== focus) steps[i].state = steps[i].key === "expert" ? "waiting" : "todo"; });
     if (pending && steps[focus].key === "expert") steps[focus].state = "waiting";
   }

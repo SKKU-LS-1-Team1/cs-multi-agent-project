@@ -56,6 +56,9 @@ export default function CustomerDetail() {
   const [note, setNote] = useState("");
   const [openError, setOpenError] = useState("");
   const openTicket = async (id: string) => {
+    const local = findTicket(id);
+    if (local?.dummy) { setOpenError(""); go.ticket(id); return; } // 로컬 더미 문의는 서버에 없다
+    if (customerId?.startsWith("CUST-D")) { setOpenError("더미 고객의 오래된 이력은 상세가 없습니다."); return; }
     try {
       const row = await api.ticket(id), old = findTicket(id);
       const t = apply(old, row);
@@ -71,7 +74,7 @@ export default function CustomerDetail() {
   const items: Item[] = [
     ...rec.actions.map((a): Item => ({ key: a.id, at: a.at, type: "대응", title: <Ids text={a.text} />, sub: <>{a.by}</> })),
     ...c.t.map(([id, date, subject, cat, fam, pri, st, sla]): Item => ({ key: id, at: date, type: "문의", title: subject, onOpen: () => { void openTicket(id); }, sub: <>{CATEGORY_KO[cat] || cat} · {FAMILY_KO[fam] || fam}</>,
-      tags: <><Tag tone={pri === "P1" ? "red" : pri === "P2" ? "amber" : ""}>{pri} {PRIORITY_KO[pri]}</Tag>{sla === "BREACHED" && <Tag tone="red">SLA 초과</Tag>}<span className={cn("text-sm", ["IN_PROGRESS", "ESCALATED", "NEW", "WAITING_CUSTOMER"].includes(st) && "font-medium")}>{findTicket(id)?.specialistFollowup?.status === "in_progress" && !["WAITING_CUSTOMER", "RESOLVED", "CLOSED", "REJECTED", "APPROVED"].includes(st) ? "사내 분석 중" : STATUS_KO[st] || st}</span></> })),
+      tags: <><Tag tone={pri === "P1" ? "red" : pri === "P2" ? "amber" : ""}>{pri} {PRIORITY_KO[pri]}</Tag>{sla === "BREACHED" && <Tag tone="red">SLA 초과</Tag>}<span className={cn("text-sm", ["IN_PROGRESS", "ESCALATED", "NEW", "WAITING_CUSTOMER"].includes(st) && "font-medium")}>{findTicket(id)?.specialistFollowup?.status === "in_progress" && !["WAITING_CUSTOMER", "RESOLVED", "CLOSED", "REJECTED", "APPROVED"].includes(st) ? "전문부서 분석 중" : STATUS_KO[st] || st}</span></> })),
   ].sort((a, b) => b.at.localeCompare(a.at));
 
   return (
@@ -93,9 +96,6 @@ export default function CustomerDetail() {
 
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-start gap-6">
         <div className="grid gap-6">
-          {c.safety.length > 0 && <Card title="안전 검토 문의" aside={<ActionButton c={c} kind="notice" />}>
-            <ul className="grid gap-3">{c.safety.map(([id, title]) => <li key={id}><button className="text-left text-info" onClick={() => { void openTicket(id); }}>{title} · <Mono>{id}</Mono></button></li>)}</ul>
-          </Card>}
           {c.urgent.length > 0 && (
             <Card title="지연·임박 문의" aside={<ActionButton c={c} kind="notice" />}>
               <ul className="-my-2 divide-y">

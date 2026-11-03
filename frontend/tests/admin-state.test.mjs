@@ -927,17 +927,18 @@ function customerRules() {
   return load('lib/customers.ts', { react: {}, '../../api/client': {} });
 }
 const customerRow = (patch = {}) => ({ id: 'C-1', tier: 'STANDARD', safety: [], urgent: [], urgentN: 0, breach: 0, fam: [], ...patch });
-test('customer focus uses safety or premium overdue, not history or imminent alone', () => {
+test('customer focus uses premium overdue only: safety, history or imminent alone do not count', () => {
   const { focusOf } = customerRules();
   const late = [['T', 'Inquiry', 'P2', 24, 30, 'ON_HOLD']];
   assert.equal(focusOf(customerRow({ tier: 'GOLD', urgent: late })), 'issue');
   assert.equal(focusOf(customerRow({ urgent: late })), null);
-  assert.equal(focusOf(customerRow({ safety: [['T', 'Safety']] })), 'issue');
+  assert.equal(focusOf(customerRow({ safety: [['T', 'Safety']] })), null);
   assert.equal(focusOf(customerRow({ tier: 'PLATINUM', urgent: [['T', '', 'P2', 24, 20, 'ON_HOLD']], breach: 8 })), null);
 });
 test('care closure cannot hide active risk; manual pin persists after automatic risk resolves', () => {
   const { focusOf } = customerRules();
-  assert.equal(focusOf(customerRow({ safety: [['T', 'Safety']] }), { resolved: true }), 'issue');
+  const late = [['T', 'Inquiry', 'P2', 24, 30, 'ON_HOLD']];
+  assert.equal(focusOf(customerRow({ tier: 'GOLD', urgent: late }), { resolved: true }), 'issue');
   assert.equal(focusOf(customerRow(), { pinned: true }), 'pinned');
   assert.equal(focusOf(customerRow(), { resolved: true }), null);
 });

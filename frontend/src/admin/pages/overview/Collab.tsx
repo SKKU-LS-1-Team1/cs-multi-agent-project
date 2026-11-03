@@ -1,6 +1,6 @@
 // 전문부서 협업: 회신 대기와 회신 후에도 계속되는 사내 분석을 추적한다.
 // 왼쪽 = 회신 대기 카드(회신 대기 시간·회신 등록), 오른쪽 = 부서별 대기(건수 막대를 기다린 시간 구간으로 나눠 어느 부서가 오래 묵었는지 보인다).
-// 회신이 온 뒤의 일(답변 작성)은 "오늘 내가 할 일"과 문의 상세가 안내하므로 여기에는 두지 않는다.
+// 회신이 온 뒤의 일(답변 작성)은 "할 일"과 문의 상세가 안내하므로 여기에는 두지 않는다.
 import { useState } from "react";
 import { ArrowRight, ChevronDown } from "lucide-react";
 import { Button } from "@admin/components/ui/button";

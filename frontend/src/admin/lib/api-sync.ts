@@ -140,7 +140,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     type: api.category ? CATEGORY_LABEL[api.category] || api.category : "미분류",
     secondaryType: api.classification?.secondary_category ? CATEGORY_LABEL[api.classification.secondary_category] || api.classification.secondary_category : null,
     priority: api.priority || "—",
-    status: api.specialist_followup?.status === "in_progress" && !["WAITING_CUSTOMER", "RESOLVED", "REJECTED", "APPROVED"].includes(api.status) ? "사내 분석 중" : STATUS_LABEL[api.status] || api.status,
+    status: api.specialist_followup?.status === "in_progress" && !["WAITING_CUSTOMER", "RESOLVED", "REJECTED", "APPROVED"].includes(api.status) ? "전문부서 분석 중" : STATUS_LABEL[api.status] || api.status,
     sla: CLOSED.has(api.status) ? STATUS_LABEL[api.status] : slaText(api.sla_due_at),
     risk: Boolean(work?.at_risk),
     owner: api.assignee ? agents.get(api.assignee)?.name || api.assignee : "",
@@ -277,6 +277,8 @@ export function watchTicketDetail(id: string): () => void {
   };
 }
 export function loadTicketDetail(id: string): Promise<Ticket> {
+  const local = tickets.find((t) => t.id === id);
+  if (local?.dummy) return Promise.resolve(local); // 로컬 더미 문의는 서버에 없다
   const pending = detailLoads.get(id);
   if (pending) return pending;
   const before = snapshotKey(tickets.find((t) => t.id === id));
@@ -311,7 +313,8 @@ export async function syncFromApi(): Promise<boolean> {
     list.forEach((w) => workItems.set(w.ticket_id, w));
     const known = tickets.filter((t) => isApiTicket(t) && !CLOSED.has(t.apiStatus)).map((t) => t.id);
     // 작업 목록(열린 건) + 발송했고 완료 전인 건(다른 브라우저에서 발송했어도 완료 처리할 수 있게) + 이미 아는 건
-    const ids = [...new Set([...list.map((w) => w.ticket_id), ...answered, ...known, ...selectedDetails.keys()])];
+    const ids = [...new Set([...list.map((w) => w.ticket_id), ...answered, ...known, ...selectedDetails.keys()])]
+      .filter((id) => !tickets.find((t) => t.id === id)?.dummy); // 서버에 없는 더미 문의를 조회하면 404 로 지워진다
 
     const fetched = await Promise.all(ids.map(async (id) => {
       const before = snapshotKey(tickets.find((t) => t.id === id));
@@ -321,7 +324,7 @@ export async function syncFromApi(): Promise<boolean> {
       }
     }));
     if (!online) {
-      tickets.splice(0, tickets.length, ...tickets.filter(isApiTicket)); // 예시 티켓은 뺀다
+      tickets.splice(0, tickets.length, ...tickets.filter((t) => isApiTicket(t) || t.dummy)); // 예시 티켓은 뺀다(로컬 더미 문의는 남긴다)
       // 실제 문의는 agents.csv 담당자에게 자동 배정돼 로그인 상담원의 "내 담당"에 없을 수 있다
       setUi({ filter: "전체", queueScope: "전체" });
     }

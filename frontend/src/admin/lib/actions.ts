@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   answerContext, buildExpertRequest, canAssign, checkAssign, composeAnswer, composerKey, composerLanguage, contextIsNew, contextKey, customerLanguage, FRONTLINE, isEdited, needsLocalization, runChecks, translateText,
   informationAssessment, people, recommend, record, requiredInformation, resourceReason, signedIn, storeComposer, ticketProgress,
-  waitingReviews, latestCustomerReply, ownedTickets, departmentRank, slaMinutes, branchChoice,
+  waitingReviews, latestCustomerReply, ownedTickets, departmentRank, slaMinutes, branchChoice, pendingCustomerInfo,
 } from "./logic";
 import { closeModal, commit, openModal, setUi, tickets } from "./store";
 import type { Ticket } from "./types";
@@ -81,6 +81,8 @@ export function requestInvestigationInfo(t: Ticket) {
 }
 export function openExpertComposer(t: Ticket) {
   if (t.regenerating || t.expertDraftLoading) return;
+  const left = pendingCustomerInfo(t);
+  if (left > 0) { toast.error(`고객 정보를 먼저 확인해야 전문부서에 요청할 수 있습니다. 남은 자료 ${left}건`); return; }
   setUi({ tab: "문의·답변" });
   t.activeComposer = "expert"; t.reviewed = false;
   if (isApiTicket(t) && (!t.expertDraft || !t.apiEscalationRequest)) { commit(); scrollToEditor(); void escalationDraftViaApi(t); return; } // AI 요청서 초안 (CSA-55)
@@ -429,7 +431,7 @@ export function nextAction(t: Ticket): Next | null {
     if (investigation.kind === "confirm") return { label: "검토 결과 확인", run: () => openModal("specialist-finding", { id: t.id }) };
     if (investigation.kind === "analyze" || investigation.kind === "review") return { label: "회신 확인하기", run: () => openModal("specialist-finding", { id: t.id }) };
     if (t.apiCustomerId && t.apiLanguage) return { label: "진행상황 안내 작성", externalWaiting: true, run: () => openModal("care", { customerId: t.apiCustomerId, ticketId: t.id, kind: "notice" }) };
-    return { label: "사내 분석 중", waiting: true };
+    return { label: "전문부서 분석 중", waiting: true };
   }
   if (t.customerRequestStatus === "waiting") return { label: "고객 회신 대기 중", waiting: true };
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) };

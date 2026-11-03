@@ -1,5 +1,5 @@
 import { todayTasks } from "@admin/lib/actions";
-// C/S 업무 홈(2단): 위 = 오늘 내가 할 일 | SLA 안정도, 아래 = 팀 현황 | 전문부서 협업 요약. 위쪽 버튼으로 카드를 켜고 끌 수 있다.
+// C/S 업무 홈(2단): 위 = 할 일 | SLA 안정도, 아래 = 팀 현황 | 전문부서 협업 요약. 위쪽 버튼으로 카드를 켜고 끌 수 있다.
 import { ArrowRight, ArrowUpRight, ChevronRight, FileCheck2, Plus, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { CustomizeMenu, Ring, useWidgets } from "@admin/components/admin/charts";
@@ -8,7 +8,7 @@ import { departmentRank, departmentRisk, openTickets, people, referralRows, canA
 import { openModal, setUi, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 
-export const CS_WIDGETS = [["today", "오늘 내가 할 일"], ["sla", "SLA·바로가기"], ["team", "팀 현황"], ["collab", "전문부서 협업"]] as const;
+export const CS_WIDGETS = [["today", "할 일"], ["sla", "SLA·바로가기"], ["team", "팀 현황"], ["collab", "전문부서 협업"]] as const;
 
 /** 위험 건수에 따른 색: 0건 초록 · 1~2건 노랑 · 3건 이상 빨강. */
 const riskTone = (n: number) => (n === 0 ? "success" : n < 3 ? "warning" : "destructive") as "success" | "warning" | "destructive";
@@ -52,7 +52,7 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
       <PageHeader title="고객지원 업무 현황" actions={<><CustomizeMenu all={CS_WIDGETS} shown={w.shown} toggle={w.toggle} /><Button onClick={() => openModal("new-ticket")}><Plus aria-hidden />새 문의 등록</Button></>}>{tabs}</PageHeader>
       <div className="grid grid-cols-[minmax(0,1fr)_340px] items-stretch gap-5 px-10 pb-12">
         {w.shown("today") && (
-          <Card title="오늘 내가 할 일" sub={allTasks.length ? `${allTasks.length}건` : undefined} desc="기한이 급한 순" aside={<button onClick={() => list("내 담당")} className={link}>내 문의 전체 ›</button>} className="overflow-hidden p-0 [&>div:first-child]:px-6 [&>div:first-child]:pt-6">
+          <Card title="할 일" sub={allTasks.length ? `${allTasks.length}건` : undefined} desc="기한이 급한 순" aside={<button onClick={() => list("내 담당")} className={link}>내 문의 전체 ›</button>} className="overflow-hidden p-0 [&>div:first-child]:px-6 [&>div:first-child]:pt-6">
             <ul className="divide-y">
               {tasks.map(({ ticket: t, label }) => (
                 <li key={t.id}>
@@ -87,7 +87,7 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
           </Card>
         )}
         {w.shown("team") && (
-          <Card title="팀 현황" sub={FRONTLINE} desc="담당자별 진행 중 문의" order={2} aside={<div className="flex items-center gap-3">
+          <Card title="팀 현황" sub={FRONTLINE} order={2} aside={<div className="flex items-center gap-3">
             {s.unassigned > 0 && <button onClick={() => go.to("/resources")} className="rounded-full bg-warning/20 px-2.5 py-0.5 text-xs font-semibold text-warning-ink transition-colors hover:bg-warning/30">미배정 {s.unassigned}건</button>}
             <button onClick={() => go.to("/resources")} className={link}>{canAssign ? "배정하기 ›" : "자세히 ›"}</button></div>}>
             <ul className="grid grid-cols-2 gap-x-4 gap-y-1">
@@ -108,7 +108,7 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
           </Card>
         )}
         {w.shown("collab") && (
-          <Card title="전문부서 협업" desc="전문부서 회신을 기다리는 요청" order={3} aside={<button onClick={() => go.to("/collab")} className={link}>자세히 ›</button>}>
+          <Card title="전문부서 협업" order={3} aside={<button onClick={() => go.to("/collab")} className={link}>자세히 ›</button>}>
             <div className="flex items-baseline gap-2"><span className="text-4xl font-bold tracking-tight tabular-nums">{waiting.length}</span><span className="text-muted-foreground">건 회신 대기</span>{waitRisk > 0 && <Tag tone="red" className="ml-auto">SLA 위험 {waitRisk}</Tag>}</div>
             <ul className="mt-3 divide-y">
               {waiting.slice(0, 3).map((r) => (
