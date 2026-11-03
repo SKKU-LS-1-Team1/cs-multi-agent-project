@@ -71,9 +71,9 @@ export const cases: CaseRow[] = caseCatalog.map((r) => ({
 export const openTickets = () => tickets.filter((t) => t.stage !== 5);
 export const ownedTickets = (owner = signedIn) => openTickets().filter((t) => t.owner === owner);
 export const scopeTickets = (scope: string): Ticket[] =>
-  scope === "내 담당" ? tickets.filter((t) => t.owner === signedIn) // 내가 완료한 것도 포함(목록의 "완료" 묶음에 나온다)
+  scope === "내 담당" ? ownedTickets() // 진행 중인 내 문의만. 완료한 건은 "완료 문의" 탭에서 본다.
   : scope === "답변 준비" ? openTickets().filter(awaitingReview)
-  : openTickets(); // "전체"는 진행 중인 문의만. 완료한 건은 "완료 문의" 탭(그리고 내 것은 "내 담당")에서 본다.
+  : openTickets(); // "전체"는 진행 중인 문의만. 완료한 건은 "완료 문의" 탭에서 본다.
 
 export function resource(p: Person, excludeId?: string) {
   const count = ownedTickets(p.name).filter((t) => t.id !== excludeId).length;

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Badge } from "@admin/components/ui/badge";
 import { cn } from "@admin/lib/utils";
 import { findTicket, setUi } from "@admin/lib/store";
-import { departmentRisk, overdue, signedIn, ticketProgress, unreadReplies } from "@admin/lib/logic";
+import { departmentRisk, overdue, signedIn, slaMinutes, ticketProgress, unreadReplies } from "@admin/lib/logic";
 import type { Ticket } from "@admin/lib/types";
 
 const TONES = {
@@ -54,12 +54,13 @@ export const StatusTag = ({ t }: { t: Ticket }) => {
   return <span className="inline-flex items-center gap-1.5 text-sm"><span aria-hidden className={cn("size-1.5 rounded-full", DOT[tone])} />{ticketProgress(t)}</span>;
 };
 
-/** SLA 상태를 한눈에: 초과(빨강) / 임박(노랑) / 완료(초록) / 정상(글자). */
-export function SlaTag({ t }: { t: Ticket }) {
-  if (t.stage === 5) return <Tag tone="green">{t.sla}</Tag>;
-  if (overdue(t)) return <Tag tone="red">{t.sla}</Tag>;
-  if (t.risk) return <Tag tone="amber">임박 {t.sla}</Tag>;
-  return <span className="text-sm tabular-nums text-muted-foreground">{t.sla}</span>;
+/** SLA 상태를 한눈에: 초과(빨강) / 임박(노랑) / 완료(초록) / 정상(글자). prefix 는 다른 시간(예: 부서 회신 대기)과 같이 놓일 때 "SLA " 처럼 앞에 붙인다. */
+export function SlaTag({ t, prefix = "" }: { t: Ticket; prefix?: string }) {
+  if (t.stage === 5) return <Tag tone="green">{prefix}{t.sla}</Tag>;
+  if (overdue(t)) return <Tag tone="red">{prefix}{t.sla}</Tag>;
+  const left = slaMinutes(t) !== null; // "1h 20m" 같은 시간일 때만 "남음"을 붙인다("—" 등은 그대로)
+  if (t.risk) return <Tag tone="amber">{prefix}임박 {t.sla}{left && " 남음"}</Tag>;
+  return left ? <Tag tone="blue">{prefix}{t.sla} 남음</Tag> : <span className="text-sm tabular-nums text-muted-foreground">{t.sla}</span>;
 }
 
 export function PageHeader({ title, actions, children }: { title: string; actions?: ReactNode; children?: ReactNode }) {
@@ -125,7 +126,7 @@ export function useGo() {
       nav("/tickets/" + id);
     },
     list(patch: Record<string, any> = {}) {
-      setUi({ listOwner: "", ...patch });
+      setUi({ listOwner: "", riskOnly: false, ...patch });
       nav("/tickets");
     },
     /** 완료 문의는 문의 관리의 탭으로, 해결 사례·기술문서는 지식·해결 사례 화면으로 이동. */
@@ -147,10 +148,10 @@ export function StatusIcon({ t }: { t: Ticket }) {
 export function TicketRow({ t, onOpen, lead }: { t: Ticket; onOpen: () => void; lead?: ReactNode }) {
   return (
     <div role="button" tabIndex={0} aria-label={`${t.title} 상세 열기`} onClick={onOpen} onKeyDown={(e) => e.target === e.currentTarget && e.key === "Enter" && onOpen()}
-      className="group grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto_16px] items-center gap-4 px-5 py-3.5 transition-colors hover:bg-muted/70">
+      className="group grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto_16px] items-center gap-4 px-6 py-5 transition-colors hover:bg-muted/70">
       {lead ?? <StatusIcon t={t} />}
-      <div className="min-w-0"><div className="flex items-center gap-2"><span className="truncate font-medium">{t.title}</span>{unreadReplies(t) > 0 && <Tag tone="blue" className="shrink-0">새 회신</Tag>}</div><div className="truncate text-xs text-muted-foreground"><Mono>{t.id}</Mono> · {t.product} · {t.country}</div></div>
-      <div className="grid justify-items-end gap-0.5 text-right"><SlaTag t={t} /><span className={cn("flex items-center gap-1.5 text-xs", t.owner ? "text-muted-foreground" : "font-medium text-[#8a6500]")}>{t.owner && <PersonAvatar name={t.owner} size={18} />}{t.owner || "미배정"}</span></div>
+      <div className="grid min-w-0 gap-1.5"><div className="flex items-center gap-2"><span className="truncate font-medium">{t.title}</span>{unreadReplies(t) > 0 && <Tag tone="blue" className="shrink-0">새 회신</Tag>}</div><div className="truncate text-xs text-muted-foreground"><Mono>{t.id}</Mono> · {t.product} · {t.country}</div></div>
+      <div className="grid justify-items-end gap-2 text-right"><SlaTag t={t} /><span className={cn("flex items-center gap-1.5 text-xs", t.owner ? "text-muted-foreground" : "font-medium text-[#8a6500]")}>{t.owner && <PersonAvatar name={t.owner} size={18} />}{t.owner || "미배정"}</span></div>
       <ChevronRight className="size-4 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
     </div>
   );

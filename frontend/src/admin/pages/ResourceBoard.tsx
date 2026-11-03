@@ -5,7 +5,7 @@ import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, us
 import { toast } from "sonner";
 import { ChevronDown, GripVertical } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
-import { Mono, NativeSelect, PersonAvatar, PriorityTag, Tag, rise, useGo } from "@admin/components/admin/common";
+import { Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, Tag, rise, useGo } from "@admin/components/admin/common";
 import { checkAssign, departmentRisk, openTickets, ownedTickets, canAssign, people, recommend, resource, teamLead } from "@admin/lib/logic";
 import { moveTicket } from "@admin/lib/actions";
 import { openModal, useStore } from "@admin/lib/store";
@@ -118,7 +118,7 @@ function Card({ t, handle, onOpen, overlay }: { t: Ticket; handle?: Record<strin
       </div>
       <div className="grid text-xs text-muted-foreground"><Mono>{t.id}</Mono><span>{t.product}</span></div>
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5"><PriorityTag p={t.priority} /><span className={cn("text-xs tabular-nums", departmentRisk(t) ? "font-semibold text-destructive" : "text-muted-foreground")}>{t.sla}</span></div>
+        <div className="flex items-center gap-1.5 whitespace-nowrap"><PriorityTag p={t.priority} /><SlaTag t={t} /></div>
         {!overlay && canAssign && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs opacity-0 transition-opacity focus-visible:opacity-100 group-hover/card:opacity-100" onClick={() => openModal("assign", { id: t.id })}>배정<ChevronDown /></Button>}
       </div>
     </article>

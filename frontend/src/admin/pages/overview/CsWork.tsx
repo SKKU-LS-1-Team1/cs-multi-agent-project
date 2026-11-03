@@ -1,6 +1,6 @@
 import { todayTasks } from "@admin/lib/actions";
 // C/S 업무 홈(2단): 위 = 오늘 내가 할 일 | SLA 안정도, 아래 = 팀 현황 | 전문부서 협업 요약. 위쪽 버튼으로 카드를 켜고 끌 수 있다.
-import { ArrowRight, ArrowUpRight, CheckCheck, ChevronRight, FileCheck2, FilePenLine, MessageSquareReply, Plus, Send, TriangleAlert, type LucideIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronRight, FileCheck2, Plus, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { CustomizeMenu, Ring, useWidgets } from "@admin/components/admin/charts";
 import { Mono, PageHeader, PersonAvatar, SlaTag, Tag, rise, useGo } from "@admin/components/admin/common";
@@ -16,17 +16,6 @@ const RISK_TEXT = { success: "위험 없음", warning: "주의 필요", destruct
 const RISK_TAG = { success: "green", warning: "amber", destructive: "red" } as const;
 /** 할 일 카드에 보여 주는 줄 수(급한 순). 전체 건수는 제목 옆에 쓴다. */
 const TASK_ROWS = 4;
-const TASK_ICON: Record<string, [LucideIcon, string]> = {
-  "고객 회신 확인하기": [MessageSquareReply, "bg-info/10 text-info"],
-  "답변 작성 시작하기": [FilePenLine, "bg-info/10 text-info"],
-  "영어 초안 검토하기": [FilePenLine, "bg-info/10 text-info"],
-  "승인하고 발송하기": [Send, "bg-success/10 text-success"],
-  "처리 결과 기록하고 완료하기": [CheckCheck, "bg-success/10 text-success"],
-  "고객 질의서 작성하기": [FilePenLine, "bg-info/10 text-info"],
-  "전문부서 요청서 작성하기": [FilePenLine, "bg-info/10 text-info"],
-};
-const TaskIcon = ({ label }: { label: string }) => { const [Icon, tone] = TASK_ICON[label] || [FilePenLine, "bg-muted text-foreground"]; return <span className={cn("grid size-10 place-items-center rounded-full transition-transform duration-200 group-hover:scale-105", tone)}><Icon className="size-[18px]" aria-hidden /></span>; };
-
 /** 대시보드 카드: 제목 + 한 줄 설명(desc) + 오른쪽 링크. */
 const Card = ({ title, sub, desc, aside, children, className, order = 0 }: { title: string; sub?: string; desc?: string; aside?: React.ReactNode; children: React.ReactNode; className?: string; order?: number }) => (
   <section aria-label={title} style={rise(order).style} className={cn("flex flex-col rounded-3xl bg-card p-6 shadow-card", rise(order).className, className)}>
@@ -51,10 +40,10 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
   const waitRisk = new Set(waiting.filter((r) => departmentRisk(r.ticket)).map((r) => r.ticket.id)).size;
   const list = (filter: string) => { setUi({ filter }); go.list({ filter }); };
   const quick: [string, number, LucideIcon, string, () => void][] = [
-    ["SLA 위험", s.risk, TriangleAlert, s.risk ? (tone === "destructive" ? "bg-destructive/10 text-destructive" : "bg-warning/15 text-warning-ink") : "bg-muted text-muted-foreground", () => list("전체")],
+    ["SLA 위험", s.risk, TriangleAlert, s.risk ? (tone === "destructive" ? "bg-destructive/10 text-destructive" : "bg-warning/15 text-warning-ink") : "bg-muted text-muted-foreground", () => { setUi({ filter: "전체" }); go.list({ filter: "전체", riskOnly: true }); }],
     ["답변 검토 대기", s.review, FileCheck2, s.review ? "bg-info/10 text-info" : "bg-muted text-muted-foreground", () => list("답변 준비")],
   ];
-  const row = "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto_16px] items-center gap-4 px-6 py-4 text-left transition-colors duration-200 hover:bg-muted/70 active:bg-muted";
+  const row = "group grid w-full grid-cols-[minmax(0,1fr)_auto_16px] items-center gap-4 px-6 py-4 text-left transition-colors duration-200 hover:bg-muted/70 active:bg-muted";
   const chev = "size-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-foreground";
   const link = "text-sm font-medium text-info transition-colors hover:text-[#003377]";
 
@@ -68,7 +57,6 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
               {tasks.map(({ ticket: t, label }) => (
                 <li key={t.id}>
                   <button onClick={() => go.ticket(t.id)} className={row}>
-                    <TaskIcon label={label} />
                     <span className="grid gap-0.5"><span className="font-semibold">{label}</span><span className="truncate text-sm text-muted-foreground">{t.title} · <Mono>{t.id}</Mono></span></span>
                     <SlaTag t={t} />
                     <ChevronRight className={chev} aria-hidden />

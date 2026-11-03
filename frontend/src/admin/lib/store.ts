@@ -24,6 +24,7 @@ export const ui = {
   priority: "",
   product: "",
   listOwner: "",
+  riskOnly: false, // 업무 현황의 "SLA 위험"에서 들어온 경우: 위험 문의만 보여 준다
   queueScope: "내 담당",
   tab: "문의·답변",
   evidenceOpen: false,

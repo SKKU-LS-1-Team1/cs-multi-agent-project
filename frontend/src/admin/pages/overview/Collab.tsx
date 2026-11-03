@@ -1,10 +1,10 @@
 // 전문부서 협업: 회신 대기와 회신 후에도 계속되는 사내 분석을 추적한다.
-// 왼쪽 = 회신 대기 카드(요청 후 경과 시간·회신 등록), 오른쪽 = 부서별 대기(건수 막대를 기다린 시간 구간으로 나눠 어느 부서가 오래 묵었는지 보인다).
+// 왼쪽 = 회신 대기 카드(회신 대기 시간·회신 등록), 오른쪽 = 부서별 대기(건수 막대를 기다린 시간 구간으로 나눠 어느 부서가 오래 묵었는지 보인다).
 // 회신이 온 뒤의 일(답변 작성)은 "오늘 내가 할 일"과 문의 상세가 안내하므로 여기에는 두지 않는다.
 import { useState } from "react";
 import { ArrowRight, ChevronDown } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
-import { PageHeader, SlaTag, rise, useGo } from "@admin/components/admin/common";
+import { PageHeader, SlaTag, Tag, rise, useGo } from "@admin/components/admin/common";
 import { departmentRisk, departmentReviewRows, referralDepartments, referralRows } from "@admin/lib/logic";
 import { openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
@@ -15,11 +15,10 @@ const waitedHours = (r: Row): number | null => {
   const timestamp = r.when ? Date.parse(r.when) : NaN;
   return Number.isFinite(timestamp) ? Math.max(0, (Date.now() - timestamp) / 3600e3) : null;
 };
-const fmtWait = (h: number) => (h < 1 ? "1시간 미만" : h < 24 ? `${Math.floor(h)}시간` : `${Math.floor(h / 24)}일 ${Math.floor(h % 24)}시간`);
+/** SLA 태그(초과 2h 10m)와 같은 표기: 1시간 이상이면 "30h 5m"(분이 0이면 "30h"), 1시간 미만이면 "45m". */
+const fmtWait = (h: number) => { const total = Math.floor(h * 60), hh = Math.floor(total / 60), mm = total % 60; return hh ? (mm ? `${hh}h ${mm}m` : `${hh}h`) : `${mm}m`; };
 /** SLA 위험인 요청을 먼저, 그다음 오래 기다린 순. */
 const byUrgency = (a: Row, b: Row) => Number(departmentRisk(b.ticket)) - Number(departmentRisk(a.ticket)) || (waitedHours(b) ?? -1) - (waitedHours(a) ?? -1);
-/** 이만큼 기다리면 경과 시간을 강조한다. */
-const NUDGE_HOURS = 24;
 
 /** 기다린 시간 구간: 막대 색. 시각이 없는 요청은 회색으로 둔다. */
 const WAIT_BANDS = [
@@ -101,7 +100,7 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
 function Card({ r, onOpen, order }: { r: Row; onOpen: () => void; order: number }) {
   const go = useGo();
   const goToInquiry = (id: string) => go.ticket(id);
-  const h = waitedHours(r), late = h !== null && h >= NUDGE_HOURS;
+  const h = waitedHours(r);
   return (
     <article onClick={onOpen} style={rise(order).style} className={cn("grid cursor-pointer gap-3 rounded-2xl bg-card p-5 shadow-card transition-shadow hover:shadow-float", rise(order).className, departmentRisk(r.ticket) && "ring-1 ring-destructive/40")}>
       <div className="grid gap-1">
@@ -109,8 +108,8 @@ function Card({ r, onOpen, order }: { r: Row; onOpen: () => void; order: number 
         <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><span className="truncate">{r.source || "부서 미기록"}</span><ArrowRight className="size-3.5 shrink-0" aria-hidden /><span className="truncate font-medium text-foreground">{r.target || "부서 미기록"}</span></p>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-        <span className={cn(late ? "font-medium text-warning-ink" : "text-muted-foreground")}>{h === null ? "요청 시각 미기록" : `요청 후 ${fmtWait(h)}`}</span>
-        <SlaTag t={r.ticket} />
+        <Tag>{h === null ? "요청 시각 미기록" : `회신 대기 ${fmtWait(h)}`}</Tag>
+        <SlaTag t={r.ticket} prefix="SLA " />
       </div>
       <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
         <Button size="sm" onClick={() => r.response ? goToInquiry(r.ticket.id) : openModal("expert-receive", { id: r.ticket.id, requestId: r.requestId || undefined })}>{r.response ? "사내 분석 확인" : "회신 등록"}</Button>
