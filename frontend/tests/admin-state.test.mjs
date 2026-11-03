@@ -1307,3 +1307,74 @@ test('retained text of a different document kind cannot be translated or sent as
     assert.equal(calls.length, 0);
   }
 });
+
+function specialistStepsFixture() {
+  const info = t => t.requiredInformation || [];
+  const assessed = t => info(t).map(field => ({ ...field, status: t.infoChecks?.[field.id]?.status || 'missing' }));
+  const steps = load('lib/flow-steps.ts', {
+    './logic': { informationAssessment: assessed, requiredInformation: info,
+      pendingCustomerInfo: t => assessed(t).filter(x => !['provided', 'confirmed'].includes(x.status)).length,
+      latestCustomerReply: () => null, informationSummary: () => '고객 회신 대기',
+      waitingReviews: t => (t.specialistRequests || []).filter(r => !r.reply) },
+    './store': { openModal: noop },
+  });
+  const t = { owner: 'Doyeon Kim', source: 'api', analysisReady: true,
+    apiStatus: 'READY_FOR_REVIEW', stage: 0, events: [{ kind: 'expert' }],
+    draft: 'Old customer answer', purpose: 'answer', customerRequestStatus: 'none',
+    specialistFollowup: { status: 'in_progress', pending_replies: false,
+      needs_review: false, reading: { conclusion: { evidence: 'Final finding' } }, missing_fields: [] },
+  };
+  return { ...steps, t };
+}
+
+test('received specialist conclusion stays at specialist review despite an older answer draft', () => {
+  const { currentStep, flowSteps, t } = specialistStepsFixture();
+  assert.equal(currentStep(t).label, '전문부서');
+  assert.equal(currentStep(t).index, 3);
+  assert.equal(flowSteps(t).find(s => s.key === 'expert').sub, '전문부서 검토 결과 도착');
+  assert.equal(flowSteps(t).find(s => s.key === 'answer').state, 'todo');
+});
+
+test('failed or uncertain specialist reading is not treated as completed', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  for (const change of [{ reading: null, error: 'Failed' }, { needs_review: true }]) {
+    assert.equal(currentStep({ ...t, specialistFollowup: { ...t.specialistFollowup, ...change } }).label, '전문부서');
+  }
+});
+
+test('pending customer information keeps main priority over specialist review or request writing', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  const missing = { ...t, requiredInformation: [{ id: 'photos' }], infoChecks: {} };
+  assert.equal(currentStep(missing).label, '고객 정보');
+  assert.equal(currentStep({ ...missing, activeComposer: 'expert' }).label, '고객 정보');
+  assert.equal(currentStep({ ...missing, specialistRequests: [{ reply: null }] }).label, '고객 정보');
+  assert.equal(currentStep({ ...missing, infoChecks: { photos: { status: 'confirmed' } } }).label, '전문부서');
+});
+
+test('specialist additional material request respects customer info and customer waiting', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  const request = { ...t, specialistFollowup: { ...t.specialistFollowup, reading: {}, missing_fields: ['photos'] } };
+  assert.equal(currentStep(request).label, '전문부서');
+  const required = { ...request, requiredInformation: [{ id: 'photos' }], infoChecks: {} };
+  assert.equal(currentStep(required).label, '고객 정보');
+  assert.equal(currentStep({ ...required, customerRequestStatus: 'waiting', apiStatus: 'WAITING_CUSTOMER', draft: '' }).label, '고객 정보');
+  assert.equal(currentStep({ ...required, purpose: 'request', draft: 'Please provide photos' }).label, '고객 정보');
+});
+
+test('confirmed specialist findings return to answer writing and closed tickets do not reopen', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  assert.equal(currentStep({ ...t, specialistFollowup: { ...t.specialistFollowup, status: 'confirmed' } }).label, '답변 작성');
+  assert.notEqual(currentStep({ ...t, sent: true }).label, '전문부서');
+  assert.equal(currentStep({ ...t, stage: 5 }).label, '완료');
+  assert.equal(currentStep({ ...t, owner: '' }).label, '접수·분석');
+});
+
+test('normal answer, unsent referral and unanswered referral keep existing steps', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  const normal = { ...t, specialistFollowup: null, events: [] };
+  assert.equal(currentStep(normal).label, '답변 작성');
+  assert.equal(currentStep({ ...normal, activeComposer: 'expert' }).label, '전문부서');
+  const pending = currentStep({ ...normal, specialistRequests: [{ reply: null }] });
+  assert.equal(pending.label, '전문부서');
+  assert.equal(pending.waiting, true);
+});
