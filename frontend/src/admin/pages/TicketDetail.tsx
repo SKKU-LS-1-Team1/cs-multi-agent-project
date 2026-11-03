@@ -12,14 +12,15 @@ import { Input } from "@admin/components/ui/input";
 import { Textarea } from "@admin/components/ui/textarea";
 import { AiMark, Facts, Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, StatusTag, Tag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import {
-  answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, feedbackLabel, informationAssessment, informationSummary, inquirySummary, isEdited,
-  canAssign, latestCustomerReply, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
+  answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, feedbackLabel, inquirySummary, isEdited,
+  canAssign, isNewAssignment, latestCustomerReply, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
   requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
 import { loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
+import { flowSteps, type Step, type StepState } from "@admin/lib/flow-steps";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
 import { api, type InquiryAttachment } from "../../api/client";
@@ -28,40 +29,6 @@ type Choice = "answer" | "expert" | "request";
 const SAMPLE = "CSV1-000050";
 /** 샘플 문의가 접수된 시각. 대화 머리와 처리 이력이 같은 값을 쓴다. */
 const INQUIRY_AT = "10.06 · 17:43";
-type StepState = "done" | "current" | "waiting" | "todo" | "optional";
-type Step = { key: string; label: string; sub: string; state: StepState; action?: { label: string; run: () => void } };
-function flowSteps(t: Ticket): Step[] {
-  const items = informationAssessment(t), req = requiredInformation(t).length, reply = latestCustomerReply(t);
-  const pending = waitingReviews(t).length + (t.legacyReviewPending ? 1 : 0), gotExpert = t.events.some((e) => e.kind === "expert");
-  const missing = items.filter((x) => !["provided", "confirmed"].includes(x.status)).length, needsCheck = t.customerRequestStatus === "received" && reply && req > 0 && reply.id !== t.reviewedReplyKey;
-  const writingExpert = t.activeComposer === "expert";
-  const writing = !writingExpert && !!t.draft && t.purpose === "answer";
-  const done = t.stage === 5, analysisReady = t.source !== "api" || t.analysisReady;
-  const steps: Step[] = [
-    { key: "intake", label: "접수·분석", sub: analysisReady ? "완료" : t.status, state: analysisReady ? "done" : "current" },
-    { key: "info", label: "고객 정보", sub: !analysisReady ? "필수정보 확인 대기" : !req ? "추가 자료 불필요" : t.customerRequestStatus === "none" && missing ? `자료 필요 ${missing}건` : informationSummary(t), state: !analysisReady ? "todo" : !req || !missing ? "done" : t.customerRequestStatus === "waiting" ? "waiting" : "current",
-      action: needsCheck && !done ? { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) } : undefined },
-    { key: "expert", label: "전문부서", sub: writingExpert ? "요청서 작성 중" : pending ? `회신 대기 ${pending}건` : gotExpert ? "회신 수신" : "요청 없음 (선택)", state: writingExpert || pending ? "current" : gotExpert ? "done" : "optional",
-      action: pending && !done ? { label: "회신 등록", run: () => openModal("expert-receive", { id: t.id }) } : undefined },
-    { key: "answer", label: "답변 작성", sub: t.sent ? "작성 완료" : writing ? (t.reviewed ? "발송 준비 완료" : "영어 초안 검토 중") : "작성 전", state: t.sent ? "done" : writing ? "current" : "todo" },
-    { key: "send", label: "발송", sub: t.sent ? (t.customerOutcome === "resolved" ? "해결 회신 수신" : t.customerOutcome === "provided" ? "정보 확인 회신" : "발송 완료") : "대기", state: t.sent ? "done" : "todo",
-      action: reply ? { label: "고객 회신 보기", run: () => openModal("customer-reply", { id: t.id }) } : undefined },
-    { key: "done", label: "완료", sub: done ? "처리 완료" : "대기", state: done ? "done" : "todo" },
-  ];
-  if (done) steps.forEach((x) => (x.state = "done"));
-  else if (!steps.some((x) => x.state === "current")) { const i = steps.findIndex((x) => x.state === "todo"); if (i >= 0) steps[i].state = "current"; }
-  // 병행 중인 단계가 둘 이상이면 하나만 "지금 단계"로 펼치고(답변 작성 중이면 답변 작성), 나머지는 "대기"로 접는다.
-  const live = steps.map((x, i) => (x.state === "current" ? i : -1)).filter((i) => i >= 0);
-  if (live.length > 1) {
-    // 전문부서 회신을 기다리는 중이면 그 단계가 지금 단계(답변 초안이 있어도 회신 전에는 발송하지 못한다).
-    const focus = live.find((i) => steps[i].key === (pending || writingExpert ? "expert" : "answer")) ?? live[0];
-    live.forEach((i) => { if (i !== focus) steps[i].state = steps[i].key === "expert" ? "waiting" : "todo"; });
-    if (pending && steps[focus].key === "expert") steps[focus].state = "waiting";
-  }
-  if (pending && !done) { const e = steps.find((x) => x.key === "expert"); if (e) e.state = "waiting"; } // 회신을 기다리는 단계는 항상 시계 아이콘
-  return steps;
-}
-
 const DETAIL_TABS = [["문의·답변", "문의·답변"], ["처리 이력", "처리 이력"], ["고객·제품 정보", "고객·제품 정보"]] as const;
 
 export default function TicketDetail() {
@@ -78,7 +45,7 @@ export default function TicketDetail() {
     void loadTicketDetail(ticketId).catch(() => { if (!cancelled) setLoadError("문의 상세를 불러오지 못했습니다."); });
     return () => { cancelled = true; stop(); };
   }, [ticketId, retry]);
-  useEffect(() => { if (t && unreadReplies(t) > 0) markSeen(t); }, [t?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (t && (unreadReplies(t) > 0 || isNewAssignment(t))) markSeen(t); }, [t?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!t) return <div className="p-10" role={loadError ? "alert" : "status"}>{loadError || "문의 상세를 불러오는 중입니다."}{loadError && <Button variant="outline" onClick={() => setRetry((v) => v + 1)}>다시 시도</Button>}</div>;
   return (
     <div data-ticket-id={t.id} className="grid h-[calc(100dvh-1.5rem)] min-h-0 grid-cols-1 items-start overflow-y-auto overscroll-contain min-[1360px]:grid-cols-[minmax(0,1fr)_400px] min-[1360px]:items-stretch min-[1360px]:overflow-hidden">

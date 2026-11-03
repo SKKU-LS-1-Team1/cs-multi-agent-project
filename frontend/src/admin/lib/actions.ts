@@ -408,7 +408,7 @@ export function bulkAssign(ids: string[], owner: string) {
   else toast(`${done}건을 ${owner}에게 배정했습니다.`);
 }
 
-/** 문의 상세를 열면 고객 회신을 읽은 것으로 표시한다. */
+/** 문의 상세를 열면 고객 회신과 새 배정(N 표시)을 읽은 것으로 표시한다. */
 export function markSeen(t: Ticket) {
   t.seenAt = new Date().toISOString();
   commit();

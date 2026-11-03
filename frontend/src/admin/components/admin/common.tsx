@@ -4,7 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { Badge } from "@admin/components/ui/badge";
 import { cn } from "@admin/lib/utils";
 import { findTicket, setUi } from "@admin/lib/store";
-import { departmentRisk, overdue, signedIn, slaMinutes, ticketProgress, unreadReplies } from "@admin/lib/logic";
+import { currentStep } from "@admin/lib/flow-steps";
+import { CHANNEL_KO } from "@admin/lib/customers";
+import { departmentRisk, overdue, isNewAssignment, signedIn, slaMinutes, ticketProgress } from "@admin/lib/logic";
 import type { Ticket } from "@admin/lib/types";
 
 const TONES = {
@@ -126,7 +128,7 @@ export function useGo() {
       nav("/tickets/" + id);
     },
     list(patch: Record<string, any> = {}) {
-      setUi({ listOwner: "", riskOnly: false, ...patch });
+      setUi({ listOwner: "", step: "", channel: "", riskOnly: false, ...patch });
       nav("/tickets");
     },
     /** 완료 문의는 문의 관리의 탭으로, 해결 사례·기술문서는 지식·해결 사례 화면으로 이동. */
@@ -144,14 +146,21 @@ export function StatusIcon({ t }: { t: Ticket }) {
   return <span className={cn("grid size-10 shrink-0 place-items-center rounded-full", cls)}><Icon className="size-[18px]" aria-hidden /></span>;
 }
 
+/** 지금 처리 단계: "3/6 전문부서"(외부 회신을 기다리는 단계면 "3/6 전문부서 대기"). */
+export function StepTag({ t }: { t: Ticket }) {
+  const s = currentStep(t);
+  return <Tag className="shrink-0 tabular-nums">{s.index}/{s.total} {s.label}{s.waiting && " 대기"}</Tag>;
+}
+
 /** 목록 한 줄: 아이콘 · 제목과 메타 · 오른쪽에 SLA와 담당자. 한 줄에 정보는 두세 개만. */
 export function TicketRow({ t, onOpen, lead }: { t: Ticket; onOpen: () => void; lead?: ReactNode }) {
+  const fresh = !t.owner && t.stage !== 5; // 아직 배정 전인 새 문의: 아이콘·남은 시간 없이 점선 "미배정"으로 구분한다(단계는 1/6 접수·분석)
   return (
     <div role="button" tabIndex={0} aria-label={`${t.title} 상세 열기`} onClick={onOpen} onKeyDown={(e) => e.target === e.currentTarget && e.key === "Enter" && onOpen()}
-      className="group grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto_16px] items-center gap-4 px-6 py-5 transition-colors hover:bg-muted/70">
-      {lead ?? <StatusIcon t={t} />}
-      <div className="grid min-w-0 gap-1.5"><div className="flex items-center gap-2"><span className="truncate font-medium">{t.title}</span>{unreadReplies(t) > 0 && <Tag tone="blue" className="shrink-0">새 회신</Tag>}</div><div className="truncate text-xs text-muted-foreground"><Mono>{t.id}</Mono> · {t.product} · {t.country}</div></div>
-      <div className="grid justify-items-end gap-2 text-right"><SlaTag t={t} /><span className={cn("flex items-center gap-1.5 text-xs", t.owner ? "text-muted-foreground" : "font-medium text-[#8a6500]")}>{t.owner && <PersonAvatar name={t.owner} size={18} />}{t.owner || "미배정"}</span></div>
+      className={cn("group grid cursor-pointer items-center gap-4 px-6 py-5 transition-colors hover:bg-muted/70", fresh && !lead ? "grid-cols-[minmax(0,1fr)_auto_16px]" : "grid-cols-[auto_minmax(0,1fr)_auto_16px]")}>
+      {fresh && !lead ? null : (lead ?? <StatusIcon t={t} />)}
+      <div className="grid min-w-0 gap-1.5"><div className="flex items-center gap-2"><span className="truncate font-medium">{t.title}</span><StepTag t={t} />{isNewAssignment(t) && <span title="새로 배정(인수)된 문의입니다. 열어 보면 사라집니다" className="shrink-0"><Tag tone="blue" className="font-bold">N</Tag></span>}</div><div className="truncate text-xs text-muted-foreground"><Mono>{t.id}</Mono> · {t.product} · {t.country}{t.channel && ` · ${CHANNEL_KO[t.channel] || t.channel}`}</div></div>
+      <div className="grid justify-items-end gap-2 text-right">{!fresh && <SlaTag t={t} />}<span className={cn("flex items-center gap-1.5 text-xs", t.owner ? "text-muted-foreground" : "rounded-full border border-dashed border-[#c9a227] px-2.5 py-0.5 font-medium text-[#8a6500]")}>{t.owner && <PersonAvatar name={t.owner} size={18} />}{t.owner || "미배정"}</span></div>
       <ChevronRight className="size-4 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
     </div>
   );
