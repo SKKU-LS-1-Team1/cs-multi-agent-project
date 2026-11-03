@@ -5,6 +5,8 @@ button { font-family: inherit; cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 
 .page { display: flex; min-height: 100vh; }
+/* 고른 언어로 처음 번역하는 동안 한국어 원문이 비치지 않게 가린다 (lib/autoTranslate.js, 최대 4초) */
+html.i18n-loading .page { visibility: hidden; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .cute { display: block; flex: none; }
 

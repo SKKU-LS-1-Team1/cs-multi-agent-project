@@ -13,6 +13,7 @@ import Inquire from './components/Inquire.jsx'
 import Replace from './components/Replace.jsx'
 import Onboarding from './components/Onboarding.jsx'
 import { initialLang, loadChoice, saveChoice } from './lib/onboarding.js'
+import { setPageLang } from './lib/autoTranslate.js'
 import { getProduct } from './lib/catalog.js'
 import { api } from '../api/client'
 import { needsReplace } from './lib/replace.js'
@@ -28,6 +29,9 @@ export default function App() {
     return s || loadChoice() || initialLang({ choice: null, country: null }).lang
   })
   const changeLang = (l) => { setLang(l); saveChoice(l); try { sessionStorage.setItem('ls-lang', l) } catch { /* 무시 */ } }
+  // 고른 언어로 화면 전체를 번역한다 (문구가 한국어로 고정돼 있어 DOM 에서 바꾼다, lib/autoTranslate.js).
+  // 온보딩은 자체 번역 사전(i18n.js)이 있어서 온보딩을 마친 뒤부터 적용한다.
+  useEffect(() => { setPageLang(onboarded ? lang : 'ko') }, [lang, onboarded])
   // 제품 하나당 대화 하나: 카드 키(모델 코드, fam:제품군, 단종·호환 문의는 legacy:제품군)별 대화. 제품을 아직 모르면 '_' 대화.
   const [threads, setThreads] = useState({})
   const [activeKey, setActiveKey] = useState('_')

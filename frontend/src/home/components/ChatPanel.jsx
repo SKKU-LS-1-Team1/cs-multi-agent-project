@@ -75,7 +75,7 @@ export default function ChatPanel({ messages, onSend, onReset, focusKey = 0, car
           )}
         </div>
         {messages.map((m) => (
-          <div key={m.id} className={`${m.role === 'user' ? 'bub me' : 'bub'}${m.flash ? ' flash' : ''}`} style={m.role === 'user' ? { whiteSpace: 'pre-line' } : undefined}>
+          <div key={m.id} className={`${m.role === 'user' ? 'bub me' : 'bub'}${m.flash ? ' flash' : ''}`} style={m.role === 'user' ? { whiteSpace: 'pre-line' } : undefined} translate={m.role === 'user' ? 'no' : undefined}>
             {m.role === 'user' ? m.content : <ChatText text={m.content} />}
             {m.contact && (
               <div className="bub-contact"><small>담당 기술팀</small><b>{m.contact.dept}</b><a href={`mailto:${m.contact.email}`}>{m.contact.email}</a><small>시연용 주소예요</small></div>

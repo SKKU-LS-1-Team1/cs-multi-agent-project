@@ -43,7 +43,17 @@ from cs_agent.agents.case_memory import with_graph_learning, with_live_cases
 from cs_agent.agents.retrieval import default_retrievers
 from cs_agent.agents.specialist_followup import read_replies
 from cs_agent.api import agents as agents_api
-from cs_agent.api import chat, customers, dashboard, inquiries, mail, products, progress, tickets
+from cs_agent.api import (
+    chat,
+    customers,
+    dashboard,
+    i18n,
+    inquiries,
+    mail,
+    products,
+    progress,
+    tickets,
+)
 from cs_agent.cache.store import ChatSessionStore, MemoryKV, connect_redis
 from cs_agent.config import Settings, get_settings
 from cs_agent.graph.builder import GraphDeps, build_ticket_graph, postgres_checkpointer
@@ -222,7 +232,18 @@ def create_app(
     def health() -> dict:
         return {"status": "ok", "version": __version__}
 
-    routers = (tickets, inquiries, chat, products, dashboard, agents_api, progress, customers, mail)
+    routers = (
+        tickets,
+        inquiries,
+        chat,
+        i18n,
+        products,
+        dashboard,
+        agents_api,
+        progress,
+        customers,
+        mail,
+    )
     for module in routers:
         app.include_router(module.router, prefix="/api")
     return app
