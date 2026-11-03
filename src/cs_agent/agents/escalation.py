@@ -440,7 +440,10 @@ def write_escalation_request(
             break
     draft = state.get("draft")
     inquiry = state["inquiry"]
+    from cs_agent.agents.customer_followup import context as followup_context
+
     payload = {
+        "historical_followup_context": followup_context(state.get("followup_link")),
         "prompt_version": PROMPT_VERSION,
         "department": tables.departments[target],
         "fixed_fields": fields,

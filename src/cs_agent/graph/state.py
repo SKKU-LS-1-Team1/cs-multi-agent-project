@@ -36,6 +36,8 @@ class TicketState(TypedDict, total=False):
     processing_history: list[dict]  # 발송·완료·반려 이력, 고객 회신 시에도 보존
     progress_notices: list[dict]  # 진행 안내 영어 초안·담당자 승인·고객 언어 최종 문구, 발송 없음
     info_request_fields: list[str]  # 선택한 요청 항목, 재작성에서도 유지
+    followup_link: dict | None  # Customer-history relationship, separate from specialist followup
+    followup_context_stale: bool  # Unlinked draft must be regenerated before approval
     copilot_insight: dict | None  # 근거 검증된 관리자 요약; 업무 상태를 변경하지 않는다
     body_ko: str | None  # 상담원 표시용. 원문 분석에는 사용하지 않는다 (CSA-57)
     translation_parts: list[TranslationPart]  # 회신별 원문·번역 성공 구간 (체크포인트)

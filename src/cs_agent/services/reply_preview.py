@@ -32,6 +32,8 @@ def context_key(state: dict) -> str:
         "customer_revision",
         "specialist_revision",
         "specialist_followup",
+        "followup_link",
+        "followup_context_stale",
         "specialist_requests",
         "information_review",
         "draft",

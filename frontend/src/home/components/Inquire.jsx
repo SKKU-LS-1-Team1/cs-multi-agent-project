@@ -269,6 +269,7 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
       const subject = s.subject.trim()
       const sent = await api.createInquiry({
         channel: 'WEB_FORM',
+        customer_id: customer.customer_id, // 시연 프로필의 고객. 회사명·이메일로 추측하지 않는다.
         // 서버 Category 에 없는 유형(사용 방법 · 단종 호환 대체)은 비워서 보내고, 서버가 내용을 보고 분류한다
         category: s.type === 'USAGE' || s.type === LEGACY_TYPE ? null : s.type,
         product_code: p?.code ?? null,

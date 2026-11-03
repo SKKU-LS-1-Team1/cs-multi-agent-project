@@ -205,6 +205,10 @@ export function toggleReference(t: Ticket, id: string, checked: boolean) {
 }
 
 export async function prepareCustomerReply(t: Ticket) {
+  if (t.purpose !== "request" && t.followupContextStale) {
+    toast.error("이전 문의 연결을 제외하고 답변 초안을 재작성해 주세요.");
+    return false;
+  }
   if (isApiTicket(t)) return prepareReplyViaApi(t);
   if (!t.draft?.trim()) return false;
   const text = needsLocalization(t) ? translateText(t.draft, "English", customerLanguage(t)) : t.draft;
@@ -217,6 +221,7 @@ export async function prepareCustomerReply(t: Ticket) {
 
 export function canSend(t: Ticket) {
   if (t.purpose !== "request" && t.specialistFollowup?.status === "in_progress") return false;
+  if (t.purpose !== "request" && t.followupContextStale) return false;
   if (t.translatingReply || !hasCurrentReplyPreview(t)) return false;
   if (isApiTicket(t) && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return false;
   if (isApiTicket(t) && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return false;
@@ -464,6 +469,8 @@ export function nextAction(t: Ticket): Next | null {
     return { label: "담당자 답변 작성·검토", run: () => composeFromCopilot(t, "answer") };
   }
   if (t.draft) {
+    if (t.purpose !== "request" && t.followupContextStale) return {
+      label: "답변 초안 재작성", run: () => { void rewriteViaApi(t, "이전 문의 연결을 제외하고 현재 문의와 확인된 근거로 다시 작성해 주세요.", "answer"); } };
     if (t.source === "api" && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return {
       label: "확인된 자료 반영해 재작성", run: () => regenerateDraft(t, "Reflect the latest staff-confirmed information and remove withdrawn facts.") };
     if (t.source === "api" && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return {
@@ -508,6 +515,7 @@ export function judgment(t: Ticket): Judgment {
     const lang = customerLanguage(t), isRequest = t.purpose === "request", pending = waitingReviews(t).length || (t.legacyReviewPending ? 1 : 0);
     if (!isRequest && pending) return { title: "전문부서 회신 대기", task: "회신을 등록하면 고객 답변을 작성할 수 있습니다.", note: `전문부서 회신 ${pending}건 대기 중`, reason: "답변은 전문부서 회신을 확인한 뒤 작성합니다.", missing: none };
     const what = isRequest ? "고객 질의서" : "고객 답변";
+    if (!isRequest && t.followupContextStale) return { title: "답변 초안 재작성 필요", task: "이전 문의 연결을 제외하고 답변을 다시 작성해 주세요.", note: "", reason: "연결 해제 전에 작성된 답변에는 이전 문의 내용이 남아 있을 수 있습니다.", missing: none };
     const [task, why] = !hasCurrentReplyPreview(t)
       ? ["영어 초안을 검토하고, 필요하면 고쳐 주세요.", "초안은 영어로 작성됩니다. 검토 후 고객 언어로 변환 버튼을 눌러 주세요."]
       : [t.reviewed ? `${lang} 발송용 문구를 확인한 뒤 발송하세요.` : "영어 초안과 변환된 문구를 확인하고 검토 완료에 체크해 주세요.", "발송하면 영어 원본과 발송본이 함께 이력에 남습니다."];

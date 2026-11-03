@@ -131,6 +131,7 @@ def ticket_row(values: dict) -> dict:
         "body": inquiry.body,
         "body_ko": values.get("body_ko"),
         "resolution": values.get("resolution"),
+        "followup_link": values.get("followup_link"),
         "provided_fields": dict(inquiry.provided_fields),
         "thread_ref": inquiry.thread_ref,
         "received_at": inquiry.received_at,

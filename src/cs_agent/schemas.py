@@ -265,6 +265,8 @@ class TicketOut(BaseModel):
         None  # 고객 문의 원문 (회신이 오면 이어 붙인 본문). 관리자 화면 표시용
     )
     body_ko: str | None = None
+    followup_link: dict | None = None
+    followup_context_stale: bool = False
     copilot: dict | None = None
     status: TicketStatus
     manual_reply: bool = False

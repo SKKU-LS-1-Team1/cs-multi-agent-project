@@ -199,6 +199,24 @@ def create_app(
                     llm=deps.llm,
                 ),
             )
+            history_task = None
+            if (
+                settings.customer_history_enabled
+                and app.state.sessionmaker is not None
+                and app.state.llm.enabled
+            ):
+                from cs_agent.pipeline.embed_docs import embed
+                from cs_agent.services.customer_history import CustomerHistory, index_loop
+
+                history = CustomerHistory(
+                    app.state.sessionmaker,
+                    embed,
+                    settings.embedding_model,
+                    lambda ticket_id: app.state.tickets._state(ticket_id).values,
+                    app.state.llm,
+                )
+                app.state.tickets.history_matcher = history.match
+                history_task = asyncio.create_task(index_loop(history))
             # 업무 메일함: 앞단을 거치지 않은 메일 문의를 같은 분석·규칙으로 검토 후 티켓 등록
             app.state.mailbox = Mailbox.from_deps(load_mails(), app.state.tickets, deps)
             app.state.progress = ProgressService(
@@ -217,7 +235,7 @@ def create_app(
                 else None
             )
             yield
-            for task in (retry, embed_cases):
+            for task in (retry, embed_cases, history_task):
                 if task:
                     task.cancel()
                     with suppress(asyncio.CancelledError):

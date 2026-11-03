@@ -79,7 +79,16 @@ export type CopilotInsight = {
   changes: { field: string; label: string; before: string | null; after: string | null }[];
   generated_at: string | null;
 };
+export type FollowupQuote = { source_id: string; quote: string };
+export type FollowupLink = {
+  previous_ticket_id: string; previous_subject: string; reason: string; relation: string;
+  dismissed: boolean; new_information: string; references: FollowupQuote[];
+  previous_response?: { text: string; references: FollowupQuote[] } | null;
+  current_source?: string; sources: Record<string, string>;
+};
 export type Ticket = {
+  followup_link?: FollowupLink | null;
+  followup_context_stale?: boolean;
   copilot?: CopilotInsight;
   ticket_id: string;
   inquiry: InquiryIn | null; // 문의 원문 (회신이 오면 이어 붙인 본문)
@@ -308,6 +317,7 @@ export const api = {
   ticket: (id: string) => request<Ticket>(`/tickets/${id}`),
   act: (id: string, body: { action: ReviewAction } & Record<string, unknown>) =>
     request<Ticket>(`/tickets/${id}/action`, { method: "POST", body: JSON.stringify(body) }),
+  unlinkFollowup: (id: string) => request<Ticket>(`/tickets/${id}/followup/unlink`, { method: "POST" }),
   copilot: (id: string) => request<CopilotInsight>(`/tickets/${id}/copilot`, { method: "POST" }),
   mailCopilot: (id: string, review: MailReview) => request<CopilotInsight>(`/mail/${id}/copilot`, { method: "POST", body: JSON.stringify(review) }),
   mails: () => request<MailItem[]>("/mail"),

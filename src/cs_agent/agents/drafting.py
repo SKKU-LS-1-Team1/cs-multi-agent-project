@@ -62,6 +62,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from functools import lru_cache
 from pathlib import Path
 
+from cs_agent.agents.customer_followup import context as followup_context
 from cs_agent.config import get_settings
 from cs_agent.domain import BUNDLE_OF, Category
 from cs_agent.llm.router import LLMRouter
@@ -669,6 +670,7 @@ def write_draft(
     secondary_category: Category | None = None,
     tables: RefTables | None = None,
     specialist_replies: Sequence[Mapping[str, object]] = (),
+    followup_link: dict | None = None,
 ) -> Draft:
     """공통 규칙 + 주·보조 유형 지침 + 실제 조회값으로 writer를 한 번 호출한다.
 
@@ -721,6 +723,7 @@ def write_draft(
         "case_examples_not_current_facts": [{"case_id": e.doc_id, "text": e.text} for e in cases],
         "allowed_citations": allowed,
         "customer_inquiry": inquiry_text,
+        "historical_followup_context": followup_context(followup_link),
         "fix_notes": fix_notes or [],
         "reviewer_feedback": reviewer_feedback or "",
     }

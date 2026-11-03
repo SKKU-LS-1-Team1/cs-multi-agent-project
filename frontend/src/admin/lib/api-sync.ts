@@ -79,6 +79,15 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
   if (t && (api.customer_revision ?? 0) === (t.customerRevision ?? 0) &&
     (api.information_review?.checked_at || "") < (t.informationReviewedAt || "")) return t;
   const inquiry = api.inquiry;
+  if (t?.followupLink?.dismissed && api.followup_link && !api.followup_link.dismissed &&
+    t.followupLink.previous_ticket_id === api.followup_link.previous_ticket_id) return t;
+  const followupChanged = JSON.stringify(t?.followupLink ?? null) !== JSON.stringify(api.followup_link ?? null)
+    || Boolean(t?.followupContextStale) !== Boolean(api.followup_context_stale);
+  if (t && followupChanged) {
+    t.reviewed = false;
+    t.replyPreview = null;
+    t.replyPreviewKey = null;
+  }
   if (t) t.copilot = api.copilot;
   const initialMessage = api.customer_messages?.find((m) => m.kind === "initial");
   const replies = (api.customer_messages || []).filter((m) => m.kind === "reply");
@@ -125,6 +134,8 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     apiRules: api.rules,
     fieldLabels: labels,
     copilot: api.copilot,
+    followupLink: api.followup_link,
+    followupContextStale: api.followup_context_stale ?? false,
     analysisReady: Boolean(api.classification && api.extraction && api.rules && api.status !== "ANALYSIS_PENDING"),
     requiredInformation: required,
     infoChecks: checks,
@@ -375,7 +386,8 @@ export function isManualReplyTicket(t: Ticket): boolean {
   return isApiTicket(t) && (t.apiStatus === "HUMAN_QUEUE" || Boolean(t.manualReply));
 }
 export function replyPreviewKey(t: Ticket): string {
-  return JSON.stringify([t.draft, t.apiLanguage, t.replyLanguage, t.purpose, t.customerRevision ?? 0, t.specialistRevision ?? 0, t.informationReviewedAt ?? null, t.apiEvidence, t.apiBaselineDraft]);
+  return JSON.stringify([t.draft, t.apiLanguage, t.replyLanguage, t.purpose, t.customerRevision ?? 0, t.specialistRevision ?? 0, t.informationReviewedAt ?? null, t.apiEvidence, t.apiBaselineDraft,
+    t.followupLink?.previous_ticket_id, t.followupLink?.created_at, Boolean(t.followupLink?.dismissed), Boolean(t.followupContextStale)]);
 }
 function draftKindMismatch(t: Ticket): boolean {
   return !isManualReplyTicket(t) && typeof t.apiInfoRequest === "boolean" &&
