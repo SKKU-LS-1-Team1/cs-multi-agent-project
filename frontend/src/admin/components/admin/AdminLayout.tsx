@@ -38,7 +38,7 @@ export default function AdminLayout() {
       <aside className="sticky top-0 flex h-dvh flex-col px-5 pb-5 pt-7 text-white">
         <div className="px-1">
           <img src={logo} alt="LS ELECTRIC" width={2029} height={322} style={{ display: "block", width: "100%", height: "auto" }} />
-          <p className="mt-3 text-sm font-medium tracking-wide text-white/70">글로벌 고객지원</p>
+          <p className="mt-5 text-sm font-medium tracking-wide text-white/70">글로벌 고객지원</p>
         </div>
         <nav aria-label="주 메뉴" className="mt-10 grid gap-1.5">
           {MENU.map(({ to, label, icon: Icon, match }) => {

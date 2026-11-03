@@ -8,7 +8,7 @@ import { Input } from "@admin/components/ui/input";
 import { NativeSelect, PageHeader, TicketRow, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import { CompletedTickets } from "@admin/pages/Knowledge";
 import { bulkAssign } from "@admin/lib/actions";
-import { canAssign, completedTickets, departmentRisk, people, scopeTickets } from "@admin/lib/logic";
+import { canAssign, completedTickets, departmentRisk, overdue, people, scopeTickets, slaMinutes } from "@admin/lib/logic";
 import { openModal, setUi, tickets, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
@@ -16,14 +16,17 @@ import type { Ticket } from "@admin/lib/types";
 const SCOPES = ["내 담당", "전체"] as const;
 const DONE_TAB = "완료 문의";
 const Count = ({ label, n }: { label: string; n: number }) => <>{label}<span className="ml-1.5 text-sm font-normal tabular-nums text-muted-foreground">{n}</span></>;
-const scoped = (scope: string) => scopeTickets(scope).filter((t) => (!ui.listOwner || t.owner === ui.listOwner));
+const UNASSIGNED = "미배정"; // 담당자 필터의 "담당자 없음" 값
+const scoped = (scope: string) => scopeTickets(scope).filter((t) => (!ui.listOwner || (ui.listOwner === UNASSIGNED ? !t.owner : t.owner === ui.listOwner)));
+/** SLA 마감까지 남은 분. 초과는 음수(더 많이 넘길수록 작다), 시간 정보가 없으면 맨 뒤. */
+const remaining = (t: Ticket) => { const m = slaMinutes(t); return m === null ? Infinity : overdue(t) ? -m : m; };
 function filtered() {
   const q = ui.query.toLowerCase();
   return scoped(ui.filter).filter(
     (t) =>
       (!q || [t.id, t.title, t.company, t.product, t.country].join(" ").toLowerCase().includes(q)) &&
-      (!ui.status || t.status === ui.status) && (!ui.priority || t.priority === ui.priority) && (!ui.product || t.product === ui.product),
-  );
+      (!ui.riskOnly || (t.risk && t.stage !== 5)) && (!ui.status || t.status === ui.status) && (!ui.priority || t.priority === ui.priority) && (!ui.product || t.product === ui.product),
+  ).sort((a, b) => remaining(a) - remaining(b) || a.priority.localeCompare(b.priority)); // 긴급한 순: 초과 → 남은 시간이 짧은 순, 같으면 우선순위(P1 먼저)
 }
 /** 지금 봐야 할 것부터 묶는다: 위험 → 미배정 → 진행 중 → 완료. */
 function groups(rows: Ticket[]) {
@@ -52,11 +55,11 @@ export default function Tickets() {
   const doneTab = ui.filter === DONE_TAB;
   const rows = doneTab ? [] : filtered();
   const picked = [...sel].filter((id) => rows.some((t) => t.id === id));
-  const activeFilters = [ui.status, ui.priority, ui.product].filter(Boolean).length;
+  const activeFilters = [ui.status, ui.priority, ui.product, ui.listOwner].filter(Boolean).length;
   const toggle = (id: string, on: boolean) => setSel((s) => { const n = new Set(s); on ? n.add(id) : n.delete(id); return n; });
   const opt = (first: string, values: string[]) => [<option key="" value="">{first}</option>, ...values.map((v) => <option key={v}>{v}</option>)];
   const exitSelect = () => { setSelectMode(false); setSel(new Set()); };
-  const hasFilter = ui.query || activeFilters || ui.listOwner;
+  const hasFilter = ui.query || activeFilters || ui.listOwner || ui.riskOnly;
 
   return (
     <>
@@ -64,7 +67,7 @@ export default function Tickets() {
         <UnderlineTabs
           tabs={[...SCOPES.map((v) => [v, <Count key={v} label={v} n={scoped(v).filter((t) => v !== "내 담당" || t.stage !== 5).length} />] as const), [DONE_TAB, <Count key={DONE_TAB} label={DONE_TAB} n={ui.completedTotal ?? completedTickets().length} />] as const]}
           value={ui.filter as string}
-          onChange={(v) => { exitSelect(); setUi(v === DONE_TAB ? { filter: v, kquery: "" } : { filter: v }); }} />
+          onChange={(v) => { exitSelect(); setUi(v === DONE_TAB ? { filter: v, kquery: "", riskOnly: false } : { filter: v, riskOnly: false }); }} />
       </PageHeader>
       {ui.ticketSync !== "ready" && <p role={ui.ticketSync === "error" ? "alert" : "status"} className="px-10 pb-4 text-sm text-muted-foreground">{ui.ticketSyncError || "서버 문의를 불러오는 중입니다."}{tickets.length > 0 && " 마지막 조회 정보를 표시합니다."}</p>}
       {doneTab ? <CompletedTickets /> : <>
@@ -75,6 +78,7 @@ export default function Tickets() {
           <SlidersHorizontal />필터{activeFilters > 0 && <span className="tabular-nums text-info"> {activeFilters}</span>}
         </Button>
         {ui.listOwner && <Button variant="secondary" onClick={() => setUi({ listOwner: "" })}>{ui.listOwner} ×</Button>}
+        {ui.riskOnly && <Button variant="secondary" onClick={() => setUi({ riskOnly: false })}>SLA 위험만 ×</Button>}
         {canAssign && <Button className="ml-auto" variant={selectMode ? "secondary" : "ghost"} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}>{selectMode ? "선택 끝내기" : "여러 건 선택"}</Button>}
       </div>
 
@@ -82,8 +86,9 @@ export default function Tickets() {
         <div className="mx-10 mb-4 flex flex-wrap items-center gap-2 rounded-2xl bg-card p-3 shadow-card">
           <NativeSelect className="rounded-full pl-4" aria-label="전체 상태" value={ui.status} onChange={(e) => setUi({ status: e.target.value })}>{opt("전체 상태", [...new Set(tickets.map((t) => t.status))])}</NativeSelect>
           <NativeSelect className="rounded-full pl-4" aria-label="우선순위" value={ui.priority} onChange={(e) => setUi({ priority: e.target.value })}>{opt("우선순위", ["P1", "P2", "P3", "P4"])}</NativeSelect>
+          {ui.filter !== "내 담당" && <NativeSelect className="rounded-full pl-4" aria-label="담당자" value={ui.listOwner} onChange={(e) => setUi({ listOwner: e.target.value })}>{opt("전체 담당자", [...people.map((p) => p.name), UNASSIGNED])}</NativeSelect>}
           <NativeSelect className="rounded-full pl-4" aria-label="전체 제품" value={ui.product} onChange={(e) => setUi({ product: e.target.value })}>{opt("전체 제품", [...new Set(tickets.map((t) => t.product))])}</NativeSelect>
-          {activeFilters > 0 && <Button size="sm" variant="ghost" onClick={() => setUi({ status: "", priority: "", product: "" })}>초기화</Button>}
+          {activeFilters > 0 && <Button size="sm" variant="ghost" onClick={() => setUi({ status: "", priority: "", product: "", listOwner: "" })}>초기화</Button>}
         </div>
       )}
 
@@ -102,7 +107,7 @@ export default function Tickets() {
             <strong className="font-medium">{ui.ticketSync === "loading" ? "문의 조회 중입니다." : ui.ticketSync === "error" ? "문의 조회를 완료하지 못했습니다." : "조건에 맞는 문의가 없습니다."}</strong>
             <p className="max-w-sm text-sm text-muted-foreground">{ui.ticketSync !== "ready" ? "서버 조회가 완료되면 문의 목록을 갱신합니다." : hasFilter ? "걸어 둔 검색·필터를 풀면 더 많은 문의가 보입니다." : "이 범위에는 처리할 문의가 없습니다. 전체 범위를 보거나 새 문의를 등록하세요."}</p>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setUi({ query: "", status: "", priority: "", product: "", listOwner: "", filter: "전체" })}>검색·필터 초기화</Button>
+              <Button variant="outline" onClick={() => setUi({ query: "", status: "", priority: "", product: "", listOwner: "", riskOnly: false, filter: "전체" })}>검색·필터 초기화</Button>
               <Button onClick={() => openModal("new-ticket")}>새 문의 등록</Button>
             </div>
           </div>
