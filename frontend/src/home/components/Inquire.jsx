@@ -455,7 +455,7 @@ export default function Inquire({ draft, lang, onSubmitted, onOpenMine, onExit, 
             ))}
             <div className="fld"><label><span>답변 언어{!s.contactEdited.lang && <Auto />}</span>
               <select className="qin" value={s.contact.lang} onChange={(e) => set({ contact: { ...s.contact, lang: e.target.value }, contactEdited: { ...s.contactEdited, lang: true } })}>
-                {LANGUAGES.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select></label></div>
+                {LANGUAGES.map(([c, n]) => <option key={c} value={c} lang={c}>{n}</option>)}</select></label></div>
           </div>
           <div className="qnav"><button type="button" className="gbtn" onClick={back}>이전</button><button type="button" className="pbtn" onClick={() => (emailBad ? set({ attempted: true, touched: { ...s.touched, __email: true }, focusKey: '__email' }) : set({ stage: 4 }))}>다음</button></div>
         </>
