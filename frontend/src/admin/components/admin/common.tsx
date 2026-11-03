@@ -149,7 +149,7 @@ export function StatusIcon({ t }: { t: Ticket }) {
 /** 지금 처리 단계: "3/6 전문부서"(외부 회신을 기다리는 단계면 "3/6 전문부서 대기"). */
 export function StepTag({ t }: { t: Ticket }) {
   const s = currentStep(t);
-  return <Tag className="shrink-0 tabular-nums">{s.index}/{s.total} {s.label}{s.waiting && " 대기"}</Tag>;
+  return <Tag className="shrink-0 tabular-nums">{s.index}/{s.total} {s.label}{s.phase ? ` · ${s.phase}` : s.waiting && " 대기"}</Tag>;
 }
 
 /** 목록 한 줄: 아이콘 · 제목과 메타 · 오른쪽에 SLA와 담당자. 한 줄에 정보는 두세 개만. */

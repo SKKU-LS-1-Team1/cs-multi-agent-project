@@ -12,11 +12,11 @@ import { Input } from "@admin/components/ui/input";
 import { Textarea } from "@admin/components/ui/textarea";
 import { AiMark, Facts, Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, StatusTag, Tag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import {
-  answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, feedbackLabel, inquirySummary, isEdited,
+  answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, expertPhase, feedbackLabel, inquirySummary, isEdited,
   canAssign, isNewAssignment, latestCustomerReply, pendingCustomerInfo, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
-  requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
+  requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, openExpertReview, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
 import { loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
@@ -275,6 +275,15 @@ function Editor({ t }: { t: Ticket }) {
   const manual = isManualReplyTicket(t);
   const isRequestDraft = t.purpose === "request", expertWaiting = waitingReviews(t).length > 0 || !!t.legacyReviewPending;
   // 전문부서 회신을 기다리는 동안은 고객 답변 작성칸을 열지 않는다(회신을 보고 써야 하므로). 고객에게 보내는 질의서는 해당 없음.
+  if (!isRequestDraft && expertPhase(t) === "review" && !t.sent && t.stage !== 5 && !t.specialistFollowup) {
+    return (
+      <Card className="grid justify-items-center gap-2 p-8 text-center">
+        <strong className="text-base">전문부서 회신이 도착했습니다</strong>
+        <p className="text-sm text-muted-foreground">회신이 요청에 맞는지 확인한 뒤 답변에 반영하세요. 부족하면 추가 질의나 고객 자료 요청으로 돌아갈 수 있습니다.</p>
+        <Button className="mt-1" onClick={() => openExpertReview(t)}>회신 검토</Button>
+      </Card>
+    );
+  }
   if (!isRequestDraft && expertWaiting && !t.sent && t.stage !== 5) {
     return (
       <Card className="grid gap-1.5 p-8 text-center">

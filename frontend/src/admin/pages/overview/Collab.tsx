@@ -1,11 +1,12 @@
-// 전문부서 협업: 회신 대기와 회신 후에도 계속되는 사내 분석을 추적한다.
-// 왼쪽 = 회신 대기 카드(회신 대기 시간·회신 등록), 오른쪽 = 부서별 대기(건수 막대를 기다린 시간 구간으로 나눠 어느 부서가 오래 묵었는지 보인다).
-// 회신이 온 뒤의 일(답변 작성)은 "할 일"과 문의 상세가 안내하므로 여기에는 두지 않는다.
+// 전문부서 협업 = 문의 목록 "3/6 전문부서" 단계를 문의 전체에 걸쳐 본 화면. 하위 상태는 expertPhase 와 같다.
+// 왼쪽 위 = 회신 도착·검토 필요(공이 우리에게 있다: 담당자가 확인해야 4단계로 넘어간다), 왼쪽 아래 = 회신 대기(회신 대기 시간·회신 등록)
+// 오른쪽 = 부서별 대기(건수 막대를 기다린 시간 구간으로 나눠 어느 부서가 오래 묵었는지 보인다).
+// 요청서 작성 중(writing)은 부서와 오가는 일이 아니라 담당자 본인의 작업이라 "할 일"에 둔다. 검토가 끝난 뒤의 답변 작성도 "할 일"과 문의 상세가 안내한다.
 import { useState } from "react";
 import { ArrowRight, ChevronDown } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { PageHeader, SlaTag, Tag, rise, useGo } from "@admin/components/admin/common";
-import { departmentRisk, departmentReviewRows, referralDepartments, referralRows } from "@admin/lib/logic";
+import { departmentRisk, departmentReviewRows, expertPhase, referralDepartments, referralRows } from "@admin/lib/logic";
 import { openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 
@@ -38,8 +39,11 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
 
   const waitingAll = referralRows().filter((r) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5);
   const names = referralDepartments();
+  const inReview = (r: Row) => !!r.response && !r.response.reviewed && r.ticket.stage !== 5 && expertPhase(r.ticket) === "review";
+  const reviewAll = referralRows().filter(inReview);
   const selected = ui.department !== "전체 부서" && !names.includes(ui.department) ? "전체 부서" : ui.department;
   const pending = (selected === "전체 부서" ? waitingAll : departmentReviewRows(selected).filter((r) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5)).sort(byUrgency);
+  const toReview = (selected === "전체 부서" ? reviewAll : reviewAll.filter((r) => (r.target || "대상 부서 미기록") === selected)).sort((a, b) => Number(departmentRisk(b.ticket)) - Number(departmentRisk(a.ticket)) || (Date.parse(a.response.createdAt || "") || 0) - (Date.parse(b.response.createdAt || "") || 0));
   // 부서별 현황: 대기가 있는 부서만 먼저(많은 순), 대기 없는 부서는 접어 둔다. 부서 목록 자체는 그대로다.
   const waitOf = (n: string) => (n === "전체 부서" ? waitingAll : waitingAll.filter((r) => (r.target || "대상 부서 미기록") === n)).length;
   const busy = names.filter((n) => waitOf(n) > 0).sort((a, b) => waitOf(b) - waitOf(a));
@@ -53,6 +57,15 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
     <>
       <PageHeader title="전문부서 협업 현황">{tabs}</PageHeader>
       <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-5 px-10 pb-12">
+        <div className="grid gap-8">
+        {toReview.length > 0 && (
+          <section aria-label="회신 도착" className="grid gap-4">
+            <h2 className="px-1 text-lg font-medium">회신 도착 · 검토 필요 <span className="tabular-nums text-muted-foreground">{toReview.length}</span></h2>
+            <div className="grid grid-cols-2 gap-4">
+              {toReview.map((r, i) => <ReviewCard key={r.key} r={r} order={i + 1} />)}
+            </div>
+          </section>
+        )}
         <section aria-label="회신 대기" className="grid gap-4">
           <h2 className="px-1 text-lg font-medium">회신 대기·사내 분석 <span className="tabular-nums text-muted-foreground">{pending.length}</span></h2>
           <div className="grid grid-cols-2 gap-4">
@@ -60,6 +73,7 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
           </div>
           {!pending.length && <p style={rise(1).style} className={cn("rounded-2xl bg-card py-12 text-center text-sm text-muted-foreground shadow-card", rise(1).className)}>진행 중인 전문부서 요청이 없습니다.</p>}
         </section>
+        </div>
 
         <section aria-label="부서별 현황" style={rise(0).style} className={cn("rounded-2xl bg-card p-6 shadow-card", rise(0).className)}>
           <h2 className="text-lg font-medium">부서별 현황</h2>
@@ -94,6 +108,28 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
         </section>
       </div>
     </>
+  );
+}
+
+/** 회신이 도착해 담당자 확인을 기다리는 요청. 누르면 요청·회신 비교 화면(반영/추가 질의/고객 자료 요청)이 열린다. */
+function ReviewCard({ r, order }: { r: Row; order: number }) {
+  const got = r.response?.createdAt ? Date.parse(r.response.createdAt) : NaN;
+  const h = Number.isFinite(got) ? Math.max(0, (Date.now() - got) / 3600e3) : null;
+  return (
+    <article onClick={() => openModal("department-review", { key: r.key })} style={rise(order).style} className={cn("grid cursor-pointer gap-3 rounded-2xl bg-card p-5 shadow-card transition-shadow hover:shadow-float", rise(order).className, departmentRisk(r.ticket) && "ring-1 ring-destructive/40")}>
+      <div className="grid gap-1">
+        <h3 className="font-semibold leading-snug">{r.ticket.title}</h3>
+        <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><span className="truncate font-medium text-foreground">{r.target || "부서 미기록"}</span><span className="shrink-0">회신</span></p>
+        <p className="line-clamp-2 text-sm text-muted-foreground">{r.response.text}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <Tag tone="blue">{h === null ? "회신 시각 미기록" : `도착 ${fmtWait(h)} 전`}</Tag>
+        <SlaTag t={r.ticket} prefix="SLA " />
+      </div>
+      <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+        <Button size="sm" onClick={() => openModal("department-review", { key: r.key })}>회신 검토</Button>
+      </div>
+    </article>
   );
 }
 

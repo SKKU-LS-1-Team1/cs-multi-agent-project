@@ -824,7 +824,7 @@ for (const source of ['api', 'local']) {
     const actions = load('lib/actions.ts', {
       sonner: { toast }, './api-sync': mod,
       './store': { commit: noop },
-      './logic': { contextIsNew: () => false, waitingReviews: () => [], contextKey: JSON.stringify,
+      './logic': { contextIsNew: () => false, waitingReviews: () => [], expertPhase: () => 'none', referralRows: () => [], contextKey: JSON.stringify,
         answerContext: () => ({}), needsLocalization: () => false, customerLanguage: () => 'English' },
     });
     const t = mod.apply(undefined, apiRow()); t.source = source;
@@ -871,7 +871,7 @@ function nextActionFixture(rows) {
       latestCustomerReply: t => t.latestReply,
       requiredInformation: t => t.required || [],
       answerContext: () => ({ missingInfo: [] }),
-      waitingReviews: t => t.waiting ? [{}] : [],
+      waitingReviews: t => t.waiting ? [{}] : [], expertPhase: () => 'none', referralRows: () => [],
       contextIsNew: () => false,
     },
     './store': { openModal: (...args) => opened.push(args) },
@@ -1315,7 +1315,7 @@ function specialistStepsFixture() {
     './logic': { informationAssessment: assessed, requiredInformation: info,
       pendingCustomerInfo: t => assessed(t).filter(x => !['provided', 'confirmed'].includes(x.status)).length,
       latestCustomerReply: () => null, informationSummary: () => '고객 회신 대기',
-      waitingReviews: t => (t.specialistRequests || []).filter(r => !r.reply) },
+      waitingReviews: t => (t.specialistRequests || []).filter(r => !r.reply), expertPhase: () => 'none', expertReviewModal: () => null },
     './store': { openModal: noop },
   });
   const t = { owner: 'Doyeon Kim', source: 'api', analysisReady: true,

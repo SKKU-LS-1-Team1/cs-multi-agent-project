@@ -154,6 +154,25 @@ export function record(t: Ticket, kind: string, text: string, extra: Record<stri
   save();
 }
 export const waitingReviews = (t: Ticket) => t.events.filter((e) => e.kind === "escalation" && (t.source !== "api" || e.source === "specialist-api") && !t.events.some((r) => r.kind === "expert" && r.requestId === e.id));
+/** 3단계(전문부서)의 하위 상태. 공이 누구에게 있는지로 나눈다: writing(우리: 요청서 작성) · waiting(전문부서: 회신 대기) · review(우리: 회신 검토) · done(반영 완료) · none(요청 없음).
+ *  C/S 는 한 번에 한 전문부서에만 요청한다(전제). 회신이 오면 review, 추가 질의는 같은 부서에 다시 요청해 writing → waiting 으로 돌아간다.
+ *  방어: 데이터에 요청이 여러 건이면 전부 회신이 와야 review 가 된다. */
+export type ExpertPhase = "none" | "writing" | "waiting" | "review" | "done";
+export function expertPhase(t: Ticket): ExpertPhase {
+  if (t.activeComposer === "expert") return "writing";
+  if (waitingReviews(t).length || t.legacyReviewPending) return "waiting";
+  const replies = t.events.filter((e) => e.kind === "expert" && (t.source !== "api" || e.source === "specialist-api"));
+  if (!replies.length) return "none";
+  const f = t.specialistFollowup;
+  const unreviewed = f ? f.status !== "confirmed" && !f.pending_replies : replies.some((e) => !e.reviewed);
+  return unreviewed && t.stage !== 5 && !t.sent ? "review" : "done";
+}
+/** 회신 검토 화면: 서버 분석(specialistFollowup)이 있으면 검토 결과 확인, 없으면 요청·회신 비교 화면. */
+export function expertReviewModal(t: Ticket): [string, Record<string, any>] | null {
+  if (t.specialistFollowup) return ["specialist-finding", { id: t.id }];
+  const r = referralRows().find((x) => x.ticket === t && x.response && !x.response.reviewed);
+  return r?.event ? ["department-review", { key: r.key }] : null;
+}
 export const ticketProgress = (t: Ticket) => (t.stage === 5 ? "완료" : t.owner ? "진행 중" : "미배정");
 /** 담당자가 아직 열어 보지 않은 고객 회신 수. 문의 상세를 열면 읽음 처리된다. */
 export const unreadReplies = (t: Ticket) =>

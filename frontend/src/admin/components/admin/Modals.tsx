@@ -13,10 +13,10 @@ import { AiMark, Facts, Field, Mono, NativeSelect, PersonAvatar, Tag } from "./c
 import DocContent from "./DocContent";
 import { useNavigate } from "react-router-dom";
 import {
-  canSend, applyPendingAnswer, assignOwner, completeTicket, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply,
+  canSend, applyPendingAnswer, assignOwner, completeTicket, confirmExpertReview, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply,
 } from "@admin/lib/actions";
 import {
-  candidates, completionDraft, customerLanguage, informationAssessment, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, referralRows, resource, resourceReason, signedIn, waitingReviews,
+  candidates, completionDraft, customerLanguage, informationAssessment, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, expertPhase, referralRows, resource, resourceReason, signedIn, waitingReviews,
 } from "@admin/lib/logic";
 import { closeModal, setUi, findTicket, openModal, tickets, ui, useStore } from "@admin/lib/store";
 import { kindLabel, rememberProgressNotice, type CareKind } from "@admin/lib/care";
@@ -409,12 +409,13 @@ function DepartmentReview({ props }: { props: Record<string, any> }) {
   if (!r?.event) return null;
   const e = r.event, c = e.requestContext, files: string[] | null = Array.isArray(e.transmittedFiles) ? e.transmittedFiles : null;
   const canReply = !r.response && r.ticket.stage !== 5;
+  const toReview = !!r.response && !r.response.reviewed && expertPhase(r.ticket) === "review"; // 회신이 도착했고 담당자가 아직 확인하지 않았다
   return (
     <div className="grid gap-5">
       <header className="grid gap-2">
         <div className="flex items-center justify-between">
           <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-slate-200/70 px-2.5 text-xs font-medium text-slate-700"><Building2 className="size-3.5" aria-hidden />전문부서 요청</span>
-          <Tag tone={r.response ? "green" : "amber"}>{r.response ? "회신 받음" : "회신 대기"}</Tag>
+          <Tag tone={r.response ? (toReview ? "blue" : "green") : "amber"}>{r.response ? (toReview ? "회신 도착 · 검토 필요" : r.response.reviewed ? "회신 반영 완료" : "회신 받음") : "회신 대기"}</Tag>
         </div>
         <h3 className="text-xl font-bold leading-snug">{r.ticket.title}</h3>
         <p className="text-sm text-muted-foreground"><Mono>{r.requestId}</Mono> · <Mono>{r.ticket.id}</Mono> · {r.ticket.product}</p>
@@ -454,6 +455,11 @@ function DepartmentReview({ props }: { props: Record<string, any> }) {
         <Close />
         <Button variant="outline" onClick={() => { closeModal(); nav("/tickets/" + r.ticket.id); }}>원본 문의 열기</Button>
         {canReply && <Button onClick={() => openModal("expert-receive", { id: r.ticket.id, requestId: r.requestId })}>회신 등록</Button>}
+        {toReview && <>
+          <Button variant="outline" onClick={() => confirmExpertReview(r.ticket, "customer")}>고객 자료 추가 요청</Button>
+          <Button variant="outline" onClick={() => { confirmExpertReview(r.ticket, "followup"); }}>추가 질의</Button>
+          <Button onClick={() => { confirmExpertReview(r.ticket, "answer"); nav("/tickets/" + r.ticket.id); }}>회신 반영하고 답변 작성</Button>
+        </>}
       </Footer>
     </div>
   );
@@ -507,19 +513,19 @@ function SpecialistFinding({ t }: { t: Ticket }) {
     finally { setBusy(false); }
   };
   if (!f) return <p>현재 확인할 조사 정보가 없습니다.</p>;
-  return <div className="grid gap-4">
-    <p className="text-sm text-muted-foreground">회신이 현재 문의에 대한 최종 검토 결과인지 확인하세요. 확인을 완료하면 이 결과를 반영해 고객 답변을 작성할 수 있습니다.</p>
+  return <div className="grid gap-7">
+    <p className="text-sm leading-relaxed text-muted-foreground">회신이 현재 문의에 대한 최종 검토 결과인지 확인하세요. 확인을 완료하면 이 결과를 반영해 고객 답변을 작성할 수 있습니다.</p>
     {stale && <p role="alert" className="text-sm text-warning-ink">문의 또는 회신이 변경됐습니다. 창을 닫고 최신 내용을 다시 확인해 주세요.</p>}
     {f.error && <p role="alert" className="text-sm text-warning-ink">{f.error}</p>}
     {(f.error || !f.reading || f.needs_review) && <Button variant="outline" disabled={busy || stale || t.followupBusy} onClick={() => void specialistFollowupViaApi(t)}>회신 내용 다시 분석</Button>}
     <NativeSelect aria-label="확인할 회신" value={replyId} onChange={e => { setReplyId(e.target.value); setEvidence(""); setConfirmed(false); }}>
-      {replies.map((r: any) => <option key={r.reply_id} value={r.reply_id}>{r.author} · {r.created_at}</option>)}
+      {replies.map((r: any) => <option key={r.reply_id} value={r.reply_id}>{r.author} · {stamp(r.created_at)}</option>)}
     </NativeSelect>
-    <details className="rounded-2xl bg-muted p-4 text-sm"><summary className="cursor-pointer font-medium">회신 원문 보기</summary><p className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap">{source?.text || "아직 등록된 회신이 없습니다."}</p></details>
-    <Field label="고객 답변에 반영할 검토 결과 (회신 원문 그대로)"><Textarea value={evidence} onChange={e => { setEvidence(e.target.value); setConfirmed(false); }} /></Field>
-    <label className="flex items-start gap-2 text-sm"><Checkbox checked={confirmed} onCheckedChange={v => setConfirmed(v === true)} />위 내용이 현재 문의에 대한 전문부서의 최종 검토 결과이며, 고객 답변에 반영할 수 있음을 확인했습니다.</label>
+    <details className="rounded-2xl bg-muted px-5 py-4 text-sm"><summary className="cursor-pointer font-medium">회신 원문 보기</summary><p className="mt-4 max-h-56 overflow-auto whitespace-pre-wrap leading-relaxed">{source?.text || "아직 등록된 회신이 없습니다."}</p></details>
+    <Field label="고객 답변에 반영할 검토 결과 (회신 원문 그대로)"><Textarea className="min-h-32 leading-relaxed" value={evidence} onChange={e => { setEvidence(e.target.value); setConfirmed(false); }} /></Field>
+    <label className="flex items-start gap-3 text-sm leading-relaxed"><Checkbox checked={confirmed} onCheckedChange={v => setConfirmed(v === true)} />위 내용이 현재 문의에 대한 전문부서의 최종 검토 결과이며, 고객 답변에 반영할 수 있음을 확인했습니다.</label>
     {f.pending_replies && <p className="text-sm text-warning-ink">다른 전문부서의 회신을 기다리고 있습니다.</p>}
-    <DialogFooter><Button variant="outline" disabled={busy} onClick={closeModal}>닫기</Button><Button disabled={busy || stale || t.followupBusy || !confirmed || f.pending_replies || !evidence.trim() || !source?.text.includes(evidence.trim())} onClick={() => void save()}>{busy ? "저장 중…" : "확인 완료"}</Button></DialogFooter>
+    <DialogFooter className="pt-1"><Button variant="outline" disabled={busy} onClick={closeModal}>닫기</Button><Button disabled={busy || stale || t.followupBusy || !confirmed || f.pending_replies || !evidence.trim() || !source?.text.includes(evidence.trim())} onClick={() => void save()}>{busy ? "저장 중…" : "확인 완료"}</Button></DialogFooter>
   </div>;
 }
 
