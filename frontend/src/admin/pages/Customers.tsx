@@ -1,11 +1,11 @@
 // 고객 관리: 표 하나로 보는 두 가지 — 중점 관리(매일 먼저 보는 곳) · 전체(찾아보기). 검색·필터는 탭마다 따로.
 // 줄 하나 = 고객 하나(이름·업종·국가 / 등급 / 사실 / 상태 / 버튼). 국기는 표에서 쓰지 않고, 지난 대응 이력은 고객 상세에서 본다.
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Search, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, Search, SlidersHorizontal } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { Input } from "@admin/components/ui/input";
 import { CareButtons } from "@admin/components/admin/CareButtons";
-import { CareTag, PageHeader, Tag, TierTag, UnderlineTabs, useGo } from "@admin/components/admin/common";
+import { CareTag, PageHeader, Pager, Tag, TierTag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import { careStatus, recordOf, useCare } from "@admin/lib/care";
 import { factParts, flag, focusOf, maxLate, monthsSince, primaryReason, score, SEGMENT_KO, useCustomers, type Customer } from "@admin/lib/customers";
 import { cn } from "@admin/lib/utils";
@@ -20,26 +20,6 @@ const md = (iso: string) => iso.slice(5, 10).replace("-", ".");
 const SIZE = 15;
 const SORTS: [string, string][] = [["default", "중요도순"], ["recent", "최근 문의순"], ["oldest", "오래된 문의순"], ["most", "문의 많은 순"]];
 const TIER_RANK = { PLATINUM: 0, GOLD: 1, STANDARD: 2 } as const;
-
-/** 페이지 번호: 현재 페이지 앞뒤와 처음·끝만 보이고 나머지는 … 로 줄인다. */
-function Pager({ page, size, total, onChange }: { page: number; size: number; total: number; onChange: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / size));
-  if (pages <= 1) return null;
-  const nums = [...new Set([1, pages, page - 1, page, page + 1].filter((n) => n >= 1 && n <= pages))].sort((a, b) => a - b);
-  const items: (number | "…")[] = [];
-  nums.forEach((n, i) => { if (i && n - nums[i - 1] > 1) items.push("…"); items.push(n); });
-  const go = (p: number) => { onChange(p); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  return (
-    <nav aria-label="페이지" className="flex items-center justify-between gap-4 pt-2">
-      <span className="text-sm tabular-nums text-muted-foreground">{(page - 1) * size + 1}–{Math.min(page * size, total)} / {total}곳</span>
-      <div className="flex items-center gap-1">
-        <button aria-label="이전 페이지" disabled={page === 1} onClick={() => go(page - 1)} className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted disabled:opacity-30"><ChevronLeft className="size-4" /></button>
-        {items.map((n, i) => n === "…" ? <span key={"g" + i} className="px-1 text-muted-foreground">…</span> : <button key={n} aria-current={n === page ? "page" : undefined} onClick={() => go(n)} className={cn("h-9 min-w-9 rounded-full px-3 text-sm tabular-nums transition-colors", n === page ? "bg-[#003377] font-medium text-white" : "text-muted-foreground hover:bg-muted")}>{n}</button>)}
-        <button aria-label="다음 페이지" disabled={page === pages} onClick={() => go(page + 1)} className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted disabled:opacity-30"><ChevronRight className="size-4" /></button>
-      </div>
-    </nav>
-  );
-}
 
 /** 필터 선택: 보이는 글자에 맞춰 너비가 정해져 화살표가 글자 바로 옆에 붙는다. 값이 걸려 있으면 남색으로 보인다. 실제 선택은 투명한 select 가 받는다. */
 function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void }) {
@@ -167,7 +147,7 @@ export default function Customers() {
                   );
                 })}
               </Table>
-              <Pager page={page} size={SIZE} total={focusRows.length} onChange={setPage} />
+              <Pager page={page} size={SIZE} total={focusRows.length} unit="곳" onChange={setPage} />
             </>
           ))}
 
@@ -185,7 +165,7 @@ export default function Customers() {
                   </Row>
                 ))}
               </Table>
-              <Pager page={page} size={SIZE} total={allRows.length} onChange={setPage} />
+              <Pager page={page} size={SIZE} total={allRows.length} unit="곳" onChange={setPage} />
             </>
           ))}
         </div>

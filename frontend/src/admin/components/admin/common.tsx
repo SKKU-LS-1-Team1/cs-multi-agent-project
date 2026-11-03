@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { AlarmClock, Check, ChevronRight, Clock, UserRound, type LucideIcon } from "lucide-react";
+import { AlarmClock, Check, ChevronLeft, ChevronRight, Clock, UserRound, type LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@admin/components/ui/badge";
 import { cn } from "@admin/lib/utils";
@@ -171,3 +171,23 @@ export const rise = (order = 0) => ({
   className: "animate-in fade-in slide-in-from-bottom-2 fill-mode-both duration-500 motion-reduce:animate-none",
   style: { animationDelay: `${Math.min(order, 8) * 70}ms` },
 });
+
+/** 페이지 번호: 현재 페이지 앞뒤와 처음·끝만 보이고 나머지는 … 로 줄인다. */
+export function Pager({ page, size, total, unit = "건", onChange }: { page: number; size: number; total: number; unit?: string; onChange: (p: number) => void }) {
+  const pages = Math.max(1, Math.ceil(total / size));
+  if (pages <= 1) return null;
+  const nums = [...new Set([1, pages, page - 1, page, page + 1].filter((n) => n >= 1 && n <= pages))].sort((a, b) => a - b);
+  const items: (number | "…")[] = [];
+  nums.forEach((n, i) => { if (i && n - nums[i - 1] > 1) items.push("…"); items.push(n); });
+  const go = (p: number) => { onChange(p); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  return (
+    <nav aria-label="페이지" className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pt-2">
+      <span className="text-sm tabular-nums text-muted-foreground">{(page - 1) * size + 1}–{Math.min(page * size, total)} / {total}{unit}</span>
+      <div className="flex items-center justify-center gap-1">
+        <button aria-label="이전 페이지" disabled={page === 1} onClick={() => go(page - 1)} className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted disabled:opacity-30"><ChevronLeft className="size-4" /></button>
+        {items.map((n, i) => n === "…" ? <span key={"g" + i} className="px-1 text-muted-foreground">…</span> : <button key={n} aria-current={n === page ? "page" : undefined} onClick={() => go(n)} className={cn("h-9 min-w-9 rounded-full px-3 text-sm tabular-nums transition-colors", n === page ? "bg-[#003377] font-medium text-white" : "text-muted-foreground hover:bg-muted")}>{n}</button>)}
+        <button aria-label="다음 페이지" disabled={page === pages} onClick={() => go(page + 1)} className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted disabled:opacity-30"><ChevronRight className="size-4" /></button>
+      </div>
+    </nav>
+  );
+}
