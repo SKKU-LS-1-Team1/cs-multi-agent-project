@@ -190,6 +190,11 @@ export function requiredInformation(t: Ticket): { id: string; label: string }[] 
 }
 export const informationAssessment = (t: Ticket) =>
   requiredInformation(t).map((item) => ({ ...item, ...(t.infoChecks?.[item.id] || {}), status: (t.infoChecks?.[item.id]?.status || "missing") as string, evidence: t.infoChecks?.[item.id]?.evidence as string | undefined }));
+/** 아직 확인되지 않은 필수 고객 정보 건수. 0이어야 전문부서로 요청할 수 있다(고객 정보 확인 → 전문부서 순서). */
+export function pendingCustomerInfo(t: Ticket): number {
+  if (t.stage === 5 || (t.source === "api" && !t.analysisReady)) return 0;
+  return informationAssessment(t).filter((x) => !["provided", "confirmed"].includes(x.status)).length;
+}
 export function informationSummary(t: Ticket) {
   const items = informationAssessment(t), remaining = items.filter((x) => !["provided", "confirmed"].includes(x.status)).length;
   if (t.source === "api" && !t.analysisReady) return "필수정보 확인 대기";

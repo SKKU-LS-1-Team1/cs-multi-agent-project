@@ -328,7 +328,7 @@ function CareModal({ customerId, ticketId }: { customerId: string; kind: CareKin
   const { rows, error } = useCustomers();
   const known = rows?.find((x) => x.id === customerId);
   const linked: NoticeTicket[] = (known?.notice_tickets || []).map((t) => ({ ...t,
-    apiLanguage: t.language, status: findTicket(t.id)?.specialistFollowup?.status === "in_progress" && t.status !== "WAITING_CUSTOMER" ? "사내 분석 중" : STATUS_KO[t.status] || t.status }));
+    apiLanguage: t.language, status: findTicket(t.id)?.specialistFollowup?.status === "in_progress" && t.status !== "WAITING_CUSTOMER" ? "전문부서 분석 중" : STATUS_KO[t.status] || t.status }));
   const c = known;
   return c ? <><p role={error ? "alert" : undefined} className="text-sm text-destructive">{error && `${error} 마지막 조회 정보를 표시합니다.`}</p><CareForm key={customerId} c={c} ticketId={ticketId} linked={linked} /></>
     : <p className="text-sm text-muted-foreground">{error || (rows ? "서버에 연결된 고객 문의가 없습니다." : "고객 문의를 불러오는 중입니다.")}</p>;

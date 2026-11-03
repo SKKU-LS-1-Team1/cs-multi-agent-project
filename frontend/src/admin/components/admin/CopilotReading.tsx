@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 import { api, type CopilotInsight, type CopilotStatement } from "../../../api/client";
 import { Button } from "../ui/button";
@@ -37,24 +37,42 @@ export function useCopilot(t: Ticket) {
   return { data: local?.context_key === key ? local : current, busy, error, retry: () => setAttempt((n) => n + 1) };
 }
 
+/** 원문 전체를 보여 주고, 근거로 인용한 부분(quote)에 형광펜을 칠한다. 원문에서 못 찾으면 인용문만 형광펜으로 보인다. */
+function Highlighted({ text, quotes }: { text: string; quotes: string[] }) {
+  const spans = quotes.map((q) => ({ at: text.indexOf(q), len: q.length })).filter((x) => x.at >= 0 && x.len > 0).sort((x, y) => x.at - y.at);
+  const merged: { at: number; end: number }[] = [];
+  for (const { at, len } of spans) {
+    const last = merged[merged.length - 1];
+    if (last && at <= last.end) last.end = Math.max(last.end, at + len); else merged.push({ at, end: at + len });
+  }
+  if (!merged.length) return <mark className="rounded-sm bg-yellow-200/80 px-0.5 text-foreground [box-decoration-break:clone]">{quotes.join("\n")}</mark>;
+  const parts: ReactNode[] = []; let pos = 0;
+  merged.forEach(({ at, end }, i) => {
+    if (at > pos) parts.push(text.slice(pos, at));
+    parts.push(<mark key={i} className="rounded-sm bg-yellow-200/80 px-0.5 text-foreground [box-decoration-break:clone]">{text.slice(at, end)}</mark>);
+    pos = end;
+  });
+  if (pos < text.length) parts.push(text.slice(pos));
+  return <>{parts}</>;
+}
+
 /** Keep the claim visible; collect its exact supporting quotations at the section boundary. */
 export function EvidenceGroup({ statements, sources, label = "근거 원문 보기" }: {
   statements: CopilotStatement[]; sources: CopilotInsight["sources"]; label?: string;
 }) {
-  const refs = new Map<string, { source_id: string; quote: string; claims: Set<string> }>();
+  const refs = new Map<string, { quotes: Set<string>; claims: Set<string> }>();
   for (const statement of statements) for (const ref of statement.references) {
-    const key = JSON.stringify([ref.source_id, ref.quote]);
-    const item = refs.get(key) || { ...ref, claims: new Set<string>() };
-    item.claims.add(statement.text); refs.set(key, item);
+    const item = refs.get(ref.source_id) || { quotes: new Set<string>(), claims: new Set<string>() };
+    item.quotes.add(ref.quote); item.claims.add(statement.text); refs.set(ref.source_id, item);
   }
   if (!refs.size) return null;
   return <details className="mt-3 text-sm text-muted-foreground">
     <summary className="cursor-pointer rounded-sm py-1 focus-visible:outline-2 focus-visible:outline-primary">{label} <span className="ml-1 text-xs">{refs.size}건</span></summary>
     <div className="mt-3 grid gap-4 border-l-2 border-primary/20 pl-3">
-      {[...refs.entries()].map(([key, ref]) => <div key={key} className="min-w-0">
-        <p className="font-semibold text-foreground">{sources[ref.source_id]?.label || "원문"}</p>
+      {[...refs.entries()].map(([id, ref]) => <div key={id} className="min-w-0">
+        <p className="font-semibold text-foreground">{sources[id]?.label || "원문"}</p>
         <ul className="mt-1 grid gap-1 text-xs">{[...ref.claims].map((text) => <li key={text} className="break-words">관련 설명: {text}</li>)}</ul>
-        <blockquote className="mt-2 whitespace-pre-wrap break-words">{ref.quote}</blockquote>
+        <blockquote className="mt-2 whitespace-pre-wrap break-words leading-relaxed"><Highlighted text={sources[id]?.text || ""} quotes={[...ref.quotes]} /></blockquote>
       </div>)}
     </div>
   </details>;

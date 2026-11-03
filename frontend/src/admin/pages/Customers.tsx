@@ -56,12 +56,12 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
 
 const Num = ({ n }: { n?: number }) => <span className="ml-1.5 text-sm font-normal tabular-nums text-muted-foreground">{n ?? ""}</span>;
 /** 표: 머리글 한 줄 + 고객당 한 줄. 줄 전체를 누르면 고객 상세. */
-const FOCUS_COLS = "grid-cols-[minmax(0,2.4fr)_96px_minmax(0,1.4fr)_minmax(0,1.3fr)_104px_156px]";
+const FOCUS_COLS = "grid-cols-[minmax(0,2.4fr)_96px_96px_minmax(0,1.8fr)_104px_156px]";
 const ALL_COLS = "grid-cols-[minmax(0,2.4fr)_96px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_104px]";
-function Table({ cols, heads, children }: { cols: string; heads: string[]; children: React.ReactNode }) {
+function Table({ cols, heads, centered = [], children }: { cols: string; heads: string[]; centered?: number[]; children: React.ReactNode }) {
   return (
     <div className="overflow-hidden rounded-2xl bg-card shadow-card">
-      <div className={cn("grid items-center gap-4 px-7 pb-3 pt-5 text-sm text-muted-foreground", cols)}>{heads.map((h, i) => <span key={i}>{h}</span>)}</div>
+      <div className={cn("grid items-center gap-4 px-7 pb-3 pt-5 text-sm text-muted-foreground", cols)}>{heads.map((h, i) => <span key={i} className={cn(centered.includes(i) && "text-center")}>{h}</span>)}</div>
       <div className="divide-y border-t">{children}</div>
     </div>
   );
@@ -149,19 +149,19 @@ export default function Customers() {
 
           {tab === "focus" && (focusRows.length === 0 ? <Empty>해당하는 고객이 없습니다.</Empty> : (
             <>
-              <Table cols={FOCUS_COLS} heads={["고객", "등급", "사유", "지연", "대응 상태", ""]}>
+              <Table cols={FOCUS_COLS} heads={["고객", "등급", "건수", "지연", "대응 상태", ""]} centered={[1, 2, 3, 4]}>
                 {focusRows.slice((page - 1) * SIZE, page * SIZE).map(({ c }) => {
                   const r = primaryReason(c), x = r ? factParts(c, r) : null;
                   return (
                     <Row key={c.id} c={c} cols={FOCUS_COLS} onOpen={() => open(c)}>
                       <Who c={c} />
-                      <span><TierTag tier={c.tier} /></span>
-                      {x ? <span className="flex items-center gap-2 text-[15px]"><span className={cn("size-2 shrink-0 rounded-full", DOT[x.tone])} aria-hidden />{x.title}</span> : <span className="text-[15px] text-muted-foreground">직접 지정</span>}
-                      <span className="grid gap-1.5">
+                      <span className="flex justify-center"><TierTag tier={c.tier} /></span>
+                      {x ? <span className="flex items-center justify-center gap-2 text-[15px]"><span className={cn("size-2 shrink-0 rounded-full", DOT[x.tone])} aria-hidden /><span className="tabular-nums">{x.count}</span></span> : <span className="text-[15px] text-muted-foreground">직접 지정</span>}
+                      <span className="grid justify-items-center gap-1.5 text-center">
                         <span className={cn("text-[15px]", x?.tone === "severe" ? "font-medium text-destructive" : "text-muted-foreground")}>{x?.value ?? "—"}</span>
                         {r === "urgent" && x && (x.tone === "severe" || x.tone === "red") && <Gauge value={maxLate(c)} max={LATE_MAX} tone={x.tone === "severe" ? "bg-destructive/80" : "bg-destructive/45"} />}
                       </span>
-                      <span><CareTag status={st(c)} /></span>
+                      <span className="flex justify-center"><CareTag status={st(c)} /></span>
                       <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>{r && <CareButtons c={c} />}</div>
                     </Row>
                   );

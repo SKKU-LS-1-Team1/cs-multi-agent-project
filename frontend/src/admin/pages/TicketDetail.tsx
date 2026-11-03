@@ -13,7 +13,7 @@ import { Textarea } from "@admin/components/ui/textarea";
 import { AiMark, Facts, Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, StatusTag, Tag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import {
   answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, feedbackLabel, inquirySummary, isEdited,
-  canAssign, isNewAssignment, latestCustomerReply, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
+  canAssign, isNewAssignment, latestCustomerReply, pendingCustomerInfo, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
   requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
@@ -347,6 +347,7 @@ function RewriteBox({ t, busy }: { t: Ticket; busy: boolean }) {
   return (
     <section aria-label="AI에게 수정 요청" className="grid gap-3">
       <form className="flex items-center gap-3" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <AiMark />
         <Input aria-label="수정 지시" className="h-11 flex-1 rounded-full border-0 bg-muted/60 px-5 text-[15px]" disabled={busy} placeholder="AI에게 수정 요청 (예: 더 정중하게, 원인은 확정이 아니라고 분명히)" value={ask} onChange={(e) => setAsk(e.target.value)} />
         <Button type="submit" size="lg" variant="secondary" disabled={busy || !ask.trim()}>{busy ? "만드는 중…" : "다시 생성"}</Button>
       </form>
@@ -378,21 +379,23 @@ function ExpertEditor({ t }: { t: Ticket }) {
         const d = new FormData(e.currentTarget);
         submitExpertRequest(t, { department: String(d.get("department")), channel: String(d.get("channel")), body: t.expertDraft || "", files: checked });
       }}>
-        <div className="flex items-center justify-between"><h2 className="text-lg font-bold">전문부서 요청서 작성 · 한국어</h2><Button type="button" size="sm" variant="ghost" onClick={() => closeComposer(t)}>닫기</Button></div>
+        <div className="flex items-center justify-between"><h2 className="flex items-center gap-2.5 text-lg font-bold">{t.source === "api" && <AiMark />}전문부서 요청서 작성 · 한국어</h2><Button type="button" size="sm" variant="ghost" onClick={() => closeComposer(t)}>닫기</Button></div>
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">대상 부서</span>
             <NativeSelect disabled={t.specialistSaving || t.expertDraftLoading} name="department" value={t.expertDraftDepartment || expertDepartments[0]} onChange={(e) => { t.expertDraftDepartment = e.target.value; commit(); if (t.source === "api") void escalationDraftViaApi(t, e.target.value); }}>{expertDepartments.map((n) => <option key={n}>{n}</option>)}</NativeSelect></label>
           <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">전달 방식</span><NativeSelect disabled={t.specialistSaving} name="channel" defaultValue="이메일"><option>이메일</option><option>기업 메신저</option></NativeSelect></label>
         </div>
-        {t.expertDraftLoading && <small className="text-muted-foreground">AI가 요청서 초안을 쓰는 중이에요…</small>}
+        {t.expertDraftLoading && <small className="flex items-center gap-2 text-muted-foreground"><AiMark />AI가 요청서 초안을 쓰는 중이에요…</small>}
         <Textarea disabled={t.specialistSaving} aria-label="전문부서 요청서" required className="min-h-32 max-h-44 leading-relaxed" value={t.expertDraft || ""} onChange={(e) => { t.expertDraft = e.target.value; commit(); }} />
-        <fieldset className="grid gap-2 rounded-xl bg-background p-4"><legend className="px-1 text-sm text-muted-foreground">전달한 자료</legend>
+        <div role="group" aria-labelledby="expert-files-label" className="grid gap-1.5 text-sm"><span id="expert-files-label" className="text-muted-foreground">전달한 자료</span>
+          <div className="grid gap-2 rounded-xl border bg-background p-4">
           {files.length ? files.map((f) => (
             <label key={f} className="flex items-center gap-2 text-sm"><Checkbox checked={checked.includes(f)} onCheckedChange={(v) => { t.expertDraftFiles = v === true ? [...checked, f] : checked.filter((x) => x !== f); commit(); }} />{f}</label>
           )) : <small className="text-muted-foreground">등록된 첨부자료 없음</small>}
-        </fieldset>
+          </div>
+        </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" required className="size-4 accent-[var(--primary)]" />요청 내용과 전달 자료를 확인했습니다.</label>
-        <div className="flex items-center justify-between"><small className="text-muted-foreground">외부 전달 후 요청을 기록합니다.</small><Button type="submit" disabled={t.specialistSaving || t.expertDraftLoading}>{t.specialistSaving ? "저장 중…" : "검토 요청 기록"}</Button></div>
+        <div className="flex items-center justify-between"><small className="text-muted-foreground">외부 전달 후 요청을 기록합니다.</small><Button type="submit" disabled={t.specialistSaving || t.expertDraftLoading}>{t.specialistSaving ? "저장 중…" : "검토 요청"}</Button></div>
       </form>
     </Card>
   );
@@ -507,7 +510,7 @@ function Copilot({ t }: { t: Ticket }) {
               <div className="mt-5 grid gap-2.5">
                 {choice ? <>
                   {t.draft && t.composerOpen && next ? <Button className="w-full" disabled={next.waiting || t.regenerating} onClick={next.run}>{next.label}</Button> : null}
-                  {branches.filter((k) => !(t.draft && t.composerOpen && next && k === choice)).map((k, i) => <Button key={k} className="w-full" disabled={t.regenerating || t.expertDraftLoading} variant={i === 0 && !(t.draft && t.composerOpen && next) ? "default" : "outline"} onClick={BRANCH[k][1]}>{BRANCH[k][0]}</Button>)}
+                  {branches.filter((k) => !(t.draft && t.composerOpen && next && k === choice)).map((k, i) => <Button key={k} className="w-full" title={k === "expert" && pendingCustomerInfo(t) > 0 ? "고객 정보 확인이 끝나야 전문부서에 요청할 수 있습니다" : undefined} disabled={t.regenerating || t.expertDraftLoading || (k === "expert" && pendingCustomerInfo(t) > 0)} variant={i === 0 && !(t.draft && t.composerOpen && next) ? "default" : "outline"} onClick={BRANCH[k][1]}>{BRANCH[k][0]}</Button>)}
                 </>
                   : next && <Button className="w-full" disabled={next.waiting} variant={next.waiting ? "outline" : "default"} onClick={next.run}>{next.label}</Button>}
               </div>
