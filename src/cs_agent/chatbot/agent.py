@@ -507,7 +507,9 @@ def respond(
     candidates = first_pass(docs, None, query) if docs is not None else []
     if docs is not None and scope and not getattr(docs, "calibrated", False):
         candidates += first_pass(docs, None, f"{chat.message} {scope}")
-    evidence = finalize_evidence(candidates, quick, k=CHAT_EVIDENCE_K, category=category)
+    evidence = finalize_evidence(
+        candidates, quick, k=CHAT_EVIDENCE_K, category=category, query=query, llm=llm
+    )
     policy = doc_sections(POLICY_DOCS[category]) if category in POLICY_DOCS else []
 
     product_context = _product_context(quick, tables, whole_catalog=misnamed)

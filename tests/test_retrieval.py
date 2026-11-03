@@ -214,3 +214,106 @@ def test_pgvector_case_row_maps_db_columns() -> None:
     assert evidence.metadata["family"] == "DRIVE"
     assert evidence.metadata["reference_doc_id"] == "TG-INV-A"
     assert retriever._evidence({**row, "cited": []}).metadata["reference_doc_id"] == ""
+
+
+# reranker (CSA-81) ---------------------------------------------------------------------------
+
+
+class _RerankLLM:
+    """절 id 별 관련도를 정해 둔 판단 대역. model 을 'fake' 로 주면 LLM 꺼짐."""
+
+    def __init__(self, yes: dict[str, float], *, enabled=True, model="jev", fail=False):
+        self.settings = SimpleNamespace(rerank_enabled=enabled, rerank_weight=0.5)
+        self.yes, self.model, self.fail = yes, model, fail
+        self.calls: list[str] = []
+
+    def judge(self, task, prompt, options):
+        from cs_agent.llm.clients import Judgement
+
+        if self.fail:
+            raise RuntimeError("timeout")
+        self.calls.append(task)
+        doc = next(d for d in self.yes if f"Section: {d} " in prompt)
+        p = self.yes[doc]
+        return Judgement("yes" if p >= 0.5 else "no", p if p >= 0.5 else 1 - p, self.model)
+
+
+RERANK_CANDIDATES = [
+    _doc("DS-INV-A", "2.1", 0.80, doc_type="DS", product_code="INV-A", family="DRIVE"),
+    _doc("DS-INV-A", "4.2", 0.75, doc_type="DS", product_code="INV-A", family="DRIVE"),
+    _doc("DS-INV-A", "5.1", 0.70, doc_type="DS", product_code="INV-A", family="DRIVE"),
+    _doc("DS-INV-A", "6.3", 0.60, doc_type="DS", product_code="INV-A", family="DRIVE"),
+]
+RERANK_YES = {"DS-INV-A 2.1": 0.1, "DS-INV-A 4.2": 0.2, "DS-INV-A 5.1": 0.3, "DS-INV-A 6.3": 0.95}
+EXTRACTION = Extraction(product_code="INV-A", product_family="DRIVE")
+
+
+def _sections(result):
+    return [e.section for e in result if e.source == "docs"]
+
+
+def test_rerank_lifts_relevant_section_into_top3() -> None:
+    llm = _RerankLLM(RERANK_YES)
+
+    before = finalize_evidence(RERANK_CANDIDATES, EXTRACTION, k=3, query="IP rating?")
+    after = finalize_evidence(RERANK_CANDIDATES, EXTRACTION, k=3, query="IP rating?", llm=llm)
+
+    assert _sections(before) == ["2.1", "4.2", "5.1"]
+    assert _sections(after)[0] == "6.3"
+    assert after[0].metadata["rerank"] == "0.950"
+    assert llm.calls == ["rerank"] * 4
+
+
+def test_rerank_keeps_exact_error_code_section_on_top() -> None:
+    title = "3.1. E.OC — Over-current"
+    candidates = [
+        *RERANK_CANDIDATES,
+        _doc("TG-INV-A", "3.1", 0.2, doc_type="TG", product_code="INV-A", title=title),
+    ]
+    yes = {**RERANK_YES, "TG-INV-A 3.1": 0.0}
+    extraction = Extraction(product_code="INV-A", error_code="E.OC")
+
+    result = finalize_evidence(
+        candidates, extraction, k=3, category=Category.DEFECT, query="E.OC", llm=_RerankLLM(yes)
+    )
+
+    assert [(e.doc_id, e.section) for e in result][:2] == [("TG-INV-A", "3.1"), ("DS-INV-A", "6.3")]
+
+
+@pytest.mark.parametrize(
+    "llm",
+    [
+        None,
+        _RerankLLM(RERANK_YES, enabled=False),
+        _RerankLLM(RERANK_YES, model="fake"),
+        _RerankLLM(RERANK_YES, fail=True),
+    ],
+    ids=["no-router", "disabled", "llm-off", "judge-fails"],
+)
+def test_rerank_falls_back_to_rule_order(llm) -> None:
+    result = finalize_evidence(RERANK_CANDIDATES, EXTRACTION, k=3, query="IP rating?", llm=llm)
+
+    assert _sections(result) == ["2.1", "4.2", "5.1"]
+
+
+def test_measure_rerank_compares_off_and_on() -> None:
+    from cs_agent.agents.retrieval import measure_rerank
+
+    row = {
+        "reference_doc_id": "DS-INV-A",
+        "reference_section": "6.3",
+        "inquiry_subject": "IP rating",
+        "inquiry_body": "What is the enclosure rating?",
+        "product_code": "INV-A",
+        "product_family": "DRIVE",
+        "error_code_reported": "",
+        "category_code": "TECH_SPEC",
+    }
+
+    class Fixed:
+        def search(self, query, k, where=None):
+            return list(RERANK_CANDIDATES)
+
+    result = measure_rerank([row], Fixed(), None, _RerankLLM(RERANK_YES), weights=(0.5,))
+
+    assert (result["base"], result["pool"], result["rerank"][0.5]) == (0, 1, 1)

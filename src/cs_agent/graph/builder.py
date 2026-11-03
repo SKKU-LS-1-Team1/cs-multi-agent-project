@@ -337,14 +337,17 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         # 지식 그래프는 문의 글로 증상을 비교한다 (켜져 있을 때만 넘긴다 — 주입한 대역의 규격 유지)
         graph = {}
         if deps.graph is not None:
-            graph = {"graph": deps.graph, "query": _inquiry_text(state)}
+            graph = {"graph": deps.graph}
         return {
             "candidates": candidates,
             "information_review_refresh": False,
+            # reranker 는 문의 글로 절의 관련도를 본다 (CSA-81, RERANK_ENABLED · LLM 꺼지면 생략)
             "evidence": deps.finalize_evidence(
                 candidates,
                 state["extraction"],
                 category=state["classification"].category,
+                query=_inquiry_text(state),
+                llm=deps.llm,
                 **graph,
             ),
         }
