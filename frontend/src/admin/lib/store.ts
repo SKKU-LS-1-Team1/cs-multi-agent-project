@@ -24,6 +24,8 @@ export const ui = {
   priority: "",
   product: "",
   listOwner: "",
+  step: "", // 문의 목록의 처리 단계 필터(단계 이름, 빈 값 = 전체)
+  channel: "", // 문의 목록의 접수 경로 필터(WEB_FORM 등, 빈 값 = 전체)
   riskOnly: false, // 업무 현황의 "SLA 위험"에서 들어온 경우: 위험 문의만 보여 준다
   queueScope: "내 담당",
   tab: "문의·답변",

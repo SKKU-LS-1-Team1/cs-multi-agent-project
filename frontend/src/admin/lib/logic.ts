@@ -158,6 +158,10 @@ export const ticketProgress = (t: Ticket) => (t.stage === 5 ? "완료" : t.owner
 /** 담당자가 아직 열어 보지 않은 고객 회신 수. 문의 상세를 열면 읽음 처리된다. */
 export const unreadReplies = (t: Ticket) =>
   t.stage === 5 ? 0 : t.events.filter((e) => ["customer", "customer-followup"].includes(e.kind) && (!t.seenAt || (e.createdAt && e.createdAt > t.seenAt))).length;
+/** 담당자가 마지막으로 바뀐(배정·인수된) 시각. 배정 이력이 없으면 빈 값. */
+export const lastAssignedAt = (t: Ticket): string => t.events.filter((e) => e.kind === "assignment").map((e) => e.createdAt || "").sort().at(-1) || "";
+/** 내가 새로 배정받았거나 중간에 인수했는데 아직 열어 보지 않은 문의(목록의 N 표시). 문의 상세를 열면 사라진다. */
+export const isNewAssignment = (t: Ticket): boolean => t.stage !== 5 && !!t.owner && t.owner === signedIn && !!lastAssignedAt(t) && lastAssignedAt(t) > (t.seenAt || "");
 export const latestCustomerReply = (t: Ticket): Ev | undefined => t.events.findLast((e) => ["customer", "customer-followup"].includes(e.kind));
 export const sourceInquiry = (t: Ticket) => t.body || (t.source !== "api" && t.id === "CSV1-000050" ? "The iS7 75kW trips with E.OC immediately at run command. Restarting did not resolve the issue." : t.title);
 

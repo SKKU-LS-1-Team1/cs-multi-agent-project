@@ -16,6 +16,8 @@ export const CASE_GROUPS: [string, string, string[]][] = [
 ];
 /** 문의 유형 코드가 속한 분류 키("" = 어디에도 없음). */
 export const groupOfCategory = (code: string): string => CASE_GROUPS.find(([, , codes]) => codes.includes(code))?.[0] || "";
+/** 문의가 들어온 경로(서버 channel 값). */
+export const CHANNEL_KO: Record<string, string> = { WEB_FORM: "웹 문의", EMAIL: "메일", CHAT: "챗봇", PARTNER_PORTAL: "파트너 포털", PHONE: "전화" };
 export const PRIORITY_KO: Record<string, string> = { P1: "위급", P2: "높음", P3: "보통", P4: "낮음" };
 export const STATUS_KO: Record<string, string> = { CLOSED: "종료", RESOLVED: "해결", IN_PROGRESS: "진행 중", ESCALATED: "이관", WAITING_CUSTOMER: "고객 회신 대기", NEW: "신규", READY_FOR_REVIEW: "답변 검토", ON_HOLD: "보류", HUMAN_QUEUE: "사람 검토", ANALYSIS_PENDING: "분석 대기", APPROVED: "답변 발송", REJECTED: "반려" };
 
