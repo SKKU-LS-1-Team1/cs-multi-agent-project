@@ -7,6 +7,15 @@ export type { Customer };
 export const SEGMENT_KO: Record<string, string> = { DISTRIBUTOR: "유통사", EPC: "EPC", END_USER: "최종 사용자", PANEL_BUILDER: "판넬 제작사", SYSTEM_INTEGRATOR: "시스템 통합사", UTILITY: "전력사" };
 export const CATEGORY_KO: Record<string, string> = { TECH_SPEC: "기술 사양", DEFECT: "불량", INSTALL: "설치", MANUAL: "매뉴얼", FW_UPDATE: "펌웨어", COMPLIANCE: "인증", ORDER_LEAD: "납기", RETURN: "반품", QUOTE: "견적", WARRANTY: "보증" };
 export const FAMILY_KO: Record<string, string> = { DRIVE: "인버터", PLC: "PLC", HMI: "HMI", LV_BREAKER: "저압 차단기", MV_EQUIP: "고압 설비", TRANSFORMER: "변압기", METER: "계량기", ESS: "ESS", PV: "태양광", UPS: "UPS", CONTROL: "제어" };
+/** 고객 화면의 4개 분류에 문의 유형(백엔드 category 코드)을 묶는다. 해결 사례 분류·업무 메일 유형 선택이 함께 쓴다. */
+export const CASE_GROUPS: [string, string, string[]][] = [
+  ["FAULT", "제품 고장", ["DEFECT"]],
+  ["INSTALL", "설치·사용", ["INSTALL", "FW_UPDATE"]],
+  ["INFO", "제품 정보·자료", ["TECH_SPEC", "MANUAL", "COMPLIANCE"]],
+  ["ORDER", "보증·주문·견적", ["WARRANTY", "RETURN", "ORDER_LEAD", "QUOTE"]],
+];
+/** 문의 유형 코드가 속한 분류 키("" = 어디에도 없음). */
+export const groupOfCategory = (code: string): string => CASE_GROUPS.find(([, , codes]) => codes.includes(code))?.[0] || "";
 export const PRIORITY_KO: Record<string, string> = { P1: "위급", P2: "높음", P3: "보통", P4: "낮음" };
 export const STATUS_KO: Record<string, string> = { CLOSED: "종료", RESOLVED: "해결", IN_PROGRESS: "진행 중", ESCALATED: "이관", WAITING_CUSTOMER: "고객 회신 대기", NEW: "신규", READY_FOR_REVIEW: "답변 검토", ON_HOLD: "보류", HUMAN_QUEUE: "사람 검토", ANALYSIS_PENDING: "분석 대기", APPROVED: "답변 발송", REJECTED: "반려" };
 
