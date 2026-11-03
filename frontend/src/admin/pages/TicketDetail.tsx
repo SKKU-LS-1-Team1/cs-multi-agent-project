@@ -3,7 +3,7 @@ import { investigationTask, copilotPresentation, referralSuggestions } from "@ad
 // 문의 상세: 대기열 · 문의 요약 · 처리 상황 · 문의·답변/처리 이력/고객·제품 정보 · AI Copilot.
 import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
-import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Headset, Image as ImageIcon, Paperclip, Send, User, type LucideIcon } from "lucide-react";
+import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Headset, Image as ImageIcon, Link2, Paperclip, Send, User, type LucideIcon } from "lucide-react";
 import { FAMILY_KO } from "@admin/lib/customers";
 import { Button, buttonVariants } from "@admin/components/ui/button";
 import { Card } from "@admin/components/ui/card";
@@ -18,12 +18,13 @@ import {
 import {
   requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, openExpertReview, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
-import { loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
+import { rewriteViaApi, loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { flowSteps, type Step, type StepState } from "@admin/lib/flow-steps";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
 import { api, type InquiryAttachment } from "../../api/client";
+import { FollowupEvidence } from "../components/admin/FollowupEvidence";
 
 type Choice = "answer" | "expert" | "request";
 const SAMPLE = "CSV1-000050";
@@ -53,6 +54,7 @@ export default function TicketDetail() {
         {/* 제목·진행 단계·탭은 스크롤해도 맨 위에 고정된다 */}
         <div className="sticky top-0 z-20 -mx-12 grid gap-6 bg-background px-12 pb-1 pt-10">
           <Header t={t} />
+          <FollowupLink key={t.id} t={t} />
           <Progress t={t} />
           <UnderlineTabs tabs={DETAIL_TABS} value={ui.tab as (typeof DETAIL_TABS)[number][0]} onChange={(v) => setUi({ tab: v })} />
         </div>
@@ -61,6 +63,26 @@ export default function TicketDetail() {
       <Copilot t={t} />
     </div>
   );
+}
+
+function FollowupLink({ t }: { t: Ticket }) {
+  const go = useGo();
+  const link = t.followupLink;
+  if ((!link || link.dismissed) && !t.followupContextStale) return null;
+  return <section aria-label="후속 문의 연결" className="min-w-0 rounded-2xl border border-info/50 bg-info/5 p-5 text-foreground shadow-card">
+    {link && !link.dismissed && <div className="flex flex-wrap items-center gap-5">
+      <div className="flex min-w-0 flex-1 items-start gap-3.5">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-info/10 text-info"><Link2 className="size-5" aria-hidden="true" /></span>
+        <div className="min-w-0 [overflow-wrap:anywhere]">
+          <h2 className="text-base font-semibold">이전 문의에서 이어진 후속 문의</h2>
+          <p className="mt-2 text-base font-semibold">{link.previous_subject || "이전 문의"}</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{link.previous_ticket_id}</p>
+        </div>
+      </div>
+      <Button variant="outline" size="sm" className="shrink-0 bg-card text-foreground" onClick={() => go.ticket(link.previous_ticket_id)}>이전 문의 보기<ArrowRight className="size-4" aria-hidden="true" /></Button>
+    </div>}
+    {t.followupContextStale && <div className="grid gap-2"><p role="status" className="text-sm text-amber-700">이전 문의 연결이 해제되었습니다. 답변 초안을 재작성한 뒤 발송해 주세요.</p><Button variant="outline" size="sm" className="w-fit bg-card text-foreground" disabled={t.regenerating} onClick={() => void rewriteViaApi(t, "이전 문의 연결을 제외하고 현재 문의와 확인된 근거로 다시 작성해 주세요.", "answer")}>답변 초안 재작성</Button></div>}
+  </section>;
 }
 
 function evidenceCount(t: Ticket) {
@@ -339,7 +361,7 @@ function Editor({ t }: { t: Ticket }) {
           {hasCurrentReplyPreview(t) ? (
             <Button size="lg" className="px-6" disabled={!canSend(t) || busy} onClick={() => canSend(t) && openModal("send", { id: t.id })}>발송하기</Button>
           ) : (
-            <Button variant="outline" size="lg" disabled={busy || t.translatingReply} onClick={() => void prepareCustomerReply(t)}>{t.translatingReply ? "변환 중…" : "고객 언어로 변환"}</Button>
+            <Button variant="outline" size="lg" disabled={busy || t.translatingReply || (!isRequestDraft && t.followupContextStale)} onClick={() => void prepareCustomerReply(t)}>{t.translatingReply ? "변환 중…" : "고객 언어로 변환"}</Button>
           )}
         </div>}
       </div>
@@ -526,6 +548,11 @@ function Copilot({ t }: { t: Ticket }) {
             )}
           </div>
         </PanelBlock>
+        {t.followupLink && !t.followupLink.dismissed && (
+          <PanelBlock icon={BookOpen} tone="info" title="이전 문의와의 연결 근거">
+            <FollowupEvidence link={t.followupLink} />
+          </PanelBlock>
+        )}
         {requestRows.length > 0 && (
           <PanelBlock icon={Paperclip} tone="info" title={presentation.reasonTitle}>
             <RequestChecklist rows={requestRows} data={insight.data} />

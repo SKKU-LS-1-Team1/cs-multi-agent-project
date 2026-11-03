@@ -103,6 +103,12 @@ def get_ticket(ticket_id: str, tickets: Tickets) -> TicketOut:
         return tickets.get(ticket_id)
 
 
+@router.post("/{ticket_id}/followup/unlink", response_model=TicketOut)
+def unlink_followup(ticket_id: str, tickets: Tickets) -> TicketOut:
+    with _errors():
+        return tickets.unlink_followup(ticket_id)
+
+
 @router.post("/{ticket_id}/copilot")
 def refresh_copilot(ticket_id: str, tickets: Tickets, llm: LLM) -> dict:
     with _errors():

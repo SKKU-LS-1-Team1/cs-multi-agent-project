@@ -231,7 +231,11 @@ class LLMRouter:
         )
 
     def _writer_for(self, task: str) -> Writer:
-        if task == "admin_copilot" and self.enabled and isinstance(self.writer, GeminiClient):
+        if (
+            task in {"admin_copilot", "customer_followup"}
+            and self.enabled
+            and isinstance(self.writer, GeminiClient)
+        ):
             if not hasattr(self, "copilot_writer"):
                 self.copilot_writer = GeminiClient(
                     self.settings.gemini_api_key,

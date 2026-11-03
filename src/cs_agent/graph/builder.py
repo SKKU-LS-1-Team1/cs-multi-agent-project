@@ -150,6 +150,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         return {
             "status": TicketStatus.NEW,
             "manual_reply": False,
+            "followup_context_stale": False,
             "reply_preview": None,
             "retries": 0,
             "review_rounds": 0,
@@ -378,6 +379,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 tables=deps.tables,
                 secondary_category=state["classification"].secondary_category,
                 specialist_replies=state.get("specialist_replies", []),
+                followup_link=state.get("followup_link"),
             )
             # 재작성 때 이전 회신 근거를 누적하지 않고 최신 저장값으로 다시 구성한다.
             evidence = [e for e in evidence if e.source != "specialist"]
@@ -411,6 +413,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         retries = state.get("retries", 0) + (1 if state.get("fix_notes") else 0)
         return {
             "draft": result,
+            "followup_context_stale": False,
             "info_request": None,
             "info_request_fields": [],
             "draft_specialist_revision": state.get("specialist_revision", 0),

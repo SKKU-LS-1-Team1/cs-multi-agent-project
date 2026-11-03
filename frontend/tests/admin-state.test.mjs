@@ -6,13 +6,15 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 import ts from 'typescript';
+import * as jsxRuntime from 'react/jsx-runtime';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const noop = () => {};
 const toast = Object.assign(noop, { error: noop });
 function load(file, imports, globals = {}) {
   const exports = {};
   const code = ts.transpileModule(fs.readFileSync(new URL(`../src/admin/${file}`, import.meta.url), 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   vm.runInNewContext(code, { exports, require: id => {
     if (id === "./investigation") return load("lib/investigation.ts", {});
@@ -837,6 +839,14 @@ for (const source of ['api', 'local']) {
     assert.equal(actions.canSend(t), false);
     actions.setReviewed(t, true);
     assert.equal(actions.canSend(t), true);
+    t.followupContextStale = true;
+    assert.equal(actions.canSend(t), false);
+    assert.equal(await actions.prepareCustomerReply(t), false);
+    t.purpose = 'request'; t.apiInfoRequest = true;
+    // A dismissed answer relationship must not block an independent information request.
+    setPreview(mod, t); t.reviewed = true;
+    assert.equal(actions.canSend(t), true);
+    t.purpose = 'answer'; t.apiInfoRequest = false; t.followupContextStale = false;
     actions.editDraft(t, 'Changed English draft');
     assert.equal(t.reviewed, false);
     assert.equal(mod.hasCurrentReplyPreview(t), false);
@@ -884,6 +894,7 @@ const actionableTicket = (extra = {}) => ({ ...ticket(), owner: 'tester', analys
 
 test('dashboard and detail prioritize the same stale information/customer/specialist draft', () => {
   for (const [extra, label] of [
+    [{ followupContextStale: true }, '답변 초안 재작성'],
     [{ informationReviewedAt: 'new' }, '확인된 자료 반영해 재작성'],
     [{ customerRevision: 2, draftCustomerRevision: 1 }, '최신 고객 회신 반영해 재작성'],
     [{ specialistRevision: 2, draftSpecialistRevision: 1 }, '전문부서 회신 반영해 재작성'],
@@ -1377,4 +1388,38 @@ test('normal answer, unsent referral and unanswered referral keep existing steps
   const pending = currentStep({ ...normal, specialistRequests: [{ reply: null }] });
   assert.equal(pending.label, '전문부서');
   assert.equal(pending.waiting, true);
+});
+
+test('follow-up relationship survives projection and a stale poll cannot restore a dismissed link', () => {
+  const { mod } = apiFixture();
+  const link = { previous_ticket_id: 'T-OLD', previous_subject: 'Previous issue', reason: '이전 조치 후 재문의', dismissed: false };
+  const t = mod.apply(undefined, apiRow({ followup_link: link }));
+  assert.equal(t.followupLink.previous_ticket_id, 'T-OLD');
+  setPreview(mod, t); t.reviewed = true;
+  assert.equal(mod.hasCurrentReplyPreview(t), true);
+  mod.apply(t, apiRow({ followup_link: { ...link, dismissed: true }, followup_context_stale: true }));
+  assert.equal(t.followupContextStale, true);
+  assert.equal(mod.hasCurrentReplyPreview(t), false);
+  assert.equal(t.reviewed, false);
+  mod.apply(t, apiRow({ followup_link: link, followup_context_stale: false }));
+  assert.equal(t.followupLink.dismissed, true);
+  assert.equal(t.followupContextStale, true);
+  mod.apply(t, apiRow({ followup_link: { ...link, dismissed: true }, followup_context_stale: false }));
+  assert.equal(t.followupContextStale, false);
+});
+
+test('follow-up evidence keeps reasoning visible and only folds deduplicated, escaped source quotes', () => {
+  const { FollowupEvidence } = load('components/admin/FollowupEvidence.tsx', { 'react/jsx-runtime': jsxRuntime });
+  const previous = { source_id: 'T-OLD/sent:0', quote: 'Previous answer <script>bad()</script>' };
+  const link = { previous_ticket_id: 'T-OLD', reason: '연결 이유 내용', new_information: '새 정보 내용',
+    references: [previous, { source_id: 'current', quote: 'Current customer statement' }],
+    previous_response: { text: '이전 대응 내용', references: [previous] } };
+  const html = renderToStaticMarkup(jsxRuntime.jsx(FollowupEvidence, { link }));
+  const detailStart = html.indexOf('<details');
+  for (const text of ['연결 이유 내용', '새 정보 내용', '이전 대응 내용']) assert.ok(html.indexOf(text) < detailStart);
+  assert.equal((html.match(/Previous answer/g) || []).length, 1);
+  assert.ok(html.indexOf('Current customer statement') > detailStart);
+  assert.ok(!html.includes('<script>') && !html.includes('<details open'));
+  assert.equal(renderToStaticMarkup(jsxRuntime.jsx(FollowupEvidence, { link: { ...link, dismissed: true } })), '');
+  assert.equal(renderToStaticMarkup(jsxRuntime.jsx(FollowupEvidence, {})), '');
 });

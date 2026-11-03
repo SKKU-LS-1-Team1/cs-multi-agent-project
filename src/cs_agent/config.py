@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     # (같은 뜻 한·영 유사도 0.744 → 0.749, 품질 차이 없음).
     embedding_model: str = "gemini-embedding-2"
     embedding_dim: int = 1536
+    web_demo_customer_id: str = "CUST-0557"  # Single demo profile, not customer authentication
+    customer_history_enabled: bool = True  # live + DB only; background indexing
 
     # Langfuse (CSA-48)
     langfuse_public_key: str = ""

@@ -112,12 +112,14 @@ class TicketService:
         *,
         escalation_writer: Callable[..., EscalationRequest] | None = None,
         specialist_reader: Callable | None = None,
+        history_matcher: Callable | None = None,
     ) -> None:
         self.graph = graph
         self.records = records if records is not None else MemoryRecords()
         self.roster = list(roster or [])  # 담당자 명단 (data/ref/agents.csv). 비면 배정 안 함
         self.escalation_writer = escalation_writer
         self.specialist_reader = specialist_reader
+        self.history_matcher = history_matcher
 
     @staticmethod
     def _config(ticket_id: str) -> dict:
@@ -184,7 +186,7 @@ class TicketService:
         self._state(ticket_id)  # 없는 문의면 TicketNotFound
         return self.records.assignments(ticket_id)
 
-    def submit(self, inquiry: InquiryIn) -> TicketOut:
+    def submit(self, inquiry: InquiryIn, *, match_history: bool = True) -> TicketOut:
         if inquiry.thread_ref and (existing := self.records.find_thread(inquiry.thread_ref)):
             return self.reply(existing, inquiry)
         if not inquiry.language:  # 웹 문의서는 언어를 보내지 않는다 → 회신이 영어로 나가지 않게
@@ -193,12 +195,25 @@ class TicketService:
             )
         ticket_id = f"T-{uuid.uuid4().hex[:12].upper()}"
         self.records.add_ticket(ticket_id, inquiry)
+        link = None
+        if match_history and self.history_matcher and inquiry.customer_id:
+            try:
+                with ticket_scope(ticket_id):
+                    link = self.history_matcher(ticket_id, inquiry)
+            except Exception:
+                # Optional relationship must never block intake or overwrite analysis.
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Customer history unavailable for %s", ticket_id
+                )
         self._run(
             ticket_id,
             {
                 "ticket_id": ticket_id,
                 "inquiry": inquiry,
                 "followups": 0,
+                "followup_link": link,
                 "customer_messages": [self._customer_message(inquiry, "initial")],
                 "customer_revision": 0,
             },
@@ -702,6 +717,8 @@ class TicketService:
         if "review" not in snapshot.next:
             raise InvalidAction("상담원 검토 대기 상태에서만 변환할 수 있습니다")
         state = snapshot.values
+        if state.get("followup_context_stale") and state.get("pending") == "draft":
+            raise InvalidAction("이전 문의 연결이 해제되었습니다. 답변 초안을 재작성해 주세요")
         if state.get("pending") != "info_request":
             self._require_confirmed_investigation(ticket_id)
         previous = state.get("reply_preview") or {}
@@ -731,6 +748,15 @@ class TicketService:
 
     @_serialized
     def act(self, ticket_id: str, review: ReviewIn) -> TicketOut:
+        current = self._state(ticket_id).values
+        if (
+            current.get("followup_context_stale")
+            and current.get("pending") == "draft"
+            and review.action in {ReviewAction.APPROVE, ReviewAction.EDIT_APPROVE}
+        ):
+            raise InvalidAction(
+                "이전 문의 연결이 해제되었습니다. 답변 초안을 재작성한 뒤 진행해 주세요"
+            )
         if review.draft_purpose is not None and review.action != ReviewAction.REWRITE:
             raise InvalidAction("작성 대상은 재작성 요청에서만 지정할 수 있습니다")
         if review.acknowledged_failures and not review.reviewer.strip():
@@ -937,6 +963,26 @@ class TicketService:
             self.records.save_state(ticket_id, self._state(ticket_id).values)
         return copilot.view(self._state(ticket_id).values, tables)
 
+    @_serialized
+    def unlink_followup(self, ticket_id: str) -> TicketOut:
+        state = self._state(ticket_id).values
+        link = state.get("followup_link")
+        if not link or link.get("dismissed"):
+            return self.get(ticket_id)
+        updates = {
+            "followup_link": {**link, "dismissed": True},
+            "followup_context_stale": bool(state.get("draft"))
+            and not state.get("manual_reply")
+            and state.get("status") not in CLOSED,
+            "reply_preview": None,
+            "approval_checks_key": None,
+            "copilot_insight": None,
+            "escalation_request": None,
+        }
+        self.graph.update_state(self._config(ticket_id), updates)
+        self.records.save_state(ticket_id, self._state(ticket_id).values)
+        return self.get(ticket_id)
+
     def get(self, ticket_id: str) -> TicketOut:
         v = self._state(ticket_id).values
         rules = v.get("rules")
@@ -954,6 +1000,8 @@ class TicketService:
 
         return TicketOut(
             copilot=copilot.view(v, load_tables()),
+            followup_link=v.get("followup_link"),
+            followup_context_stale=v.get("followup_context_stale", False),
             ticket_id=ticket_id,
             inquiry=v.get("inquiry"),
             body_ko=v.get("body_ko"),

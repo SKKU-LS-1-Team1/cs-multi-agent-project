@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from cs_agent.api.deps import Attachments, Tickets
+from cs_agent.config import get_settings
 from cs_agent.domain import TicketStatus
 from cs_agent.schemas import InquiryIn, TicketOut
 from cs_agent.services.attachments import (
@@ -65,7 +66,15 @@ class CustomerInquiry(BaseModel):
 
 @router.post("", response_model=CustomerInquiry, status_code=201)
 def submit_inquiry(inquiry: InquiryIn, tickets: Tickets) -> CustomerInquiry:
-    return _customer_view(tickets.submit(inquiry))
+    # The current portal uses one explicit demo profile. Never let an arbitrary client ID
+    # select another customer's history. Replace this boundary with authenticated identity
+    # when a real multi-customer login is introduced; do not infer identity from body/email.
+    customer_id = get_settings().web_demo_customer_id
+    supplied_id = (inquiry.customer_id or "").strip()
+    if supplied_id and supplied_id != customer_id:
+        raise HTTPException(400, "시연 고객 프로필과 서버의 고객 ID 설정이 다릅니다")
+    inquiry = inquiry.model_copy(update={"customer_id": customer_id or None})
+    return _customer_view(tickets.submit(inquiry, match_history=bool(customer_id)))
 
 
 @router.get("/{ticket_id}", response_model=CustomerInquiry)

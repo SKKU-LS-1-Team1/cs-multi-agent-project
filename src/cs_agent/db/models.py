@@ -70,6 +70,7 @@ class Ticket(Base):
     subject: Mapped[str] = mapped_column(Text, default="")
     body: Mapped[str] = mapped_column(Text)
     resolution: Mapped[dict | None] = mapped_column(JSONB)
+    followup_link: Mapped[dict | None] = mapped_column(JSONB)
     body_ko: Mapped[str | None] = mapped_column(Text)  # 상담원 표시용 원문 번역 (CSA-57)
     provided_fields: Mapped[dict] = mapped_column(JSONB, default=dict)  # 문의서에서 고객이 채운 값
     thread_ref: Mapped[str | None] = mapped_column(String(128))  # 후속 문의 연결 키
@@ -124,6 +125,7 @@ class Ticket(Base):
         Index("ix_tickets_status_dept", "status", "assigned_dept"),  # 작업 목록·부서 대시보드
         Index("ix_tickets_received_at", "received_at"),
         Index("ix_tickets_thread_ref", "thread_ref"),
+        Index("ix_tickets_customer_received", "customer_id", "received_at"),
         Index("ix_tickets_assignee_status", "assignee", "status"),  # 담당자별 열린 건수 (배정)
     )
 
@@ -343,3 +345,20 @@ class DocChunk(_Timestamps, Base):
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
     )
+
+
+class InquiryHistoryChunk(Base):
+    """Customer-scoped search projection; never a verified solution or source of ticket state."""
+
+    __tablename__ = "inquiry_history_chunks"
+    ticket_id: Mapped[str] = mapped_column(
+        ForeignKey("tickets.ticket_id", ondelete="CASCADE"), primary_key=True
+    )
+    source_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    customer_id: Mapped[str] = mapped_column(String(64))
+    text: Mapped[str] = mapped_column(Text)
+    text_hash: Mapped[str] = mapped_column(String(64))
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_version: Mapped[str] = mapped_column(String(160))
+    indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index("ix_history_customer_ticket", "customer_id", "ticket_id"),)
