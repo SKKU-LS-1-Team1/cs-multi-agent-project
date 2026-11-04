@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { familyImage, getFamily, getProduct, issuePool } from '../lib/catalog.js'
+import { familyImage, getFamily, getProduct, issuePool, productImage } from '../lib/catalog.js'
 import { STEPS, customer, dept } from '../lib/inquiry.js'
 import { LEGACY_TYPE } from '../lib/legacy.js'
 import {
@@ -144,7 +144,7 @@ function Receipt({ s, fields, route, onExit, onOpenMine }) {
           <h3>접수 내용</h3>
           {fam && (
             <div className="rcpt-prod">
-              {familyImage(fam.id) && <img src={familyImage(fam.id)} alt="" />}
+              {(productImage(t.product_code) ?? familyImage(fam.id)) && <img src={productImage(t.product_code) ?? familyImage(fam.id)} alt="" />}
               <div><small>{fam.name}</small><b>{t.product_code ? t.product_name : '모델 미확인'}</b>{t.product_code && <code>{t.product_code}</code>}</div>
               <span className="rcpt-type">{TYPE_NAME[s.type]}</span>
             </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { familyImage, getFamily, getProduct, products } from '../lib/catalog.js'
+import { getFamily, getProduct, productImage, products } from '../lib/catalog.js'
 import MediaAttach from './MediaAttach.jsx'
 import { hasLegacy, legacyDraft } from '../lib/legacy.js'
 import FamilyCarousel from './FamilyCarousel.jsx'
@@ -64,8 +64,10 @@ export function FamilyStep({ s, pick, title = '어떤 제품에 문제가 생겼
 }
 
 // 올린 QR·사진으로 모델을 찾는다 (ModelStep·FamilyStep 공용). candidates = 찾을 수 있는 모델 코드 목록.
-// QR: 읽은 글자에 들어 있는 모델 코드. 사진: 시연용 — 실제 인식 모델이 없어서 올린 사진(이름·크기)으로 candidates 중 하나를 고정해서 고른다.
+// QR: 읽은 글자에 들어 있는 모델 코드. 사진: 시연용 — 실제 인식 모델이 없어서, 찾을 수 있는 모델에 MCCB 100AF(PHOTO_MODEL)가 있으면
+// 늘 그 모델로 연동하고, 없으면(다른 제품군의 모델 단계) 올린 사진(이름·크기)으로 candidates 중 하나를 고정해서 고른다.
 // 같은 사진은 늘 같은 모델이 나오고, 잠깐 "확인 중"을 보여 준 뒤 결과를 낸다.
+const PHOTO_MODEL = 'MCCB-ABS-103c'
 function useIdentify(list, candidates) {
   const found = [...new Set(list.filter((x) => x.kind === 'qr' && x.qr?.status === 'read').map((x) => modelFromQr(x.qr.text)).filter(Boolean))]
   const photo = list.filter((x) => x.kind === 'photo').at(-1)
@@ -75,7 +77,7 @@ function useIdentify(list, candidates) {
     const t = setTimeout(() => setSeen(photo.id), 1200)
     return () => clearTimeout(t)
   }, [photo?.id]) // eslint-disable-line
-  const guess = photo && photo.id === seen ? candidates[[...`${photo.file.name}${photo.file.size}`].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % candidates.length] : null
+  const guess = !(photo && photo.id === seen) ? null : candidates.includes(PHOTO_MODEL) ? PHOTO_MODEL : candidates[[...`${photo.file.name}${photo.file.size}`].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % candidates.length]
   return { found, guess, checking: !!photo && !guess }
 }
 
@@ -90,7 +92,7 @@ function FoundCard({ code, by, note, onPick, family = false }) {
   const p = getProduct(code)
   return (
     <div className="found" role="status">
-      <img src={familyImage(p.family)} alt="" />
+      <img src={productImage(code)} alt="" />
       <div className="found-t">
         <small>{by}{note && <i>{note}</i>}</small>
         <b>{p.name}</b>
