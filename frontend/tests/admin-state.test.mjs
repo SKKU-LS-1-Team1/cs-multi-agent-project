@@ -1341,7 +1341,7 @@ function specialistStepsFixture() {
 test('received specialist conclusion stays at specialist review despite an older answer draft', () => {
   const { currentStep, flowSteps, t } = specialistStepsFixture();
   assert.equal(currentStep(t).label, '전문부서');
-  assert.equal(currentStep(t).index, 3);
+  assert.equal(currentStep(t).index, 2);
   assert.equal(flowSteps(t).find(s => s.key === 'expert').sub, '전문부서 검토 결과 도착');
   assert.equal(flowSteps(t).find(s => s.key === 'answer').state, 'todo');
 });
@@ -1356,9 +1356,9 @@ test('failed or uncertain specialist reading is not treated as completed', () =>
 test('pending customer information keeps main priority over specialist review or request writing', () => {
   const { currentStep, t } = specialistStepsFixture();
   const missing = { ...t, requiredInformation: [{ id: 'photos' }], infoChecks: {} };
-  assert.equal(currentStep(missing).label, '고객 정보');
-  assert.equal(currentStep({ ...missing, activeComposer: 'expert' }).label, '고객 정보');
-  assert.equal(currentStep({ ...missing, specialistRequests: [{ reply: null }] }).label, '고객 정보');
+  assert.equal(currentStep(missing).label, '접수·확인');
+  assert.equal(currentStep({ ...missing, activeComposer: 'expert' }).label, '접수·확인');
+  assert.equal(currentStep({ ...missing, specialistRequests: [{ reply: null }] }).label, '접수·확인');
   assert.equal(currentStep({ ...missing, infoChecks: { photos: { status: 'confirmed' } } }).label, '전문부서');
 });
 
@@ -1367,9 +1367,9 @@ test('specialist additional material request respects customer info and customer
   const request = { ...t, specialistFollowup: { ...t.specialistFollowup, reading: {}, missing_fields: ['photos'] } };
   assert.equal(currentStep(request).label, '전문부서');
   const required = { ...request, requiredInformation: [{ id: 'photos' }], infoChecks: {} };
-  assert.equal(currentStep(required).label, '고객 정보');
-  assert.equal(currentStep({ ...required, customerRequestStatus: 'waiting', apiStatus: 'WAITING_CUSTOMER', draft: '' }).label, '고객 정보');
-  assert.equal(currentStep({ ...required, purpose: 'request', draft: 'Please provide photos' }).label, '고객 정보');
+  assert.equal(currentStep(required).label, '접수·확인');
+  assert.equal(currentStep({ ...required, customerRequestStatus: 'waiting', apiStatus: 'WAITING_CUSTOMER', draft: '' }).label, '접수·확인');
+  assert.equal(currentStep({ ...required, purpose: 'request', draft: 'Please provide photos' }).label, '접수·확인');
 });
 
 test('confirmed specialist findings return to answer writing and closed tickets do not reopen', () => {
@@ -1377,7 +1377,7 @@ test('confirmed specialist findings return to answer writing and closed tickets 
   assert.equal(currentStep({ ...t, specialistFollowup: { ...t.specialistFollowup, status: 'confirmed' } }).label, '답변 작성');
   assert.notEqual(currentStep({ ...t, sent: true }).label, '전문부서');
   assert.equal(currentStep({ ...t, stage: 5 }).label, '완료');
-  assert.equal(currentStep({ ...t, owner: '' }).label, '접수·분석');
+  assert.equal(currentStep({ ...t, owner: '' }).label, '접수·확인');
 });
 
 test('normal answer, unsent referral and unanswered referral keep existing steps', () => {
