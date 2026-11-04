@@ -54,8 +54,8 @@ export default function AdminLayout() {
           })}
         </nav>
         <div className="mt-auto grid gap-3">
-          <button onClick={() => setPalette(true)} className="flex h-12 w-full items-center gap-3 rounded-full bg-[#04337a]/65 px-4 text-base text-white shadow-[0_6px_16px_-10px_rgb(0_10_40/0.7)] transition-colors hover:bg-[#04337a]/80">
-            <Search className="size-[18px]" aria-hidden />빠른 이동<kbd className="ml-auto rounded-full bg-white/20 px-2 text-[11px]">⌘K</kbd>
+          <button onClick={() => setPalette(true)} className="flex h-12 w-full items-center gap-2.5 rounded-full bg-[#04337a]/65 px-4 text-[13px] text-white shadow-[0_6px_16px_-10px_rgb(0_10_40/0.7)] transition-colors hover:bg-[#04337a]/80">
+            <Search className="size-4 shrink-0" aria-hidden /><span className="whitespace-nowrap">문의 번호 검색</span><kbd className="ml-auto shrink-0 rounded-full bg-white/20 px-2 text-[11px]">⌘K</kbd>
           </button>
           <div className="flex items-center gap-1 rounded-full bg-white py-1.5 pl-1.5 pr-1.5 text-[#0e1a2b] shadow-[0_8px_20px_-10px_rgb(0_10_40/0.6)]">
             <PersonAvatar name={signedIn} size={32} />

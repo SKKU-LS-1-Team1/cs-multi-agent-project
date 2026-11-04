@@ -658,6 +658,25 @@ export async function infoRequestViaApi(t: Ticket, selected?: string[], planKey?
   }
 }
 
+/** 사람 검토 문의의 답변 칸을 AI 초안으로 채운다: 처음 문의와 전문부서 회신을 바탕으로 한 제안일 뿐, 담당자가 고쳐서 써야 한다. */
+export async function manualDraftViaApi(t: Ticket): Promise<boolean> {
+  if (t.aiDrafting || t.regenerating) return false;
+  t.aiDrafting = true;
+  commit();
+  try {
+    const { text } = await api.manualDraft(t.id);
+    t.draft = text; t.reviewed = false; t.replyPreview = null; t.replyPreviewKey = null;
+    toast("AI 초안을 넣었습니다. 내용을 확인하고 고쳐 쓰세요.");
+    return true;
+  } catch (e) {
+    toast.error(`AI 초안 작성 실패: ${e}`);
+    return false;
+  } finally {
+    t.aiDrafting = false;
+    commit();
+  }
+}
+
 /** 전문부서 요청서 AI 초안 (부서를 주면 그 부서용). 화면의 요청서 칸을 채운다. */
 export async function escalationDraftViaApi(t: Ticket, deptLabel?: string): Promise<boolean> {
   if (t.expertDraftLoading || rewrites.has(t)) return false;

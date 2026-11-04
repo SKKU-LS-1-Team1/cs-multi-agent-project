@@ -1,6 +1,6 @@
 // 전문부서 협업 = 문의 목록 "3/6 전문부서" 단계를 문의 전체에 걸쳐 본 화면. 하위 상태는 expertPhase 와 같다.
 // 왼쪽 위 = 회신 도착·검토 필요(공이 우리에게 있다: 담당자가 확인해야 4단계로 넘어간다), 왼쪽 아래 = 회신 대기(회신 대기 시간·회신 등록)
-// 오른쪽 = 부서별 대기(건수 막대를 기다린 시간 구간으로 나눠 어느 부서가 오래 묵었는지 보인다).
+// 오른쪽 = 부서별 현황(부서마다 요청 전체를 완료 · 회신 도착 · 회신 대기 비율 막대로 보인다).
 // 요청서 작성 중(writing)은 부서와 오가는 일이 아니라 담당자 본인의 작업이라 "할 일"에 둔다. 검토가 끝난 뒤의 답변 작성도 "할 일"과 문의 상세가 안내한다.
 import { useState } from "react";
 import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
@@ -23,8 +23,11 @@ const fmtWait = (h: number) => { const total = Math.floor(h * 60), hh = Math.flo
 /** SLA 위험인 요청을 먼저, 그다음 오래 기다린 순. */
 const byUrgency = (a: Row, b: Row) => Number(departmentRisk(b.ticket)) - Number(departmentRisk(a.ticket)) || (waitedHours(b) ?? -1) - (waitedHours(a) ?? -1);
 
-/** 부서별 현황 막대 색(진행 중 요청). */
-const BARS = [{ tone: "bg-info/45" }] as const;
+/** 부서별 현황 막대: 지금 진행 중인 요청을 회신 도착 · 회신 대기로 나눈 비율(끝난 요청은 세지 않는다). 선택한 부서(남색 바탕)에서는 밝은 색으로 바꾼다. */
+const SEGMENTS = [
+  { key: "review", label: "회신 도착", tone: "bg-info/70", onTone: "bg-sky-300" },
+  { key: "waiting", label: "회신 대기", tone: "bg-muted-foreground/25", onTone: "bg-white/30" },
+] as const;
 
 // BACKEND: 전문부서 재요청(독촉)은 아직 없다. 생기면 POST /tickets/{id}/specialist-requests/{request_id}/remind 로 카드에 버튼을 붙인다.
 
@@ -52,7 +55,13 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
   const busy = names.filter((n) => countOf(n) > 0).sort((a, b) => countOf(b) - countOf(a));
   const idle = names.filter((n) => !busy.includes(n));
   const idleOpen = showIdle || idle.includes(selected);
-  const widest = Math.max(1, ...names.map(countOf));
+  // 부서별 진행 중 요청의 비율: 회신 도착(담당자 확인 필요) 아니면 회신 대기. 이미 끝난 요청은 세지 않는다.
+  const reviewKeys = new Set(reviewAll.map((r) => r.key));
+  const mix = (n: string) => {
+    const out = { review: 0, waiting: 0 };
+    for (const r of rowsOf(doingAll, n)) out[reviewKeys.has(r.key) ? "review" : "waiting"]++;
+    return { ...out, total: out.review + out.waiting };
+  };
   const shown = [...(status === "waiting" ? [] : toReview.map((r) => ({ r, phase: "review" as const }))), ...(status === "review" ? [] : pending.map((r) => ({ r, phase: "waiting" as const })))];
   const curPage = Math.min(page, Math.max(1, Math.ceil(shown.length / SIZE))); // 건수가 줄어 마지막 페이지가 사라져도 범위 안에 둔다
   return (
@@ -82,21 +91,21 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
 
         <section aria-label="부서별 현황" style={rise(0).style} className={cn("rounded-2xl bg-card p-6 shadow-card", rise(0).className)}>
           <h2 className="text-lg font-medium">부서별 현황</h2>
-          <div className="mb-3" />
-          <ul className="grid gap-1">
+          <p className="mb-3 mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">{SEGMENTS.map((g) => <span key={g.key} className="inline-flex items-center gap-1.5"><span className={cn("size-2 rounded-full", g.tone)} aria-hidden />{g.label}</span>)}<span className="ml-auto">회신 도착/진행 중</span></p>
+          <ul className="grid gap-3">
             {["전체 부서", ...busy, ...(idleOpen ? idle : [])].map((n) => {
-              const total = n === "전체 부서" ? doingAll.length : countOf(n), on = selected === n;
+              const m = mix(n), on = selected === n;
               return (
                 <li key={n}>
                   <button onClick={() => { setUi({ department: n }); setPage(1); }} aria-pressed={on} className={cn("grid w-full gap-1.5 rounded-xl px-3 py-2.5 text-left text-sm transition-colors", on ? "bg-[#003377] text-white" : "hover:bg-muted")}>
                     <span className="flex items-center justify-between gap-3">
-                      <span className="truncate font-medium">{n}</span>
-                      <span className={cn("shrink-0 tabular-nums", on ? "text-white/80" : "text-muted-foreground")}><b className={cn("font-medium", !on && "text-foreground")}>{total}</b>건</span>
+                      <span className="truncate text-[13px] font-bold">{n}</span>
+                      <span className={cn("shrink-0 tabular-nums", on ? "text-white/80" : "text-muted-foreground")}><b className={cn("font-medium", !on && "text-foreground")}>{m.review}</b>/{m.total}</span>
                     </span>
-                    {n !== "전체 부서" && total > 0 && (
-                      // 막대 길이 = 요청 건수(가장 많은 부서 기준)
-                      <span className={cn("flex h-2 overflow-hidden rounded-full", on ? "bg-white/20" : "bg-muted")} style={{ width: `${(total / widest) * 100}%` }} role="img" aria-label={`진행 중 ${total}건`}>
-                        <span className={cn("h-full w-full", BARS[0].tone)} />
+                    {m.total > 0 && (
+                      // 막대 전체 = 그 부서의 요청 전체. 색 구간의 길이 = 상태별 비율
+                      <span className={cn("flex h-2 overflow-hidden rounded-full", on ? "bg-white/20" : "bg-muted")} title={`회신 도착 ${m.review} · 회신 대기 ${m.waiting}`} role="img" aria-label={`회신 도착 ${m.review}건, 회신 대기 ${m.waiting}건`}>
+                        {SEGMENTS.map((g) => m[g.key] > 0 && <span key={g.key} className={cn("h-full", on ? g.onTone : g.tone)} style={{ width: `${(m[g.key] / m.total) * 100}%` }} />)}
                       </span>
                     )}
                   </button>

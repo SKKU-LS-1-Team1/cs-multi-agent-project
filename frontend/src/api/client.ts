@@ -295,6 +295,8 @@ export const api = {
   closed: () => request<string[]>("/tickets/closed"),
   manualReply: (id: string, body: { text: string; reviewer: string; expected_customer_revision: number; expected_specialist_revision: number; expected_information_reviewed_at: string | null }) =>
     request<Ticket>(`/tickets/${id}/manual-reply`, { method: "POST", body: JSON.stringify(body) }),
+  // 사람 검토 문의의 영어 답변 초안 제안(저장·발송 안 함): 처음 문의와 전문부서 회신으로 만든다
+  manualDraft: (id: string) => request<{ text: string }>(`/tickets/${id}/manual-draft`, { method: "POST" }),
   assign: (id: string, body: { assignee: string; reason?: string; by?: string }) =>
     request<Ticket>(`/tickets/${id}/assign`, { method: "POST", body: JSON.stringify(body) }),
   // 전문부서 이관 요청서 초안 만들기 (CSA-55). 실제 이관은 act(escalate)
