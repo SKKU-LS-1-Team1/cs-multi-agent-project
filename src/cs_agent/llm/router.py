@@ -232,7 +232,7 @@ class LLMRouter:
 
     def _writer_for(self, task: str) -> Writer:
         if (
-            task in {"admin_copilot", "customer_followup"}
+            task in {"admin_copilot", "customer_followup", "escalation_advice"}
             and self.enabled
             and isinstance(self.writer, GeminiClient)
         ):

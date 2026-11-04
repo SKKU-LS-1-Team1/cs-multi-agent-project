@@ -12,13 +12,13 @@ import { Input } from "@admin/components/ui/input";
 import { Textarea } from "@admin/components/ui/textarea";
 import { AiMark, Facts, Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, StatusTag, Tag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import {
-  answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, expertPhase, feedbackLabel, inquirySummary, isEdited,
+  answerContext, assignmentSummary, branchChoice, escalationRecommended, cases, contextIsNew, customerLanguage, expertDepartments, expertPhase, feedbackLabel, inquirySummary, isEdited,
   canAssign, isNewAssignment, latestCustomerReply, pendingCustomerInfo, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
   requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, openExpertReview, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
-import { rewriteViaApi, loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi, manualDraftViaApi } from "@admin/lib/api-sync";
+import { DEPT_LABEL, rewriteViaApi, loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi, manualDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { flowSteps, type Step, type StepState } from "@admin/lib/flow-steps";
 import { cn } from "@admin/lib/utils";
@@ -564,6 +564,16 @@ function Copilot({ t }: { t: Ticket }) {
             )}
           </div>
         </PanelBlock>
+        {escalationRecommended(t) && t.activeComposer !== "expert" && (
+          <PanelBlock icon={Building2} tone="navy" title={pendingCustomerInfo(t) > 0 || t.customerRequestStatus === "waiting" ? "전문부서 이관 예상" : "전문부서 이관 권장"} count={t.escalationAdvice.source === "ai" ? "AI 판단" : "규칙"}>
+            <div className="grid gap-2 text-sm leading-relaxed">
+              <p className="font-medium">{DEPT_LABEL[t.escalationAdvice.to_dept] || t.escalationAdvice.to_dept}</p>
+              {t.escalationAdvice.reason && <p>{t.escalationAdvice.reason}</p>}
+              {t.escalationAdvice.quote && <p className="break-words text-muted-foreground">고객 문의: “{t.escalationAdvice.quote}”</p>}
+              {(pendingCustomerInfo(t) > 0 || t.customerRequestStatus === "waiting") && <p className="text-muted-foreground">고객 자료를 받으면 이관 여부를 다시 판단합니다.</p>}
+            </div>
+          </PanelBlock>
+        )}
         {t.followupLink && !t.followupLink.dismissed && (
           <PanelBlock icon={BookOpen} tone="info" title="이전 문의와의 연결 근거">
             <FollowupEvidence link={t.followupLink} />

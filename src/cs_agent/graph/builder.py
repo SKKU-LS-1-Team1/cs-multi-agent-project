@@ -49,7 +49,15 @@ from langgraph.types import interrupt
 
 import cs_agent.agents.translation as translation
 from cs_agent import domain, schemas
-from cs_agent.agents import analysis, customer_qc, drafting, escalation, retrieval, verification
+from cs_agent.agents import (
+    analysis,
+    customer_qc,
+    drafting,
+    escalation,
+    escalation_advice,
+    retrieval,
+    verification,
+)
 from cs_agent.agents import info_request as info_request_agent
 from cs_agent.agents.analysis import AnalysisError
 from cs_agent.agents.drafting import DraftingError, TranslationError
@@ -84,6 +92,7 @@ class GraphDeps:
     localize_info_request: Callable = info_request_agent.localize_request  # 보낼 때 고객 언어로
     translate_reply: Callable = drafting.translate_reply
     write_escalation_request: Callable = escalation.write_escalation_request
+    assess_escalation: Callable = escalation_advice.safe_assess
 
 
 def serializer() -> JsonPlusSerializer:
@@ -165,6 +174,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "drafting_error": None,
             "info_request": None,
             "escalation_request": None,
+            "escalation_advice": None,
             "checks": [],
             "evidence": [],
             "review": None,
@@ -264,7 +274,13 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             route = Route.INFO_REQUEST
         else:
             route = Route.DRAFT
-        return {"rules": result, "route": route}
+        # 이관 권장은 분기를 바꾸지 않는다. 담당자에게 보여 주기만 한다 (안전 건은 이미 사람 큐)
+        advice = (
+            None
+            if route == Route.HUMAN
+            else deps.assess_escalation({**state, "rules": result}, deps.tables, deps.llm)
+        )
+        return {"rules": result, "route": route, "escalation_advice": advice}
 
     def human(state: TicketState) -> dict:
         return {"status": TicketStatus.HUMAN_QUEUE, **_translation(state)}

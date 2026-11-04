@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   answerContext, buildExpertRequest, canAssign, checkAssign, composeAnswer, composerKey, composerLanguage, contextIsNew, contextKey, customerLanguage, FRONTLINE, isEdited, needsLocalization, runChecks, translateText,
   informationAssessment, people, recommend, record, requiredInformation, resourceReason, signedIn, storeComposer, ticketProgress,
-  waitingReviews, expertPhase, expertReviewModal, latestCustomerReply, ownedTickets, departmentRank, slaMinutes, branchChoice, pendingCustomerInfo,
+  waitingReviews, expertPhase, expertReviewModal, latestCustomerReply, ownedTickets, departmentRank, slaMinutes, branchChoice, escalationRecommended, pendingCustomerInfo,
 } from "./logic";
 import { closeModal, commit, openModal, setUi, tickets } from "./store";
 import type { Ticket } from "./types";
@@ -459,6 +459,9 @@ export function nextAction(t: Ticket): Next | null {
     return { label: "전문부서 분석 중", waiting: true };
   }
   if (t.customerRequestStatus === "waiting") return { label: "고객 회신 대기 중", waiting: true };
+  const advised = escalationRecommended(t) ? branchChoice(t) : null;
+  if (advised === "expert") return { label: "전문부서 요청서 작성", run: () => openExpertComposer(t) };
+  if (advised === "request") return { label: "고객 질의서 작성", run: () => composeFromCopilot(t, "request") };
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) };
   if (expertPhase(t) === "review" && t.purpose !== "request") return { label: "전문부서 회신 검토", run: () => openExpertReview(t) };
   if (t.draft && t.purpose !== "request" && (waitingReviews(t).length || t.legacyReviewPending)) return { label: "전문부서 회신 등록", externalWaiting: true, run: () => openModal("expert-receive", { id: t.id }) };
@@ -533,6 +536,7 @@ export function judgment(t: Ticket): Judgment {
   else if (t.customerOutcome === "needs-support") { title = "후속 문의 · 재검토 필요"; task = "이전 조치와 고객의 새 증상을 함께 확인하세요."; reason = "이전 완료 결과는 현재 해결 근거로 확정하지 않습니다."; }
   else if (t.customerRequestStatus === "waiting") { title = "고객 회신 대기"; task = "고객이 요청 자료를 제출하기를 기다리고 있습니다."; reason = "회신이 들어오면 같은 문의에서 내용을 확인합니다."; }
   else if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) { title = "고객 자료 수신 · 확인 필요"; task = "수신된 내용과 첨부자료를 확인하세요."; reason = "회신 수신만으로 필요한 자료가 충족된 것은 아닙니다."; }
+  else if (choice && escalationRecommended(t)) { const expert = choice === "expert"; title = expert ? "전문부서 이관 권장" : "이관 예상 · 고객 자료 먼저 요청"; task = expert ? "이관 이유를 확인하고 전문부서 요청서를 작성하세요." : "고객에게 아래 자료를 먼저 요청하세요. 자료를 받으면 이관 여부를 다시 판단합니다."; reason = "권장 내용입니다. 이관 여부는 담당자가 결정합니다."; }
   else if (missing) { title = t.customerRequestStatus === "received" ? "회신 수신 · 추가정보 미충족" : "추가정보 필요 · 원인 미확정"; task = t.customerRequestStatus === "received" ? "아직 충족되지 않은 자료만 추가로 요청하세요." : "고객에게 아래 자료를 요청하세요."; reason = "이 자료가 있어야 원인 후보를 좁히고 정확한 답변을 쓸 수 있습니다."; }
   else if (t.customerRequestStatus === "received" && reply && !expertPending) { title = "고객 회신 수신"; task = "회신 내용을 확인하고 고객 답변을 작성하세요."; reason = "회신 내용은 고객 소통에서 볼 수 있습니다."; }
   else if (expertPending) { title = "전문부서 회신 대기"; task = "검토 결과를 받으면 해당 요청에 등록하세요."; reason = "회신을 확인한 뒤 고객 답변에 활용합니다."; }
@@ -541,7 +545,7 @@ export function judgment(t: Ticket): Judgment {
   else if (choice === "expert") { title = "근거 부족 · 전문부서 확인 권장"; task = "연결된 참고 근거가 없어 전문부서 검토를 요청하는 것이 좋습니다."; reason = "일반 안내로 바로 답변하거나, 고객에게 자료를 요청할 수도 있습니다."; }
   else { title = "답변 작성 가능"; task = "추가 자료 없이 답변을 작성할 수 있습니다."; reason = "연결된 참고 근거가 없어 초안은 일반 안내 수준입니다. 전문 판단이 필요하면 전문부서에 요청하세요."; }
   const open = !t.sent && t.stage !== 5;
-  const note = open && manual ? "안전 등 사람 검토 문의 · AI 초안 없음" : open && t.draft && choice && choice !== "answer" ? "AI 답변 초안은 준비되어 있습니다" : "";
+  const note = open && manual ? "안전 등 사람 검토 문의 · AI 초안 없음" : open && t.draft && choice && choice !== "answer" && !escalationRecommended(t) ? "AI 답변 초안은 준비되어 있습니다" : "";
   return { title, task, note, reason, missing: (missing > 0 && t.stage !== 5 ? c.missingInfo : none) };
 }
 

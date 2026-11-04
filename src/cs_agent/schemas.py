@@ -296,6 +296,7 @@ class TicketOut(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
     specialist_requests: list[SpecialistRequest] = Field(default_factory=list)
     investigation_info: dict | None = None  # 이관 전 권장 자료, 차단 조건 아님
+    escalation_advice: dict | None = None  # 이관 권장. 없으면 담당자가 판단 (기존 문의 포함)
     specialist_followup: dict | None = None
     specialist_revision: int = 0
     draft_specialist_revision: int = 0

@@ -127,6 +127,7 @@ export type Ticket = {
   information_review?: InformationReview | null;
   information_reviews?: InformationReview[];
   investigation_info?: { recommended_fields: string[]; provided_fields: string[]; missing_fields: string[]; note: string } | null;
+  escalation_advice?: { decision: "recommended" | "not_needed"; source: "rule" | "ai"; to_dept: string; condition: string; reason: string; quote: string; model: string } | null;
   specialist_followup?: SpecialistFollowup | null;
   specialist_requests?: SpecialistRequest[];
   specialist_revision?: number;

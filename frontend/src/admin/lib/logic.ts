@@ -496,6 +496,12 @@ save();
 
 /** 아직 길이 정해지지 않은 문의의 세 갈래: 고객 질의서 · 전문부서 요청서 · 답변 초안. 이미 초안이 있거나 누구의 회신을 기다리는 중이면 갈래가 아니라 그 상태가 보인다. */
 export type Choice = "answer" | "expert" | "request";
+/** 접수 때 판단한 이관 권장이 아직 유효한가. 권장만 하고, 이관은 담당자가 요청서로 진행한다. */
+export function escalationRecommended(t: Ticket): boolean {
+  return t.escalationAdvice?.decision === "recommended" && !t.specialistRequests?.length
+    && ["READY_FOR_REVIEW", "ON_HOLD", "WAITING_CUSTOMER"].includes(t.apiStatus);
+}
+
 export function branchChoice(t: Ticket): Choice | null {
   // 백엔드 문의는 처음부터 AI 답변 초안이 있다. 고치기 전에는 전문부서 요청·고객 질의서로도 갈 수 있게 갈림길을 보인다 (CSA-61)
   if (investigationTask(t)) return null;
@@ -506,6 +512,7 @@ export function branchChoice(t: Ticket): Choice | null {
   if (t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting") return null;
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return null;
   if (waitingReviews(t).length || t.legacyReviewPending) return null;
+  if (escalationRecommended(t)) return pendingCustomerInfo(t) > 0 ? "request" : "expert"; // 시나리오: 자료를 받고 이관
   if (untouchedAiDraft && t.composerOpen) return "answer";
   if (c.missingInfo.length) return "request";
   if (!c.expertResponse && !c.availableReferences.length && ["불량", "설치", "펌웨어"].includes(t.type) && !(t.customerRequestStatus === "received" && reply)) return "expert";
