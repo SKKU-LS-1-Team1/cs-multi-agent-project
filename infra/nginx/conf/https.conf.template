@@ -36,8 +36,8 @@ server {
         include /etc/nginx/snippets/api-upload.conf;
     }
 
-    # 고객 화면이 부르는 API: 챗봇 · 제품 대시보드 · 문의 제출/조회(고객용) · 상태 확인
-    location ~ ^/api/(chat|products|inquiries|health)(/|$) {
+    # 고객 화면이 부르는 API: 챗봇 · 화면 번역(i18n) · 제품 대시보드 · 문의 제출/조회(고객용) · 상태 확인
+    location ~ ^/api/(chat|i18n|products|inquiries|health)(/|$) {
         include /etc/nginx/snippets/api-proxy.conf;
     }
 
