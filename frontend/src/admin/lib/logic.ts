@@ -186,6 +186,11 @@ export const sourceInquiry = (t: Ticket) => t.body || (t.source !== "api" && t.i
 
 // 전문부서 요청 대상 = 백엔드 이관 대상(agents/escalation.py ESCALATION_TARGETS)의 이름 (departments.csv)
 export const expertDepartments = ["자동화 기술지원", "저압기기 기술지원", "고압·배전반 기술지원", "변압기 기술지원", "에너지솔루션 기술지원", "현장 서비스", "품질보증/클레임", "펌웨어 개발", "인증·규격", "보증·RMA 데스크", "해외영업 운영", "주문·물류"];
+/** 협업 화면: 회신이 도착해 담당자가 확인할 요청. */
+export const isReviewReferral = (r: { ticket: Ticket; response?: Ev }) => !!r.response && !r.response.reviewed && r.ticket.stage !== 5 && expertPhase(r.ticket) === "review";
+/** 협업 화면: 아직 전문부서 쪽에 있는 요청. 회신 확인 단계로 넘어온 요청은 대기에 넣지 않는다 (한 건이 두 줄로 보이지 않게). */
+export const isWaitingReferral = (r: { ticket: Ticket; response?: Ev }) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5 && !isReviewReferral(r);
+
 export function referralRows() {
   const rows: any[] = [];
   for (const t of tickets) {

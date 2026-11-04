@@ -6,7 +6,7 @@ import { useState } from "react";
 import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { Mono, PageHeader, Pager, PersonAvatar, SlaTag, Tag, rise, useGo } from "@admin/components/admin/common";
 import { openExpertReview } from "@admin/lib/actions";
-import { departmentRisk, departmentReviewRows, expertPhase, referralDepartments, referralRows } from "@admin/lib/logic";
+import { departmentRisk, departmentReviewRows, isReviewReferral, isWaitingReferral, referralDepartments, referralRows } from "@admin/lib/logic";
 import { openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 
@@ -38,12 +38,11 @@ export default function Collab({ tabs }: { tabs: React.ReactNode }) {
   const [status, setStatus] = useState<"all" | "review" | "waiting">("all");
   const [page, setPage] = useState(1);
 
-  const waitingAll = referralRows().filter((r) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5);
+  const waitingAll = referralRows().filter(isWaitingReferral);
   const names = referralDepartments();
-  const inReview = (r: Row) => !!r.response && !r.response.reviewed && r.ticket.stage !== 5 && expertPhase(r.ticket) === "review";
-  const reviewAll = referralRows().filter(inReview);
+  const reviewAll = referralRows().filter(isReviewReferral);
   const selected = ui.department !== "전체 부서" && !names.includes(ui.department) ? "전체 부서" : ui.department;
-  const pending = (selected === "전체 부서" ? waitingAll : departmentReviewRows(selected).filter((r) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5)).sort(byUrgency);
+  const pending = (selected === "전체 부서" ? waitingAll : departmentReviewRows(selected).filter(isWaitingReferral)).sort(byUrgency);
   const toReview = (selected === "전체 부서" ? reviewAll : reviewAll.filter((r) => (r.target || "대상 부서 미기록") === selected)).sort((a, b) => Number(departmentRisk(b.ticket)) - Number(departmentRisk(a.ticket)) || (Date.parse(a.response.createdAt || "") || 0) - (Date.parse(b.response.createdAt || "") || 0));
   const count = { all: toReview.length + pending.length, review: toReview.length, waiting: pending.length };
   // 부서별 현황: 진행 중 요청이 있는 부서를 먼저(많은 순), 없는 부서는 접어 둔다. 진행 중 요청(회신 대기 + 회신 검토)만 센다.
