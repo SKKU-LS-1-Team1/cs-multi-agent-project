@@ -562,3 +562,76 @@ def test_serial_rule(tables, settings, body, serial):
         requested_fields=[],
     )
     assert result.fields.get("serial_no") == serial
+
+
+@pytest.mark.parametrize(
+    "evidence,accepted",
+    [
+        ("We cannot provide the trip logs.", True),
+        ("The logs are unavailable.", False),
+    ],
+)
+def test_unavailable_material_requires_customer_evidence(tables, settings, evidence, accepted):
+    inquiry = InquiryIn(channel="email", body="We cannot provide the trip logs.")
+    result = details(
+        inquiry,
+        tables,
+        settings,
+        ExtractorStub(
+            {
+                "fields": {},
+                "unconfirmed_fields": {"logs": {"reason": "UNAVAILABLE", "evidence": evidence}},
+                "model": "gemini-test",
+            }
+        ),
+        requested_fields=["logs"],
+    )
+    assert (result.unconfirmed_fields.get("logs") == "UNAVAILABLE") is accepted
+    assert "logs" not in result.provided_info
+    if accepted:
+        assert result.to_extraction().unconfirmed_evidence["logs"] == inquiry.body
+
+
+@pytest.mark.parametrize("latest_form", [False, True])
+def test_explicit_unavailable_form_is_not_a_provided_value(tables, settings, latest_form):
+    inquiry = InquiryIn(
+        channel="email",
+        body="Please investigate.",
+        provided_fields={} if latest_form else {"logs": "확인 불가"},
+    )
+    extractor = ExtractorStub()
+    result = details(
+        inquiry,
+        tables,
+        settings,
+        extractor,
+        requested_fields=["logs"],
+        current_provided_fields={"logs": "확인 불가"} if latest_form else None,
+    )
+    assert result.unconfirmed_fields["logs"] == "UNAVAILABLE"
+    assert result.unconfirmed_evidence["logs"] == "확인 불가"
+    assert "logs" not in result.fields
+    assert not extractor.calls
+
+
+def test_later_supplied_material_replaces_unavailable_answer(tables, settings):
+    inquiry = InquiryIn(
+        channel="email",
+        body="Trip logs are attached: [attachment: trip.csv]",
+        provided_fields={"logs": "확인 불가"},
+    )
+    result = details(
+        inquiry,
+        tables,
+        settings,
+        ExtractorStub(
+            {
+                "fields": {"logs": {"value": "[attachment: trip.csv]", "evidence": inquiry.body}},
+                "model": "gemini-test",
+            }
+        ),
+        requested_fields=["logs"],
+        transcript=[{"role": "user", "content": "I cannot provide logs."}],
+    )
+    assert result.fields["logs"] == "[attachment: trip.csv]"
+    assert "logs" not in result.unconfirmed_fields

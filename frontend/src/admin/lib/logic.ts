@@ -212,7 +212,8 @@ export const informationAssessment = (t: Ticket) =>
 /** 아직 확인되지 않은 필수 고객 정보 건수. 0이어야 전문부서로 요청할 수 있다(고객 정보 확인 → 전문부서 순서). */
 export function pendingCustomerInfo(t: Ticket): number {
   if (t.stage === 5 || (t.source === "api" && !t.analysisReady)) return 0;
-  return informationAssessment(t).filter((x) => !["provided", "confirmed"].includes(x.status)).length;
+  return informationAssessment(t).filter((x) => !["provided", "confirmed"].includes(x.status)
+    && !t.copilot?.request_plan?.some((r: any) => r.field === x.id && r.status === "unavailable")).length;
 }
 export function informationSummary(t: Ticket) {
   const items = informationAssessment(t), remaining = items.filter((x) => !["provided", "confirmed"].includes(x.status)).length;
@@ -512,7 +513,8 @@ export function branchChoice(t: Ticket): Choice | null {
   if (t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting") return null;
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return null;
   if (waitingReviews(t).length || t.legacyReviewPending) return null;
-  if (escalationRecommended(t)) return pendingCustomerInfo(t) > 0 ? "request" : "expert"; // 시나리오: 자료를 받고 이관
+  if (escalationRecommended(t)) return pendingCustomerInfo(t) > 0 ||
+    (t.priority !== "P1" && t.investigationInfo?.missing_fields?.length > 0) ? "request" : "expert"; // 시나리오: 자료를 받고 이관
   if (untouchedAiDraft && t.composerOpen) return "answer";
   if (c.missingInfo.length) return "request";
   if (!c.expertResponse && !c.availableReferences.length && ["불량", "설치", "펌웨어"].includes(t.type) && !(t.customerRequestStatus === "received" && reply)) return "expert";

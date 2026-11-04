@@ -12,9 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from cs_agent.agents.specialist_followup import current_followup
 from cs_agent.llm.router import json_text
-from cs_agent.rules.investigation import investigation_info
+from cs_agent.rules.investigation import investigation_info, preparing_referral, urgent_referral
 
-VERSION = "admin-copilot-v3"
+VERSION = "admin-copilot-v4"
 _POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="admin-copilot")
 _CAPACITY = BoundedSemaphore(4)
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=600)]
@@ -66,7 +66,8 @@ INSTRUCTIONS = """# ROLE
 회신 수신은 조사 완료가 아닙니다. 담당자의 confirmation 없이 전문부서 결론을 확정하지 않습니다.
 source_id와 quote는 sources의 정확한 원문이어야 합니다. 번역한 quote를 만들지 않습니다.
 request_plan의 필드와 next_action은 서버가 결정했습니다. 새 필드·필수 기준·행동을 만들지 않습니다.
-request_reasons는 confirmed가 아닌 항목만 설명합니다. 기존 정보가 있으면 무엇을 재확인할지
+request_reasons는 missing·clarify 항목만 설명합니다. unavailable은 고객이 자료가 없거나
+제공할 수 없다고 명시한 항목이므로 다시 요청하지 않습니다. 기존 정보가 있으면 무엇을 재확인할지
 명시합니다. 요청 이유는 request: 항목의 기준도 인용합니다. recommended는 선택 사항이며
 필수라고 설명하지 않습니다. 기술적 필요성을 자료에 없는 인과관계로 꾸미지 않습니다.
 근거 없는 공장 기준이나 일정, 원인, 보증 승인, 발송 완료를 만들지 않습니다.
@@ -76,7 +77,8 @@ workflow는 현재 업무 단계입니다. next_reason은 담당자가 이해할
 "요청서를 확인하세요"처럼 해야 할 일을 반복하지 않습니다. workflow 자체는 필요성의
 근거가 아닙니다. 고객 발언·확인값·문서 등에서 이유를 찾을 수 없으면 next_reason은 null입니다.
 customer_request: 추가정보가 필요한 이유를 설명합니다. 무엇이 없거나 정정되어 재확인이
-필요한지 명시합니다. 항목별 이유는 request_reasons에 작성하고 향후 이관 자료는 제안하지 않습니다.
+필요한지 명시합니다. 항목별 이유는 request_reasons에 작성합니다. 이관 전 권장 자료도
+workflow.request_fields에 포함된 경우에만 요청 이유를 설명합니다.
 customer_answer: "답변 작성 근거"로 표시됩니다. 고객 질문의 어떤 내용을 어떤 문서·확인값으로
 답할 수 있는지 설명합니다. 예: "고객이 요청한 입력 전압과 출력 주파수가 데이터시트에
 명시되어 있어, 해당 사양을 근거로 답변할 수 있습니다." 예시의 사양·문서가 실제 입력에
@@ -88,7 +90,7 @@ specialist_review: 회신의 추가자료 요청·미확정 결론·담당자 �
 wait_customer / wait_specialist: 누구의 무엇을 기다리는지 설명합니다. 재요청이나 완료를 제안하지
 않으며, 진행상황 안내에는 확인된 사실만 사용할 수 있다고 안내합니다.
 manual_review / analysis_pending / closed: 담당자 확인 또는 현재 처리 상태만 설명합니다.
-request_reasons는 workflow.request_fields에 있는 항목만 작성합니다. 이관 준비가 아니면
+request_reasons는 workflow.request_fields에 있는 항목만 작성합니다. workflow.request_fields에 없는
 recommended 항목을 unresolved나 next_reason에 고객에게 요청할 정보로 제시하지 않습니다.
 # CASE COMPARISON
 사례의 증상·조건과 현재 문의의 확인값만 비교합니다. 패턴 설명은 일반적 고장 정보이며
@@ -138,7 +140,7 @@ def request_plan(state, tables):
     # Keep explicitly selected optional fields available when rewriting that request.
     selected = state.get("info_request_fields", [])
     recommended = advisory.get("recommended_fields", [])
-    if not state.get("escalation_request") or state.get("specialist_requests"):
+    if not preparing_referral(state) or urgent_referral(state):
         recommended = [name for name in recommended if name in selected]
     names = list(
         dict.fromkeys([*rules.get("required_info", []), *specialist, *recommended, *selected])
@@ -162,18 +164,36 @@ def request_plan(state, tables):
             "required": "제품·문의 유형의 필수정보 기준에 포함됩니다.",
             "recommended": "증상 분석에 도움이 되는 권장 자료입니다. 없어도 이관할 수 있습니다.",
         }[origin]
+        unavailable = (
+            name in advisory.get("unavailable_fields", {})
+            and name not in rules.get("missing_blocking", [])
+            and name not in specialist
+        )
         if unclear:
             reason = "이전에 제공한 값이 철회되었거나 불명확합니다. 최신 값을 확인해 주세요."
+        if unavailable:
+            reason = (
+                "고객이 자료가 없거나 제공할 수 없다고 답했습니다. "
+                "미확보 사유를 이관서에 포함합니다."
+            )
         result.append(
             {
                 "field": name,
                 "label": tables.field_labels.get(name, name),
-                "status": "confirmed" if supplied else "clarify" if unclear else "missing",
+                "status": "unavailable"
+                if unavailable
+                else "confirmed"
+                if supplied
+                else "clarify"
+                if unclear
+                else "missing",
                 "origin": origin,
                 "blocking": name in rules.get("missing_blocking", []),
                 "value": values.get(name, "") if supplied else "",
                 "reason": reason,
-                "evidence": specialist.get(name, {}).get("evidence", ""),
+                "evidence": advisory["unavailable_fields"][name]
+                if unavailable
+                else specialist.get(name, {}).get("evidence", ""),
             }
         )
     return result
@@ -184,7 +204,7 @@ def workflow(state, plan):
     status = str(state.get("status", "NEW"))
     requests = state.get("specialist_requests", [])
     followup = current_followup(state, requests) or {}
-    missing = [r for r in plan if r["status"] != "confirmed"]
+    missing = [r for r in plan if r["status"] in {"missing", "clarify"}]
     if status in {"RESOLVED", "REJECTED", "APPROVED"}:
         mode, action = "closed", "발송·처리 기록 확인"
     elif status == "ANALYSIS_PENDING":
@@ -197,6 +217,11 @@ def workflow(state, plan):
         mode, action = "specialist_prepare", "전문부서 이관 요청서·확보 자료 검토"
     elif state.get("pending") == "info_request":
         mode, action = "customer_request", "고객 질의서의 요청 항목·표현 검토"
+    elif preparing_referral(state):
+        if missing and not urgent_referral(state):
+            mode, action = "customer_request", "이관 전 부족한 자료의 고객 질의서 작성"
+        else:
+            mode, action = "specialist_prepare", "전문부서 이관 요청서·확보 자료 검토"
     elif any(r["origin"] == "specialist" for r in missing):
         mode, action = "customer_request", "전문부서가 요청한 미확인 자료의 고객 질의서 작성"
     elif requests and not followup.get("confirmation"):
@@ -229,7 +254,7 @@ def workflow(state, plan):
         r["field"]
         for r in missing
         if mode in {"customer_request", "specialist_prepare"}
-        and (r["origin"] != "recommended" or mode == "specialist_prepare" or r["field"] in selected)
+        and (r["origin"] != "recommended" or preparing_referral(state) or r["field"] in selected)
         and (drafted_fields is None or r["field"] in drafted_fields)
     ]
     return {"mode": mode, "next_action": action, "request_fields": fields}
@@ -255,10 +280,15 @@ def context(state, tables):
         "pending": state.get("pending"),
         "info_request_fields": state.get("info_request_fields", []),
         "escalation_request": dump(state.get("escalation_request")),
+        "escalation_advice": state.get("escalation_advice"),
+        "unconfirmed_evidence": (dump(state.get("extraction")) or {}).get(
+            "unconfirmed_evidence", {}
+        ),
     }
     lines = [f"{tables.field_labels.get(k, k)}: {v}" for k, v in current["fields"].items()]
     lines.extend(
-        f"재확인 필요 — {tables.field_labels.get(k, k)}: {v}"
+        f"{'미확보 사유 확인' if v == 'UNAVAILABLE' else '재확인 필요'} — "
+        f"{tables.field_labels.get(k, k)}: {v}"
         for k, v in current["unconfirmed"].items()
     )
     sources["current"] = {"label": "현재 확인값", "text": "\n".join(lines)}
