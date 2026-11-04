@@ -1465,3 +1465,21 @@ test('customer-declared unavailable material does not prevent referral, while a 
   t.infoChecks.serial_no.status = 'confirmed';
   assert.equal(logic.pendingCustomerInfo(t), 0);
 });
+
+test('referral is counted once: arrived reply is review only, unanswered request is waiting only', () => {
+  const reply = { kind: 'expert', id: 'p1', requestId: 'r1', source: 'specialist-api' };
+  const request = { kind: 'escalation', id: 'r1', source: 'specialist-api', department: 'QA' };
+  const base = { source: 'api', stage: 0, sent: false, activeComposer: null };
+  const arrived = { ...base, id: 'A', events: [request, reply],
+    specialistFollowup: { status: 'in_progress', pending_replies: false } };
+  const asked = { ...base, id: 'B', events: [{ ...request, id: 'r2' }],
+    specialistFollowup: { status: 'in_progress', pending_replies: true } };
+  const confirmed = { ...base, id: 'C', events: [{ ...request, id: 'r3' }, { ...reply, id: 'p3', requestId: 'r3' }],
+    specialistFollowup: { status: 'confirmed', pending_replies: false } };
+  const closed = { ...arrived, id: 'D', stage: 5 };
+  const logic = fullLogicFixture([arrived, asked, confirmed, closed]);
+  const rows = logic.referralRows();
+  const ids = (ok) => rows.filter(ok).map((r) => r.ticket.id).join('');
+  assert.equal(ids(logic.isReviewReferral), 'A');
+  assert.equal(ids(logic.isWaitingReferral), 'B');
+});
