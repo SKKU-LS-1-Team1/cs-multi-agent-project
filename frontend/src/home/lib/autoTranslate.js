@@ -27,7 +27,11 @@ const texts = new Map() // Text 노드 → { src, out }
 const attrs = new Map() // Element → { [attr]: { src, out } }
 const caches = new Map() // lang → Map(원문 → 번역)
 const queued = new Set()
-const failed = new Set() // 이번 방문에서 번역을 못 받은 원문 (같은 원문을 계속 다시 묻지 않는다)
+// 번역을 못 받은 원문 → { n: 실패 횟수, until: 다시 물을 시각 }. 분당 호출 상한(429)·일시 오류로 한 번 실패한
+// 문구가 그 방문 내내 한국어로 남지 않게, 2·4·8·16초 뒤에 다시 묻고 그래도 안 되면 이번 방문에서는 그만 묻는다.
+const failed = new Map()
+const MAX_TRIES = 5
+let retryTimer = null
 
 const readStore = (lang) => {
   try { return JSON.parse(localStorage.getItem(STORE_PREFIX + lang) || '{}') } catch { return {} }
@@ -59,7 +63,10 @@ function skipped(el) {
 }
 
 function want(core) {
-  if (!lookup(core) && !failed.has(core)) { queued.add(core); schedule() }
+  if (lookup(core)) return
+  const f = failed.get(core)
+  if (f && (f.n >= MAX_TRIES || Date.now() < f.until)) return
+  queued.add(core); schedule()
 }
 
 function doText(node) {
@@ -128,11 +135,33 @@ function restoreAll() {
 }
 
 let firstDone = null
+let hidOnce = false // 언어마다 한 번만 가린다 (번역 서버가 계속 실패해도 화면이 거듭 사라지지 않게)
 function schedule() {
   // 이 언어로 처음 들어온 방문이면 첫 번역이 올 때까지 화면을 가린다
-  if (!firstDone && cacheOf(current).size === 0) hideUntilFirst()
+  if (!firstDone && !hidOnce && cacheOf(current).size === 0) { hidOnce = true; hideUntilFirst() }
   if (timer) return
   timer = setTimeout(flush, 30)
+}
+
+function fail(src) {
+  const n = (failed.get(src)?.n ?? 0) + 1
+  const wait = 1000 * 2 ** n
+  failed.set(src, { n, until: Date.now() + wait })
+  scheduleRetry()
+}
+
+// 다시 물을 때가 된 문구가 생기면 화면을 다시 훑어 큐에 넣는다
+function scheduleRetry() {
+  if (retryTimer) return
+  const now = Date.now()
+  const next = Math.min(...[...failed.values()].filter((f) => f.n < MAX_TRIES && f.until > now).map((f) => f.until))
+  if (!Number.isFinite(next)) return
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    if (current === 'ko') return
+    applyPending()
+    scheduleRetry()
+  }, Math.max(0, next - now) + 50)
 }
 
 async function flush() {
@@ -153,11 +182,11 @@ async function flush() {
       const cache = cacheOf(lang)
       chunk.forEach((src, i) => {
         const tr = translations?.[i]
-        if (typeof tr === 'string' && tr.trim() && tr !== src) cache.set(src, tr)
-        else failed.add(src)
+        if (typeof tr === 'string' && tr.trim() && tr !== src) { cache.set(src, tr); failed.delete(src) }
+        else fail(src)
       })
     } catch {
-      chunk.forEach((src) => failed.add(src))
+      chunk.forEach(fail)
     }
   }))
   writeStore(lang, cacheOf(lang))
@@ -185,6 +214,7 @@ function start() {
 function stop() {
   observer?.disconnect(); observer = null
   clearTimeout(timer); timer = null
+  clearTimeout(retryTimer); retryTimer = null
   queued.clear()
 }
 
@@ -208,6 +238,7 @@ export function setPageLang(lang) {
   observer?.takeRecords()
   restoreAll()
   failed.clear()
+  hidOnce = false
   current = next
   if (next === 'ko') { firstDone?.(); return }
   start()
