@@ -4,6 +4,9 @@ import issuesKo from '../data/issues_ko.json'
 
 const images = import.meta.glob('../assets/products/*.webp', { eager: true, import: 'default' })
 export const familyImage = (id) => images[`../assets/products/${id}.webp`]
+// 모델 전용 사진(assets/models/<모델코드>.webp)이 있으면 그 사진, 없으면 제품군 사진.
+const modelImages = import.meta.glob('../assets/models/*.webp', { eager: true, import: 'default' })
+export const productImage = (code) => modelImages[`../assets/models/${code}.webp`] ?? familyImage(catalog.products[code]?.family)
 
 // 고장 증상·원인·확인·조치 문구는 원본 자료(TG 문서)가 영어라 catalog.json 에도 영어로 들어 있다.
 // 고객 화면은 한국어 원문 기준(다른 언어는 lib/autoTranslate.js 가 한국어에서 번역)이라 한국어로 바꿔 보여 준다.

@@ -6,7 +6,7 @@ import {
 } from '../lib/inquiry.js'
 import InquiryBody from './InquiryBody.jsx'
 import Attachments from './Attachments.jsx'
-import { familyImage, getFamily, getProduct } from '../lib/catalog.js'
+import { getFamily, getProduct, productImage } from '../lib/catalog.js'
 import { CATEGORIES, typeInfo } from '../lib/inquiryForm.js'
 import { LEGACY_TYPE } from '../lib/legacy.js'
 
@@ -26,7 +26,7 @@ function ProductTag({ t }) {
   return (
     <section className="ib-sec ptag-sec"><h5>제품 모델</h5>
       <div className="ptag-card">
-        {p && <img src={familyImage(p.family)} alt="" />}
+        {p && <img src={productImage(p.code)} alt="" />}
         <div className="ptc-t">
           {fam && <small>{fam.name}</small>}
           <b>{t.product_name || p?.name}</b>

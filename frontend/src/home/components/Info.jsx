@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { familyImage, getFamily, getProduct } from '../lib/catalog.js'
+import { getFamily, getProduct, productImage } from '../lib/catalog.js'
 import { DOC_LABEL, DOC_ORDER } from '../lib/guide.js'
 import { FamilyStep, ModelStep, PathTags, Stepper, Title } from './common.jsx'
 
@@ -107,7 +107,7 @@ export default function Info({ onExit, onContext, onInquire, nav, onNavDone }) {
       {stage === 2 && (!data || !mdocs ? <p className="faq-sub">자료를 불러오는 중이에요…</p> : (
         <>
           <div className="pcard">
-            <img src={familyImage(s.family)} alt="" />
+            <img src={productImage(p.code)} alt="" />
             <div>
               <small>{getFamily(s.family).name} · {p.code}</small>
               <h2>{p.name}</h2>
