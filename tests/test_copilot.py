@@ -539,3 +539,51 @@ def test_automatic_request_checklist_matches_actual_blocking_fields():
     assert payload["workflow"]["request_fields"] == ["photos"]
     s["review"] = {"action": "info_request", "info_items": ["current_fw"]}
     assert copilot.context(s, load_tables())[1]["workflow"]["request_fields"] == ["current_fw"]
+
+
+def test_referral_unavailable_material_cannot_be_selected_again(client):
+    from test_investigation_info import referral_state
+
+    row = client.post("/api/tickets", json=INQUIRY).json()
+    tid = row["ticket_id"]
+    service = client.app.state.tickets
+    updates = referral_state()
+    updates["extraction"].unconfirmed_fields["carrier_frequency"] = "UNAVAILABLE"
+    updates["extraction"].unconfirmed_evidence["carrier_frequency"] = (
+        "We cannot check the carrier frequency."
+    )
+    service.graph.update_state(service._config(tid), updates, as_node="ready")
+    plan = service.get(tid).copilot
+    response = client.post(
+        f"/api/tickets/{tid}/action",
+        json={
+            "action": "info_request",
+            "info_plan_key": plan["context_key"],
+            "info_items": ["carrier_frequency"],
+        },
+    )
+    assert response.status_code == 409
+    assert "미확인 요청 항목" in response.json()["detail"]
+    response = client.post(
+        f"/api/tickets/{tid}/action",
+        json={
+            "action": "info_request",
+            "info_plan_key": plan["context_key"],
+            "info_items": ["load_type"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["copilot"]["workflow"]["request_fields"] == ["load_type"]
+    assert service._state(tid).values["info_request_fields"] == ["load_type"]
+
+
+def test_referral_plan_changes_when_material_becomes_unavailable():
+    from test_investigation_info import referral_state
+
+    s = referral_state()
+    old_key, _ = copilot.context(s, load_tables())
+    s["extraction"].unconfirmed_fields["carrier_frequency"] = "UNAVAILABLE"
+    s["extraction"].unconfirmed_evidence["carrier_frequency"] = "Cannot check the setting."
+    key, payload = copilot.context(s, load_tables())
+    assert key != old_key
+    assert "carrier_frequency" not in payload["workflow"]["request_fields"]

@@ -66,6 +66,7 @@ from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
 from cs_agent.graph.state import TicketState
 from cs_agent.llm.router import LLMRouter
 from cs_agent.rules.engine import apply_rules
+from cs_agent.rules.investigation import referral_request_fields
 from cs_agent.rules.tables import RefTables, load_tables
 from cs_agent.schemas import CheckResult, ReviewIn
 from cs_agent.services.reply_preview import review_text, valid_preview
@@ -274,12 +275,16 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             route = Route.INFO_REQUEST
         else:
             route = Route.DRAFT
-        # 이관 권장은 분기를 바꾸지 않는다. 담당자에게 보여 주기만 한다 (안전 건은 이미 사람 큐)
+        # 이관 권장 건의 부족 자료를 한 번에 요청하되 안전 사람 큐는 유지한다.
         advice = (
             None
             if route == Route.HUMAN
             else deps.assess_escalation({**state, "rules": result}, deps.tables, deps.llm)
         )
+        if route != Route.HUMAN and referral_request_fields(
+            {**state, "rules": result, "escalation_advice": advice}, deps.tables
+        ):
+            route = Route.INFO_REQUEST
         return {"rules": result, "route": route, "escalation_advice": advice}
 
     def human(state: TicketState) -> dict:
@@ -300,9 +305,9 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         elif review and review.action == ReviewAction.REWRITE and state.get("info_request_fields"):
             missing = state["info_request_fields"]
         else:
-            missing = state["rules"].missing_blocking or state["rules"].missing_info
-        # Optional investigation materials are requested only when staff select them
-        # during referral preparation, never appended to every initial inquiry.
+            missing = referral_request_fields(state, deps.tables) or (
+                state["rules"].missing_blocking or state["rules"].missing_info
+            )
         # 고객 답변과 같이 영어로 검토하고, 승인한 문장만 finish에서 고객 언어로 바꾼다.
         options = {}
         if deps.write_info_request is info_request_agent.write_info_request:

@@ -46,7 +46,7 @@ from cs_agent.followup_schemas import FollowupConfirmation
 from cs_agent.llm.router import LLMRouter
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.engine import apply_rules
-from cs_agent.rules.investigation import investigation_info
+from cs_agent.rules.investigation import investigation_info, referral_request_fields
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
 from cs_agent.rules.tables import load_tables
 from cs_agent.schemas import (
@@ -616,6 +616,7 @@ class TicketService:
             if extraction.urgency == Urgency.SAFETY
             else Route.INFO_REQUEST
             if rules.missing_blocking
+            or referral_request_fields({**values, "extraction": extraction, "rules": rules}, tables)
             else Route.DRAFT
         )
         updates = {
@@ -826,7 +827,7 @@ class TicketService:
             from cs_agent.agents import copilot
 
             plan = copilot.view(snapshot.values, load_tables())["request_plan"]
-            allowed = {row["field"] for row in plan if row["status"] != "confirmed"}
+            allowed = {row["field"] for row in plan if row["status"] in {"missing", "clarify"}}
             rules = snapshot.values.get("rules")
             selected = snapshot.values.get("info_request_fields") or (
                 (rules.missing_blocking or rules.missing_info) if rules else []
@@ -842,7 +843,9 @@ class TicketService:
 
             current = copilot.view(snapshot.values, load_tables())
             allowed = {
-                row["field"] for row in current["request_plan"] if row["status"] != "confirmed"
+                row["field"]
+                for row in current["request_plan"]
+                if row["status"] in {"missing", "clarify"}
             }
             if current["context_key"] != review.info_plan_key:
                 raise InvalidAction("확인된 정보가 변경되었습니다. 요청 항목을 다시 선택해 주세요")

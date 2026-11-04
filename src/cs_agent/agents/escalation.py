@@ -405,6 +405,11 @@ def write_escalation_request(
     from cs_agent.rules.investigation import investigation_info
 
     advisory = investigation_info(state, tables)
+    if advisory and advisory.get("unavailable_fields"):
+        fields["investigation_unavailable"] = "고객이 미확보·확인 불가로 답한 자료: " + "; ".join(
+            f"{tables.request_labels.get(f, f)} — {reason}"
+            for f, reason in advisory["unavailable_fields"].items()
+        )
     if advisory and advisory["missing_fields"]:
         fields["investigation_recommended"] = (
             "미제공·권장 자료: "
@@ -467,6 +472,7 @@ def write_escalation_request(
     )
     labels = {
         "investigation_recommended": "추가 확인 권장 자료",
+        "investigation_unavailable": "고객이 제공할 수 없는 자료와 사유",
         "product_code": "제품 코드",
         "product_family": "제품군",
         "customer_tier": "고객 등급",
