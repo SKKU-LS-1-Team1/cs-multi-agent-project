@@ -710,6 +710,60 @@ class TicketService:
         return self.get(ticket_id)
 
     @_serialized
+    def suggest_manual_reply(self, ticket_id: str, llm: LLMRouter) -> dict:
+        """사람 검토 문의의 영어 답변 초안을 처음 문의와 전문부서 회신으로 만들어 보여 준다.
+
+        저장하거나 보내지 않는다. 담당자가 고쳐서 manual-reply 로 저장해야 검토 흐름에 들어간다.
+        """
+        requests = self._sync_specialists(ticket_id)
+        snapshot = self._state(ticket_id)
+        state = snapshot.values
+        if state.get("status") != TicketStatus.HUMAN_QUEUE and not (
+            state.get("manual_reply") and "review" in snapshot.next
+        ):
+            raise InvalidAction("사람 검토 문의에서만 AI 초안을 만들 수 있습니다")
+        if any(r["reply"] is None for r in requests):
+            raise InvalidAction("전문부서 회신을 모두 확인한 뒤 초안을 만들어 주세요")
+        classification, extraction = state.get("classification"), state.get("extraction")
+        if classification is None or extraction is None:
+            raise InvalidAction("문의 분석 결과가 없어 AI 초안을 만들 수 없습니다. 직접 작성하세요")
+        replies = state.get("specialist_replies", [])
+        evidence = [e for e in state.get("evidence", []) if e.source != "specialist"]
+        evidence += drafting.specialist_evidence(replies)
+        current = followup.current_followup(state, requests)
+        confirmation = current.get("confirmation") if current else None
+        feedback = (
+            "Staff-confirmed specialist finding (preserve scope and conditions): "
+            + confirmation["finding"]["evidence"]
+            if confirmation
+            else None
+        )
+        inquiry = state["inquiry"]
+        with ticket_scope(ticket_id):
+            try:
+                evidence = drafting.prepare_evidence(
+                    classification.category,
+                    extraction,
+                    evidence,
+                    secondary_category=classification.secondary_category,
+                    raw_dir=llm.settings.raw_data_dir,
+                )
+                draft = drafting.write_draft(
+                    classification.category,
+                    extraction,
+                    evidence,
+                    f"{inquiry.subject}\n{inquiry.body}".strip(),
+                    llm,
+                    reviewer_feedback=feedback,
+                    secondary_category=classification.secondary_category,
+                    specialist_replies=replies,
+                    followup_link=state.get("followup_link"),
+                )
+            except drafting.DraftingError as error:
+                raise InvalidAction(str(error)) from error
+        return {"text": draft.text}
+
+    @_serialized
     def prepare_reply(self, ticket_id: str, text: str, llm: LLMRouter) -> dict:
         """Translate for staff inspection without approving or sending anything."""
         self._sync_specialists(ticket_id)

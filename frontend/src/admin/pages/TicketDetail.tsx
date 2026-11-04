@@ -18,7 +18,7 @@ import {
 import {
   requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, openExpertReview, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
-import { rewriteViaApi, loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
+import { rewriteViaApi, loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi, manualDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
 import { flowSteps, type Step, type StepState } from "@admin/lib/flow-steps";
 import { cn } from "@admin/lib/utils";
@@ -291,7 +291,6 @@ function Completed({ t }: { t: Ticket }) {
 
 /** 작성 카드: 화면 아래에 붙어 있고, 내용이 길면 카드 안에서만 스크롤된다. 영어로 쓴 초안을 검토·수정하고, AI 에게 수정을 지시하고, 승인한다. */
 function Editor({ t }: { t: Ticket }) {
-  const [folded, setFolded] = useState(false);
   if (t.activeComposer === "expert") return <ExpertEditor t={t} />;
   if (!t.draft && !t.composerOpen) return null;
   const manual = isManualReplyTicket(t);
@@ -321,11 +320,10 @@ function Editor({ t }: { t: Ticket }) {
     <Card id="answer-editor" className="min-w-0 scroll-mt-6 gap-0 p-0 shadow-float ring-1 ring-black/5">
       <div className="flex items-center justify-between gap-4 px-8 pb-3 pt-7">
         <h2 className="flex items-center gap-3 text-base font-semibold"><span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-[#d6336c]/10 px-3 text-[13px] font-medium text-[#c2255c]"><Headset className="size-3.5" aria-hidden />{isRequest ? "관리자 질의" : "관리자 답변"}</span>{isRequest ? "고객 질의서 작성" : "고객 답변 작성"}
-          {t.draft && <button type="button" aria-expanded={!folded} onClick={() => setFolded((v) => !v)} className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"><ChevronDown className={cn("size-3.5 transition-transform", folded && "-rotate-90")} aria-hidden />{folded ? "펼치기" : "접기"}</button>}
         </h2>
         <div className="flex items-center gap-2 text-sm text-muted-foreground"><span>작성 English</span><span>→ 고객 언어 <b className="font-medium text-foreground">{lang}</b></span></div>
       </div>
-      {!folded && (
+      {(
         <div className="grid min-w-0 grid-cols-1 gap-6 px-8 pb-7 pt-2 *:min-w-0">
           {isRequest && t.copilot && <div><Button variant="outline" size="sm" disabled={busy} onClick={() => openModal("request-plan", { id: t.id })}>요청 항목 선택</Button></div>}
           {t.draft ? <Sources c={used} t={t} /> : live.purpose === "request" ? <Sources c={live} t={t} /> : null}
@@ -333,7 +331,9 @@ function Editor({ t }: { t: Ticket }) {
           {t.draft || manual ? (
             <>
               <div className="grid gap-3">
-                <div className="flex items-center gap-2.5 text-sm font-medium">{!manual && <AiMark />}{manual ? "담당자 작성 · 영어 답변" : `미발송 초안 · v${t.draftVersion || 1}`}{!manual && isEdited(t) && <Tag tone="amber">AI 초안에서 수정됨</Tag>}{busy && <small className="font-normal text-info">AI가 다시 만드는 중…</small>}</div>
+                <div className="flex items-center gap-2.5 text-sm font-medium">{!manual && <AiMark />}{manual ? "담당자 작성 · 영어 답변" : `미발송 초안 · v${t.draftVersion || 1}`}{!manual && isEdited(t) && <Tag tone="amber">AI 초안에서 수정됨</Tag>}{busy && <small className="font-normal text-info">AI가 다시 만드는 중…</small>}
+                  {manual && <Button type="button" size="sm" variant="outline" className="ml-auto" disabled={busy || !!t.aiDrafting || expertWaiting} title={expertWaiting ? "전문부서 회신을 모두 등록한 뒤 만들 수 있습니다" : "처음 문의와 전문부서 회신을 바탕으로 영어 초안을 만듭니다"}
+                    onClick={() => { if (t.draft?.trim() && !window.confirm("작성 중인 내용을 AI 초안으로 바꿉니다. 계속할까요?")) return; void manualDraftViaApi(t); }}><AiMark className="size-3.5" />{t.aiDrafting ? "초안 작성 중…" : "AI 초안 작성"}</Button>}</div>
                 <Textarea aria-label="영어 초안" disabled={busy} className="field-sizing-fixed min-w-0 min-h-36 max-h-56 rounded-2xl border-0 bg-muted/60 px-5 py-4 text-base leading-[1.8]" value={t.draft} onChange={(e) => editDraft(t, e.target.value)} />
               </div>
               {!manual && <RewriteBox t={t} busy={busy} />}
@@ -363,6 +363,9 @@ function Editor({ t }: { t: Ticket }) {
           ) : (
             <Button variant="outline" size="lg" disabled={busy || t.translatingReply || (!isRequestDraft && t.followupContextStale)} onClick={() => void prepareCustomerReply(t)}>{t.translatingReply ? "변환 중…" : "고객 언어로 변환"}</Button>
           )}
+        </div>}
+        {!t.draft && !manual && <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button size="lg" className="px-6" disabled={busy || t.expertDraftLoading} onClick={() => composeFromCopilot(t, isRequest ? "request" : "answer")}>{busy ? "작성 중…" : isRequest ? "질의서 작성" : "답변 초안 작성"}</Button>
         </div>}
       </div>
     </Card>
@@ -483,14 +486,27 @@ function Disclosure({ title, count, children, defaultOpen }: { title: ReactNode;
 
 const SECTION_TONE = { info: "bg-info/10 text-info", navy: "bg-[#003377]/10 text-[#003377]", success: "bg-success/10 text-success" } as const;
 /** Copilot 구역: 접지 않고 항상 보인다. 아이콘 색과 제목만 다르다. */
-function PanelBlock({ icon: Icon, tone, title, count, children }: { icon: LucideIcon; tone: keyof typeof SECTION_TONE; title: ReactNode; count?: ReactNode; children: ReactNode }) {
+function PanelBlock({ icon: Icon, tone, title, count, foldable, children }: { icon: LucideIcon; tone: keyof typeof SECTION_TONE; title: ReactNode; count?: ReactNode; foldable?: boolean; children: ReactNode }) {
+  const head = (
+    <>
+      <span className={cn("grid size-8 place-items-center rounded-full", SECTION_TONE[tone])}><Icon className="size-[18px]" aria-hidden /></span>{title}
+      {count && <span className="ml-auto text-sm font-normal text-muted-foreground">{count}</span>}
+      {foldable && <ChevronDown className={cn("size-4 text-muted-foreground transition-transform group-open/fold:rotate-180", !count && "ml-auto")} aria-hidden />}
+    </>
+  );
   return (
     <section aria-label={typeof title === "string" ? title : undefined} className="py-6">
-      <h3 className="mb-4 flex items-center gap-2.5 text-base font-semibold">
-        <span className={cn("grid size-8 place-items-center rounded-full", SECTION_TONE[tone])}><Icon className="size-[18px]" aria-hidden /></span>{title}
-        {count && <span className="ml-auto text-sm font-normal text-muted-foreground">{count}</span>}
-      </h3>
-      {children}
+      {foldable ? (
+        <details open className="group/fold">
+          <summary className="mb-4 flex cursor-pointer list-none items-center gap-2.5 text-base font-semibold [&::-webkit-details-marker]:hidden"><h3 className="contents">{head}</h3></summary>
+          {children}
+        </details>
+      ) : (
+        <>
+          <h3 className="mb-4 flex items-center gap-2.5 text-base font-semibold">{head}</h3>
+          {children}
+        </>
+      )}
     </section>
   );
 }
@@ -536,7 +552,7 @@ function Copilot({ t }: { t: Ticket }) {
             {reason && <div className="mt-3 border-t border-border pt-3"><p className="mb-1 text-sm font-medium">{presentation.reasonTitle}</p><Statement value={reason} sources={insight.data!.sources} /></div>}
             {j.note && <p className="mt-2 flex items-center gap-1.5 text-sm text-warning-ink"><Clock className="size-4" aria-hidden />{j.note}</p>}
             {requestRows.length === 0 && j.missing.length > 0 && <ul className="mt-3 grid gap-1.5 text-[15px]">{j.missing.map((x) => <li key={x} className="flex items-center gap-2"><span aria-hidden className="size-1.5 rounded-full bg-warning" />{x}</li>)}</ul>}
-            {t.specialistFollowup?.confirmation && <p className="mt-2 text-sm text-success">{t.specialistFollowup.confirmation.reviewer} · 전문부서 검토 결과 확인 완료</p>}
+            {t.specialistFollowup?.confirmation && <p className="mt-2 text-xs font-bold text-success">{t.specialistFollowup.confirmation.reviewer} · 전문부서 검토 결과 확인 완료</p>}
             {(choice || showNext) && (
               <div className="mt-5 grid gap-2.5">
                 {choice ? <>
@@ -595,7 +611,7 @@ function Copilot({ t }: { t: Ticket }) {
           </PanelBlock>
         )}
         {evidence.length > 0 && (
-          <PanelBlock icon={BookOpen} tone="success" title="참고한 자료" count={`${evidence.length}건`}>
+          <PanelBlock icon={BookOpen} tone="success" title="참고한 자료" foldable count={`${evidence.length}건`}>
             <ul className="grid min-w-0 rounded-2xl bg-muted/60 p-2">{evidence.slice(0, 4).map((e) => <li key={e.key} className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 px-3 py-2.5">
               <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3"><span className="min-w-0 whitespace-normal text-[15px] font-medium [overflow-wrap:anywhere]">{e.label}</span><span className="max-w-20 whitespace-normal text-right text-xs text-muted-foreground [overflow-wrap:anywhere]">{e.hint}</span></span>
               {e.summary && <span className="min-w-0 [overflow-wrap:anywhere] line-clamp-2 text-sm leading-relaxed text-muted-foreground">{e.summary}</span>}

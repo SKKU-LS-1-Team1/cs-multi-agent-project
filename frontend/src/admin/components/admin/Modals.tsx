@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@admin/lib/utils";
-import { ArrowRight, Building2, ChevronDown, CircleCheck, Clock, LoaderCircle, ShieldAlert, Paperclip } from "lucide-react";
+import { ArrowRight, ChevronDown, CircleCheck, LoaderCircle, ShieldAlert, Paperclip } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { Checkbox } from "@admin/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@admin/components/ui/dialog";
@@ -13,7 +13,7 @@ import { AiMark, Facts, Field, Mono, NativeSelect, PersonAvatar, Tag } from "./c
 import DocContent from "./DocContent";
 import { useNavigate } from "react-router-dom";
 import {
-  canSend, applyPendingAnswer, assignOwner, completeTicket, confirmExpertReview, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply,
+  canSend, applyPendingAnswer, assignOwner, completeTicket, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply, submitExpertRequest,
 } from "@admin/lib/actions";
 import {
   candidates, completionDraft, customerLanguage, informationAssessment, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, expertPhase, referralRows, resource, resourceReason, signedIn, waitingReviews,
@@ -31,7 +31,7 @@ const TITLES: Record<string, string> = {
   "request-plan": "고객에게 확인할 정보",
   "specialist-finding": "전문부서 검토 결과 확인",
   "new-ticket": "새 문의 등록", assign: "담당자 및 리소스 확인", send: "발송 확인", "answer-comparison": "답변 초안 갱신", "review-customer": "수신 자료 확인",
-  "expert-receive": "전문부서 회신 등록", completion: "문의 완료 처리", "customer-reply": "고객 회신", "department-review": "전문부서 요청·회신", file: "첨부파일",
+  "expert-receive": "전문부서 회신 등록", completion: "문의 완료 처리", "customer-reply": "고객 회신", "department-review": "전문부서 회신 대기 중", file: "첨부파일",
   document: "기술문서 · iS7 고장 가이드", "knowledge-document": "근거 문서",
 };
 const WIDE = ["care", "new-ticket", "review-customer", "answer-comparison", "department-review", "knowledge-document", "completion"];
@@ -45,7 +45,7 @@ export default function ModalHost() {
     <Dialog open={!!m} onOpenChange={(o) => !o && !sendBusy && closeModal()}>
       {m && (
         <DialogContent showCloseButton={!sendBusy} className={cn(MODAL, WIDE.includes(m.type) ? "sm:max-w-2xl" : "sm:max-w-lg")}>
-          <DialogHeader className="pr-8"><DialogTitle className="text-[22px] font-semibold">{m.type === "send" && t ? (t.purpose === "request" ? "고객 질의서 발송" : "고객 답변 발송") : m.type === "care" ? kindLabel(m.props?.kind) : TITLES[m.type] || "알림"}</DialogTitle></DialogHeader>
+          <DialogHeader className="pr-8"><DialogTitle className="text-[22px] font-semibold">{m.type === "send" && t ? (t.purpose === "request" ? "고객 질의서 발송" : "고객 답변 발송") : m.type === "care" ? kindLabel(m.props?.kind) : m.type === "department-review" ? reviewTitle(m.props || {}) : TITLES[m.type] || "알림"}</DialogTitle></DialogHeader>
           {m.type === "send" && t ? <Send key={t.id} t={t} onBusy={setSendBusy} /> : <Body type={m.type} props={m.props || {}} t={t} />}
         </DialogContent>
       )}
@@ -402,38 +402,49 @@ const Cell = ({ label, children, wide }: { label: string; children: ReactNode; w
   <div className={wide ? "col-span-3" : ""}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 font-medium">{children}</dd></div>
 );
 
-/** 전문부서 요청·회신: 위에서 아래로 "무슨 요청인가 → 누구에게 언제 → 요청 내용 → 회신" 순서. 회신 상태는 색으로 바로 보인다. */
+/** 부서 요청 한 건: 화면 열기 키(key 또는 ticketId+requestId)로 referralRows 에서 찾는다. 제목과 본문이 같은 건을 가리킨다. */
+const findReferral = (props: Record<string, any>) => (props.key ? referralRows().find((x) => x.key === props.key) : referralRows().find((x) => x.ticket.id === props.ticketId && x.requestId === props.requestId));
+/** 모달 제목: 회신을 기다리는 중인지, 회신이 왔는지가 제목에서 바로 보인다. */
+const reviewTitle = (props: Record<string, any>) => { const r = findReferral(props); return r?.response ? "전문부서 회신 도착" : "전문부서 회신 대기 중"; };
+
+/** 전문부서 요청·회신: "무슨 요청인가 → 누구에게 언제 → 내가 보낸 요청 내용 → (회신이 왔다면) 회신과 답장". 회신 대기 중에는 회신 칸이 없다. */
 function DepartmentReview({ props }: { props: Record<string, any> }) {
   const nav = useNavigate();
-  const r = props.key ? referralRows().find((x) => x.key === props.key) : referralRows().find((x) => x.ticket.id === props.ticketId && x.requestId === props.requestId);
+  const [reply, setReply] = useState(""), [sending, setSending] = useState(false);
+  const r = findReferral(props);
   if (!r?.event) return null;
   const e = r.event, c = e.requestContext, files: string[] | null = Array.isArray(e.transmittedFiles) ? e.transmittedFiles : null;
-  const canReply = !r.response && r.ticket.stage !== 5;
   const toReview = !!r.response && !r.response.reviewed && expertPhase(r.ticket) === "review"; // 회신이 도착했고 담당자가 아직 확인하지 않았다
+  const canAnswer = !!r.response && r.ticket.stage !== 5 && !!r.target;
+  const send = async () => {
+    if (!reply.trim() || sending || !r.target) return;
+    setSending(true);
+    await submitExpertRequest(r.ticket, { department: r.target, channel: e.channel === "기업 메신저" ? "기업 메신저" : "이메일", body: reply.trim(), files: [] });
+    setSending(false);
+  };
   return (
-    <div className="grid gap-5">
-      <header className="grid gap-2">
+    <div className="grid gap-8">
+      <header className="grid gap-3">
         <div className="flex items-center justify-between">
-          <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-slate-200/70 px-2.5 text-xs font-medium text-slate-700"><Building2 className="size-3.5" aria-hidden />전문부서 요청</span>
           <Tag tone={r.response ? (toReview ? "blue" : "green") : "amber"}>{r.response ? (toReview ? "회신 도착 · 검토 필요" : r.response.reviewed ? "회신 반영 완료" : "회신 받음") : "회신 대기"}</Tag>
         </div>
         <h3 className="text-xl font-bold leading-snug">{r.ticket.title}</h3>
-        <p className="text-sm text-muted-foreground"><Mono>{r.requestId}</Mono> · <Mono>{r.ticket.id}</Mono> · {r.ticket.product}</p>
+        <p className="text-sm leading-relaxed text-muted-foreground"><Mono>{r.requestId}</Mono> · <Mono>{r.ticket.id}</Mono> · {r.ticket.product}</p>
       </header>
 
-      <dl className="grid grid-cols-3 gap-x-6 gap-y-4 rounded-xl bg-muted/60 p-4 text-[15px]">
+      <dl className="grid grid-cols-3 gap-x-6 gap-y-6 rounded-2xl bg-muted/60 p-6 text-[15px]">
         <Cell wide label="요청 → 대상 부서"><span className="inline-flex items-center gap-2">{r.source || "부서 미기록"}<ArrowRight className="size-4 text-muted-foreground" aria-hidden />{r.target || "부서 미기록"}</span></Cell>
         <Cell label="요청 담당자">{e.actor || "미기록"}</Cell>
         <Cell label="요청일">{stamp(r.when)}</Cell>
         <Cell label="전달 방식">{e.channel || "미기록"}</Cell>
       </dl>
 
-      <section className="grid gap-2">
+      <section className="grid gap-3">
         <h4 className="text-sm font-semibold">검토 요청사항</h4>
-        <p className="whitespace-pre-line rounded-xl bg-[#003377]/[0.05] p-4 text-[15px] leading-relaxed">{e.request || e.text}</p>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+        <p className="whitespace-pre-line rounded-2xl bg-[#003377]/[0.05] p-5 text-[15px] leading-[1.8]">{e.request || e.text}</p>
+        <div className="flex flex-wrap items-center gap-2.5 pt-1 text-sm">
           <span className="text-muted-foreground">전달 자료</span>
-          {files?.length ? files.map((f) => <span key={f} className="inline-flex h-6 items-center gap-1.5 rounded-full bg-muted px-2.5 text-xs"><Paperclip className="size-3" aria-hidden />{f}</span>) : <span className="text-muted-foreground">{files ? "없음" : "미기록"}</span>}
+          {files?.length ? files.map((f) => <span key={f} className="inline-flex h-7 items-center gap-1.5 rounded-full bg-muted px-3 text-xs"><Paperclip className="size-3" aria-hidden />{f}</span>) : <Tag>{files ? "없음" : "미기록"}</Tag>}
         </div>
       </section>
 
@@ -442,24 +453,23 @@ function DepartmentReview({ props }: { props: Record<string, any> }) {
           <Facts className="mt-3" rows={[["제품·오류", c.analysis.product + (c.analysis.errorCode ? " · " + c.analysis.errorCode : "")], ["누락 항목", c.missingInfo.join(" · ") || "확인된 누락 항목 없음"], ["참고 근거", c.references.map((x: any) => x.label).join(" · ") || "연결된 근거 없음"]]} /></details>
       )}
 
-      {r.response ? (
-        <section className="grid gap-2 rounded-xl bg-success/10 p-4">
+      {r.response && (
+        <section className="grid gap-3 rounded-2xl bg-success/10 p-6">
           <div className="flex items-center justify-between"><h4 className="flex items-center gap-1.5 text-sm font-semibold text-success"><CircleCheck className="size-4" aria-hidden />전문부서 회신</h4><small className="text-muted-foreground">{r.response.time} · 등록 {r.response.actor || "미기록"}</small></div>
-          <p className="whitespace-pre-line text-[15px] leading-relaxed">{r.response.text}</p>
+          <p className="whitespace-pre-line text-[15px] leading-[1.8]">{r.response.text}</p>
         </section>
-      ) : (
-        <section className="flex items-center gap-2.5 rounded-xl border border-dashed p-4 text-sm text-muted-foreground"><Clock className="size-4 text-warning" aria-hidden />전문부서의 회신을 기다리고 있습니다.</section>
+      )}
+
+      {canAnswer && (
+        <section className="grid gap-3">
+          <h4 className="text-sm font-semibold">{r.target}에 답장</h4>
+          <Textarea aria-label="전문부서에 보낼 답장" disabled={sending} className="min-h-28 leading-relaxed" value={reply} onChange={(ev) => setReply(ev.target.value)} placeholder="회신에 대한 추가 질문이나 요청을 적어 보내세요." />
+          <div className="flex items-center justify-between gap-3"><small className="text-muted-foreground">보낸 내용은 새 검토 요청으로 기록됩니다.</small><Button type="button" disabled={!reply.trim() || sending} onClick={send}>{sending ? "저장 중…" : "답장 보내기"}</Button></div>
+        </section>
       )}
 
       <Footer>
-        <Close />
-        <Button variant="outline" onClick={() => { closeModal(); nav("/tickets/" + r.ticket.id); }}>원본 문의 열기</Button>
-        {canReply && <Button onClick={() => openModal("expert-receive", { id: r.ticket.id, requestId: r.requestId })}>회신 등록</Button>}
-        {toReview && <>
-          <Button variant="outline" onClick={() => confirmExpertReview(r.ticket, "customer")}>고객 자료 추가 요청</Button>
-          <Button variant="outline" onClick={() => { confirmExpertReview(r.ticket, "followup"); }}>추가 질의</Button>
-          <Button onClick={() => { confirmExpertReview(r.ticket, "answer"); nav("/tickets/" + r.ticket.id); }}>회신 반영하고 답변 작성</Button>
-        </>}
+        <Button onClick={() => { closeModal(); nav("/tickets/" + r.ticket.id); }}>문의 관리에서 열기</Button>
       </Footer>
     </div>
   );

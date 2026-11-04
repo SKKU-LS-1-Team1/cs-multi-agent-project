@@ -115,6 +115,39 @@ def test_manual_reply_rejects_stale_context_empty_input_and_closed_ticket(app_cl
     assert rejected.json()["processing_history"][-1]["kind"] == "rejected"
 
 
+def test_manual_draft_suggestion_uses_inquiry_and_replies_without_saving(app_client, monkeypatch):
+    from cs_agent.agents import drafting
+
+    seen = {}
+
+    def fake_write(category, extraction, evidence, inquiry_text, llm, **kwargs):
+        seen["inquiry"] = inquiry_text
+        seen["replies"] = kwargs.get("specialist_replies")
+        return Draft(text=TEXT, slots={"draft_language": "en"})
+
+    monkeypatch.setattr(drafting, "write_draft", fake_write)
+    monkeypatch.setattr(drafting, "prepare_evidence", lambda *a, **k: [])
+    row = app_client.post("/api/tickets", json=INQUIRY).json()
+    assert row["status"] == "HUMAN_QUEUE"
+    tid = row["ticket_id"]
+    suggested = app_client.post(f"/api/tickets/{tid}/manual-draft")
+    assert suggested.status_code == 200, suggested.text
+    assert suggested.json() == {"text": TEXT}
+    assert "There is smoke from the iS7 drive." in seen["inquiry"]
+    # 제안일 뿐이다: 담당자가 저장하기 전에는 초안도 상태도 바뀌지 않는다.
+    after = app_client.get(f"/api/tickets/{tid}").json()
+    assert after["status"] == "HUMAN_QUEUE" and after["draft"] is None and not after["manual_reply"]
+
+
+def test_manual_draft_suggestion_is_limited_to_human_review_tickets(app_client):
+    assert app_client.post("/api/tickets/missing/manual-draft").status_code == 404
+    row = app_client.post(
+        "/api/tickets", json={**INQUIRY, "subject": "Price", "body": "Quote for MCCB 100AF?"}
+    ).json()
+    if row["status"] != "HUMAN_QUEUE":
+        assert app_client.post(f"/api/tickets/{row['ticket_id']}/manual-draft").status_code == 409
+
+
 def test_unclassified_human_reply_requires_explicit_confirmation():
     def failed(*args, **kwargs):
         raise AnalysisError("classification_failed")
