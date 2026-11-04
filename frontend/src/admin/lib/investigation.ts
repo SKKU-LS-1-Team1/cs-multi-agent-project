@@ -42,6 +42,7 @@ export function copilotMode(t: Ticket, choice: string | null = null): string {
   if (task) return task.kind === "request" ? "customer_request"
     : task.kind === "progress" ? "wait_specialist" : "specialist_review";
   if (t.specialistRequests?.some((r: any) => !r.reply)) return "wait_specialist";
+  if (choice && t.escalationAdvice?.decision === "recommended" && !t.specialistRequests?.length) return choice === "expert" ? "specialist_prepare" : "customer_request";
   if (t.purpose === "answer" && t.draft && t.composerOpen) return "customer_answer";
   if (choice) return { request: "customer_request", answer: "customer_answer", expert: "specialist_prepare" }[choice] || "manual_review";
   if (t.purpose === "answer" && t.draft) return "customer_answer";

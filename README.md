@@ -96,6 +96,15 @@ uv run --extra data python -m cs_agent.pipeline.prepare_data
 
 ---
 
+## 🧭 전문부서 이관 권장
+
+접수 분석 때 이관이 필요해 보이는 문의를 Copilot 에 이유·고객 문장과 함께 표시한다. 권장만 하고 상태·부서·발송은
+바꾸지 않으며 담당자가 요청서로 이관한다. 필수 자료가 부족하면 질의서를 먼저 보내고, 고객 회신이 오면 다시 판단한다.
+
+- 규칙: 문서 요청·견적은 이관 안 함, P1 불량·설치는 권장 (`agents/escalation_advice.py`)
+- 나머지: Jev → Gemini 판단, 예일 때만 Gemini 가 이유 작성. 인용이 원문에 없으면 권장 취소
+- 배포 전에 들어온 문의에는 소급하지 않는다. 측정: `docs/results/escalation_advice.md`
+
 ## 🕸️ 사례 학습 지식 그래프 (Neo4j)
 
 CSA-69~73.

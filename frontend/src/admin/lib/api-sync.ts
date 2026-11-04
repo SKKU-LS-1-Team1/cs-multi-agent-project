@@ -168,6 +168,7 @@ export function apply(t: Ticket | undefined, api: ApiTicket): Ticket {
     apiCited: api.draft?.cited || [],
     approvalCited: api.approval_cited,
     investigationInfo: api.investigation_info || null,
+    escalationAdvice: api.escalation_advice || null,
     specialistFollowup: api.specialist_followup || null,
     specialistRequests: api.specialist_requests || [],
     specialistRevision: api.specialist_revision ?? 0,

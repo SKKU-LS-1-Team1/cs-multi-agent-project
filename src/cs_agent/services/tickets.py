@@ -1103,6 +1103,7 @@ class TicketService:
             evidence=v.get("evidence", []),
             specialist_requests=specialist_requests,
             investigation_info=investigation_info(v),
+            escalation_advice=v.get("escalation_advice"),
             specialist_followup=self._followup(ticket_id, state=v, requests=specialist_requests),
             specialist_revision=len(specialist_requests)
             + sum(r["reply"] is not None for r in specialist_requests),
