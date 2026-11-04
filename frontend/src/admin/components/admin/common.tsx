@@ -146,7 +146,7 @@ export function StatusIcon({ t }: { t: Ticket }) {
   return <span className={cn("grid size-10 shrink-0 place-items-center rounded-full", cls)}><Icon className="size-[18px]" aria-hidden /></span>;
 }
 
-/** 지금 처리 단계: "3/6 전문부서"(외부 회신을 기다리는 단계면 "3/6 전문부서 대기"). */
+/** 지금 처리 단계: "3/5 전문부서"(외부 회신을 기다리는 단계면 "3/5 전문부서 대기"). */
 export function StepTag({ t }: { t: Ticket }) {
   const s = currentStep(t);
   return <Tag className="shrink-0 tabular-nums">{s.index}/{s.total} {s.label}{s.phase ? ` · ${s.phase}` : s.waiting && " 대기"}</Tag>;
@@ -154,7 +154,7 @@ export function StepTag({ t }: { t: Ticket }) {
 
 /** 목록 한 줄: 아이콘 · 제목과 메타 · 오른쪽에 SLA와 담당자. 한 줄에 정보는 두세 개만. */
 export function TicketRow({ t, onOpen, lead }: { t: Ticket; onOpen: () => void; lead?: ReactNode }) {
-  const fresh = !t.owner && t.stage !== 5; // 아직 배정 전인 새 문의: 아이콘·남은 시간 없이 점선 "미배정"으로 구분한다(단계는 1/6 접수·분석)
+  const fresh = !t.owner && t.stage !== 5; // 아직 배정 전인 새 문의: 아이콘·남은 시간 없이 점선 "미배정"으로 구분한다(단계는 1/5 접수·확인)
   return (
     <div role="button" tabIndex={0} aria-label={`${t.title} 상세 열기`} onClick={onOpen} onKeyDown={(e) => e.target === e.currentTarget && e.key === "Enter" && onOpen()}
       className={cn("group grid cursor-pointer items-center gap-4 px-6 py-5 transition-colors hover:bg-muted/70", fresh && !lead ? "grid-cols-[minmax(0,1fr)_auto_16px]" : "grid-cols-[auto_minmax(0,1fr)_auto_16px]")}>
