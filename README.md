@@ -158,4 +158,18 @@ RETURN p, e, f, c, d LIMIT 30
 |:--|:--|
 | [`ci.yml`](.github/workflows/ci.yml) | ruff 린트 · 포맷 검사 · pytest |
 | [`deploy.yml`](.github/workflows/deploy.yml) | `main` 푸시 시 GCP VM에 SSH로 접속해 `docker compose` 로 다시 띄움 |
+| [`chat-smoke.yml`](.github/workflows/chat-smoke.yml) | 운영 챗봇 실전 점검: 매일 09:00 KST · 배포 성공 뒤 · 직접 실행 |
 | [`jira-key-check.yml`](.github/workflows/jira-key-check.yml) | PR 제목·브랜치 이름의 Jira 키(`CSA-n`) 확인 ([규칙](docs/JIRA_INTEGRATION.md)) |
+
+### 챗봇 실전 점검
+
+실제 서버에 대화를 보내 상담원 전환 여부 · 화면 이동 · 답변 값을 확인한다. 실제 LLM 을 불러 Gemini 호출이 수십 번 든다.
+
+```bash
+uv run python -m cs_agent.evaluation.chat_smoke http://localhost:8000
+```
+
+- 운영에서 고객이 겪은 문제는 [`data/eval/chat_smoke.json`](data/eval/chat_smoke.json) 에 대화로 더한다. 고칠 때 같이 넣는다.
+- 챗봇 동작을 일부러 바꾸면 기대값도 같은 PR 에서 고친다.
+- 시연 전에는 Actions 의 `Chat smoke` 를 직접 실행한다. 다른 서버는 `base_url` 입력으로 지정한다.
+- PR CI 는 실제 서버를 부르지 않고, 시나리오 형식과 사고 사례가 남아 있는지만 본다 (`tests/test_chat_smoke.py`).
