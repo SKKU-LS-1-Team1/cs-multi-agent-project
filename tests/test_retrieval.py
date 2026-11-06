@@ -317,3 +317,98 @@ def test_measure_rerank_compares_off_and_on() -> None:
     result = measure_rerank([row], Fixed(), None, _RerankLLM(RERANK_YES), weights=(0.5,))
 
     assert (result["base"], result["pool"], result["rerank"][0.5]) == (0, 1, 1)
+
+
+# 하이브리드 (멘토링 개선안 4) --------------------------------------------------------------------
+
+
+class _VectorDocs:
+    """pgvector docs 대역: search 는 정해 둔 순서, score_sections 는 정해 둔 벡터 점수."""
+
+    calibrated = True
+
+    def __init__(self, ranked: list[Evidence], scores: dict[tuple[str, str], float]):
+        self.ranked, self.scores = ranked, scores
+        self.asked: list[tuple[str, str]] = []
+
+    def search(self, query, k=5, where=None):
+        found = [
+            e
+            for e in self.ranked
+            if not where or all(e.metadata.get(c) == v for c, v in where.items())
+        ]
+        return found[:k]
+
+    def score_sections(self, query, keys):
+        self.asked.extend(keys)
+        return [
+            _doc(doc_id, section, self.scores[(doc_id, section)], doc_type=doc_id.split("-")[0])
+            for doc_id, section in keys
+            if (doc_id, section) in self.scores
+        ]
+
+
+def _hybrid_settings(monkeypatch, enabled: bool, weight: float = 0.3) -> None:
+    from cs_agent.agents import retrieval
+
+    settings = SimpleNamespace(hybrid_enabled=enabled, hybrid_weight=weight)
+    monkeypatch.setattr(retrieval, "get_settings", lambda: settings)
+    monkeypatch.setattr(retrieval, "_keyword_index", lambda: keyword_docs(CHUNKS))
+
+
+def test_first_pass_hybrid_adds_keyword_sections(monkeypatch) -> None:
+    _hybrid_settings(monkeypatch, enabled=True)
+    vector = _VectorDocs([_doc("DS-INV-A", "2.1", 0.8, doc_type="DS")], {("TG-INV-A", "3.4"): 0.6})
+    found = first_pass(vector, None, "deceleration time keeps tripping")
+    by_key = {(e.doc_id, e.section): e for e in found}
+    # 벡터 top 밖이던 TG 3.4 가 키워드로 들어오고, 벡터 점수 + 키워드 점수 × 0.3
+    assert ("TG-INV-A", "3.4") in vector.asked
+    assert by_key[("TG-INV-A", "3.4")].score > 0.6
+    assert by_key[("TG-INV-A", "3.4")].metadata["keyword"]
+    assert by_key[("DS-INV-A", "2.1")].score == 0.8  # 키워드에 안 걸린 근거는 그대로
+
+
+def test_first_pass_hybrid_off_is_vector_only(monkeypatch) -> None:
+    _hybrid_settings(monkeypatch, enabled=False)
+    vector = _VectorDocs([_doc("DS-INV-A", "2.1", 0.8, doc_type="DS")], {("TG-INV-A", "3.4"): 0.6})
+    found = first_pass(vector, None, "deceleration time keeps tripping")
+    assert [(e.doc_id, e.section) for e in found] == [("DS-INV-A", "2.1")]
+    assert vector.asked == []
+
+
+def test_first_pass_hybrid_skips_keyword_retriever(monkeypatch) -> None:
+    # 로컬 대체 구현(키워드 검색)이면 섞을 벡터가 없으니 그대로
+    _hybrid_settings(monkeypatch, enabled=True)
+    found = first_pass(keyword_docs(CHUNKS), None, "deceleration time")
+    assert all("keyword" not in e.metadata for e in found)
+
+
+def test_measure_hybrid_counts_off_and_on(monkeypatch) -> None:
+    from cs_agent.agents.retrieval import measure_hybrid
+
+    _hybrid_settings(monkeypatch, enabled=False)
+    vector = _VectorDocs(
+        [
+            _doc("DS-INV-A", "2.1", 0.9, doc_type="DS", product_code="INV-A"),
+            _doc("TG-INV-A", "3.1", 0.85, doc_type="TG", product_code="INV-A"),
+            _doc("DS-PLC-B", "2.1", 0.8, doc_type="DS", product_code="PLC-B"),
+        ],
+        {("TG-INV-A", "3.4"): 0.5},
+    )
+    row = {
+        "ticket_id": "T-1",
+        "inquiry_subject": "Over-voltage",
+        "inquiry_body": "deceleration time",
+        "product_code": "",
+        "product_family": "",
+        "error_code_reported": "",
+        "category_code": "MANUAL",
+        "language": "en",
+        "reference_doc_id": "TG-INV-A",
+        "reference_section": "3.4",
+    }
+    result = measure_hybrid([row], vector, weights=(1.0,), keyword=keyword_docs(CHUNKS))
+    assert result["total"] == 1
+    assert result["base"] == {"k3": 0, "pool": 0}
+    assert result["hybrid"][1.0] == {"k3": 1, "pool": 1}
+    assert result["by_group"]["language"]["en"] == {"n": 1, "off": 0, "1.0": 1}
