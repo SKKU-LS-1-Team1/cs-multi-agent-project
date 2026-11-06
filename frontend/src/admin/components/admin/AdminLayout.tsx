@@ -38,7 +38,7 @@ export default function AdminLayout() {
       <aside className="sticky top-0 flex h-dvh flex-col px-5 pb-5 pt-7 text-white">
         <div className="px-1">
           <img src={logo} alt="LS ELECTRIC" width={2029} height={322} style={{ display: "block", width: "100%", height: "auto" }} />
-          <p className="mt-3 text-sm font-medium tracking-wide text-white/70">글로벌 고객지원</p>
+          <p className="mt-5 text-sm font-medium tracking-wide text-white/70">글로벌 고객지원</p>
         </div>
         <nav aria-label="주 메뉴" className="mt-10 grid gap-1.5">
           {MENU.map(({ to, label, icon: Icon, match }) => {
@@ -54,8 +54,8 @@ export default function AdminLayout() {
           })}
         </nav>
         <div className="mt-auto grid gap-3">
-          <button onClick={() => setPalette(true)} className="flex h-12 w-full items-center gap-3 rounded-full bg-[#04337a]/65 px-4 text-base text-white shadow-[0_6px_16px_-10px_rgb(0_10_40/0.7)] transition-colors hover:bg-[#04337a]/80">
-            <Search className="size-[18px]" aria-hidden />빠른 이동<kbd className="ml-auto rounded-full bg-white/20 px-2 text-[11px]">⌘K</kbd>
+          <button onClick={() => setPalette(true)} className="flex h-12 w-full items-center gap-2.5 rounded-full bg-[#04337a]/65 px-4 text-[13px] text-white shadow-[0_6px_16px_-10px_rgb(0_10_40/0.7)] transition-colors hover:bg-[#04337a]/80">
+            <Search className="size-4 shrink-0" aria-hidden /><span className="whitespace-nowrap">문의 번호 검색</span><kbd className="ml-auto shrink-0 rounded-full bg-white/20 px-2 text-[11px]">⌘K</kbd>
           </button>
           <div className="flex items-center gap-1 rounded-full bg-white py-1.5 pl-1.5 pr-1.5 text-[#0e1a2b] shadow-[0_8px_20px_-10px_rgb(0_10_40/0.6)]">
             <PersonAvatar name={signedIn} size={32} />

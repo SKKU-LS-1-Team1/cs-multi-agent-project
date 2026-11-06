@@ -9,7 +9,7 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 RUN rm -f /etc/nginx/conf.d/default.conf
-COPY infra/nginx/conf/api-proxy.conf /etc/nginx/snippets/api-proxy.conf
+COPY infra/nginx/conf/api-proxy.conf infra/nginx/conf/api-upload.conf /etc/nginx/snippets/
 COPY infra/nginx/conf/http.conf.template infra/nginx/conf/https.conf.template /etc/nginx/cs-agent/
 COPY --chmod=755 infra/nginx/select-conf.sh /docker-entrypoint.d/40-select-conf.sh
 COPY --from=build /web/dist /usr/share/nginx/html

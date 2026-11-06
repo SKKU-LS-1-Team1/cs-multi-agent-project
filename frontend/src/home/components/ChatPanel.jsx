@@ -3,7 +3,7 @@ import ContextCard from './ContextCard.jsx'
 import ChatText from './ChatText.jsx'
 import { useEffect, useRef, useState } from 'react'
 
-const CHIPS = ['화면에 E.OC가 떠요', '보증 기간이 남았나요?', '설치 설명서가 필요해요']
+const CHIPS = ['화면에 E.OC가 떠요', '표준 납기는 얼마나 걸리나요?', '설치 설명서가 필요해요']
 
 const Svg = ({ size, w = 2, children }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -64,16 +64,18 @@ export default function ChatPanel({ messages, onSend, onReset, focusKey = 0, car
       )}
 
       <div className="cb-body" ref={bodyRef}>
-        <div className="bub">안녕하세요! 궁금한 걸 편하게 적어 주세요. 아래에서 골라도 돼요.</div>
-        {messages.length === 0 && (
-          <div className="chips">
-            {CHIPS.map((c) => (
-              <button type="button" key={c} className="chip" onClick={() => onSend(c)}>{c}</button>
-            ))}
-          </div>
-        )}
+        {/* 처음 인사 말풍선 안에 자주 묻는 질문을 세로 버튼으로 둔다. 대화가 시작돼도 그대로 남아 있어 다시 고를 수 있다 */}
+        <div className="bub bub-greet">안녕하세요! 궁금한 걸 편하게 적어 주세요. 아래에서 골라도 돼요.
+          {(
+            <div className="chips">
+              {CHIPS.map((c) => (
+                <button type="button" key={c} className="chip" onClick={() => onSend(c)}><i aria-hidden="true">▸</i>{c}</button>
+              ))}
+            </div>
+          )}
+        </div>
         {messages.map((m) => (
-          <div key={m.id} className={`${m.role === 'user' ? 'bub me' : 'bub'}${m.flash ? ' flash' : ''}`} style={m.role === 'user' ? { whiteSpace: 'pre-line' } : undefined}>
+          <div key={m.id} className={`${m.role === 'user' ? 'bub me' : 'bub'}${m.flash ? ' flash' : ''}`} style={m.role === 'user' ? { whiteSpace: 'pre-line' } : undefined} translate={m.role === 'user' ? 'no' : undefined}>
             {m.role === 'user' ? m.content : <ChatText text={m.content} />}
             {m.contact && (
               <div className="bub-contact"><small>담당 기술팀</small><b>{m.contact.dept}</b><a href={`mailto:${m.contact.email}`}>{m.contact.email}</a><small>시연용 주소예요</small></div>

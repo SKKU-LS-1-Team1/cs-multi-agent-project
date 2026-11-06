@@ -5,7 +5,7 @@ import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, us
 import { toast } from "sonner";
 import { ChevronDown, GripVertical } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
-import { Mono, NativeSelect, PersonAvatar, PriorityTag, Tag, rise, useGo } from "@admin/components/admin/common";
+import { Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, Tag, rise, useGo } from "@admin/components/admin/common";
 import { checkAssign, departmentRisk, openTickets, ownedTickets, canAssign, people, recommend, resource, teamLead } from "@admin/lib/logic";
 import { moveTicket } from "@admin/lib/actions";
 import { openModal, useStore } from "@admin/lib/store";
@@ -50,7 +50,7 @@ export default function ResourceBoard() {
       </div>
 
       <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onStart} onDragEnd={onEnd} onDragCancel={() => setActive(null)}>
-        <div className="grid auto-cols-[minmax(210px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-2">
+        <div className="grid auto-cols-[minmax(264px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-2">
           <Column id={UNASSIGNED} order={0} title="미배정" tickets={unassigned} dragging={!!active} verdict={verdict(UNASSIGNED)} go={go}
             sub={<span className="text-xs text-muted-foreground">담당자 지정 대기</span>} />
           {team.map((p, i) => (
@@ -71,7 +71,7 @@ function Column({ id, order, title, tickets, person, sub, dragging, verdict, rec
   const r = person ? resource(person) : null;
   return (
     <section ref={setNodeRef} aria-label={`${title} 열`} style={rise(order).style}
-      className={cn("flex min-h-[calc(100dvh-300px)] flex-col gap-3 rounded-2xl bg-muted/70 p-3 transition-colors", rise(order).className,
+      className={cn("flex min-h-[calc(100dvh-300px)] min-w-0 flex-col gap-3 rounded-2xl bg-muted/70 p-3 transition-colors", rise(order).className,
         dragging && verdict.ok && "ring-1 ring-success/60 bg-success/5",
         dragging && !verdict.ok && "opacity-45",
         isOver && verdict.ok && "ring-2 ring-success bg-success/10",
@@ -92,7 +92,7 @@ function Column({ id, order, title, tickets, person, sub, dragging, verdict, rec
         ) : sub}
         {dragging && !verdict.ok && verdict.reason && <p className="rounded bg-card px-2 py-1 text-xs text-destructive ring-1 ring-destructive/30">{verdict.reason}</p>}
       </header>
-      <div className="grid content-start gap-2">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2">
         {tickets.map((t) => <DraggableCard key={t.id} t={t} go={go} />)}
         {!tickets.length && <p className="rounded-xl bg-card/60 py-8 text-center text-xs text-muted-foreground">배정된 문의 없음</p>}
       </div>
@@ -111,15 +111,15 @@ function DraggableCard({ t, go }: { t: Ticket; go: ReturnType<typeof useGo> }) {
 
 function Card({ t, handle, onOpen, overlay }: { t: Ticket; handle?: Record<string, any>; onOpen?: () => void; overlay?: boolean }) {
   return (
-    <article className={cn("group/card grid gap-2 rounded-xl bg-card p-3.5 text-sm shadow-card", overlay && "w-[248px] shadow-lg ring-1 ring-ring", departmentRisk(t) && "ring-1 ring-destructive/40")}>
+    <article className={cn("group/card grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-xl bg-card p-3.5 text-sm shadow-card", overlay && "w-[248px] shadow-lg ring-1 ring-ring", departmentRisk(t) && "ring-1 ring-destructive/40")}>
       <div className="flex items-start gap-1.5">
         {canAssign && <button type="button" aria-label="끌어서 담당자 변경" className="mt-0.5 cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing" {...handle}><GripVertical className="size-4" /></button>}
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left font-semibold leading-snug hover:underline">{t.title}</button>
       </div>
       <div className="grid text-xs text-muted-foreground"><Mono>{t.id}</Mono><span>{t.product}</span></div>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5"><PriorityTag p={t.priority} /><span className={cn("text-xs tabular-nums", departmentRisk(t) ? "font-semibold text-destructive" : "text-muted-foreground")}>{t.sla}</span></div>
-        {!overlay && canAssign && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs opacity-0 transition-opacity focus-visible:opacity-100 group-hover/card:opacity-100" onClick={() => openModal("assign", { id: t.id })}>배정<ChevronDown /></Button>}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <PriorityTag p={t.priority} /><SlaTag t={t} />
+        {!overlay && canAssign && <Button size="sm" variant="ghost" className="ml-auto h-6 px-2 text-xs opacity-0 transition-opacity focus-visible:opacity-100 group-hover/card:opacity-100" onClick={() => openModal("assign", { id: t.id })}>배정<ChevronDown /></Button>}
       </div>
     </article>
   );

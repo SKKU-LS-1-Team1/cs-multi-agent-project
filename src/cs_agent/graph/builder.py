@@ -49,7 +49,15 @@ from langgraph.types import interrupt
 
 import cs_agent.agents.translation as translation
 from cs_agent import domain, schemas
-from cs_agent.agents import analysis, customer_qc, drafting, escalation, retrieval, verification
+from cs_agent.agents import (
+    analysis,
+    customer_qc,
+    drafting,
+    escalation,
+    escalation_advice,
+    retrieval,
+    verification,
+)
 from cs_agent.agents import info_request as info_request_agent
 from cs_agent.agents.analysis import AnalysisError
 from cs_agent.agents.drafting import DraftingError, TranslationError
@@ -58,6 +66,7 @@ from cs_agent.domain import ReviewAction, Route, TicketStatus, Urgency
 from cs_agent.graph.state import TicketState
 from cs_agent.llm.router import LLMRouter
 from cs_agent.rules.engine import apply_rules
+from cs_agent.rules.investigation import referral_request_fields
 from cs_agent.rules.tables import RefTables, load_tables
 from cs_agent.schemas import CheckResult, ReviewIn
 from cs_agent.services.reply_preview import review_text, valid_preview
@@ -84,6 +93,7 @@ class GraphDeps:
     localize_info_request: Callable = info_request_agent.localize_request  # 보낼 때 고객 언어로
     translate_reply: Callable = drafting.translate_reply
     write_escalation_request: Callable = escalation.write_escalation_request
+    assess_escalation: Callable = escalation_advice.safe_assess
 
 
 def serializer() -> JsonPlusSerializer:
@@ -150,6 +160,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         return {
             "status": TicketStatus.NEW,
             "manual_reply": False,
+            "followup_context_stale": False,
             "reply_preview": None,
             "retries": 0,
             "review_rounds": 0,
@@ -164,6 +175,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             "drafting_error": None,
             "info_request": None,
             "escalation_request": None,
+            "escalation_advice": None,
             "checks": [],
             "evidence": [],
             "review": None,
@@ -263,7 +275,17 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
             route = Route.INFO_REQUEST
         else:
             route = Route.DRAFT
-        return {"rules": result, "route": route}
+        # 이관 권장 건의 부족 자료를 한 번에 요청하되 안전 사람 큐는 유지한다.
+        advice = (
+            None
+            if route == Route.HUMAN
+            else deps.assess_escalation({**state, "rules": result}, deps.tables, deps.llm)
+        )
+        if route != Route.HUMAN and referral_request_fields(
+            {**state, "rules": result, "escalation_advice": advice}, deps.tables
+        ):
+            route = Route.INFO_REQUEST
+        return {"rules": result, "route": route, "escalation_advice": advice}
 
     def human(state: TicketState) -> dict:
         return {"status": TicketStatus.HUMAN_QUEUE, **_translation(state)}
@@ -274,19 +296,40 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     # ⑦ ⑧ ⑨ ⑩ --------------------------------------------------------------------------
     def info_request(state: TicketState) -> dict:
         review = _review(state)
-        if review and review.action == ReviewAction.INFO_REQUEST and review.info_items:
+        if (
+            review
+            and review.action in {ReviewAction.INFO_REQUEST, ReviewAction.REWRITE}
+            and review.info_items
+        ):
             missing = review.info_items
+        elif review and review.action == ReviewAction.REWRITE and state.get("info_request_fields"):
+            missing = state["info_request_fields"]
         else:
-            missing = state["rules"].missing_blocking or state["rules"].missing_info
-        from cs_agent.rules.investigation import investigation_info
-
-        advisory = investigation_info(state, deps.tables)
-        if advisory and not (review and review.info_items):
-            missing = list(dict.fromkeys([*missing, *advisory["missing_fields"]]))
+            missing = referral_request_fields(state, deps.tables) or (
+                state["rules"].missing_blocking or state["rules"].missing_info
+            )
         # 고객 답변과 같이 영어로 검토하고, 승인한 문장만 finish에서 고객 언어로 바꾼다.
-        text = deps.write_info_request(missing, "en", _inquiry_text(state), deps.llm)
+        options = {}
+        if deps.write_info_request is info_request_agent.write_info_request:
+            from cs_agent.agents import copilot
+
+            detail = copilot.view(state, deps.tables)
+            if review and review.action == ReviewAction.REWRITE:
+                options["reviewer_feedback"] = review.feedback
+            reasons = {
+                r["field"]: r["text"]
+                for r in (detail.get("reading") or {}).get("request_reasons", [])
+            }
+            options["request_context"] = [
+                {**row, "reason": reasons.get(row["field"], row["reason"])}
+                for row in detail["request_plan"]
+                if row["field"] in missing
+            ]
+        text = deps.write_info_request(missing, "en", _inquiry_text(state), deps.llm, **options)
         return {
             "info_request": text,
+            "info_request_fields": list(missing),
+            "draft_specialist_revision": state.get("specialist_revision", 0),
             "draft": None,
             "draft_customer_revision": state.get("customer_revision", 0),
             "draft_information_reviewed_at": (state.get("information_review") or {}).get(
@@ -316,14 +359,17 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         # 지식 그래프는 문의 글로 증상을 비교한다 (켜져 있을 때만 넘긴다 — 주입한 대역의 규격 유지)
         graph = {}
         if deps.graph is not None:
-            graph = {"graph": deps.graph, "query": _inquiry_text(state)}
+            graph = {"graph": deps.graph}
         return {
             "candidates": candidates,
             "information_review_refresh": False,
+            # reranker 는 문의 글로 절의 관련도를 본다 (CSA-81, RERANK_ENABLED · LLM 꺼지면 생략)
             "evidence": deps.finalize_evidence(
                 candidates,
                 state["extraction"],
                 category=state["classification"].category,
+                query=_inquiry_text(state),
+                llm=deps.llm,
                 **graph,
             ),
         }
@@ -354,6 +400,7 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
                 tables=deps.tables,
                 secondary_category=state["classification"].secondary_category,
                 specialist_replies=state.get("specialist_replies", []),
+                followup_link=state.get("followup_link"),
             )
             # 재작성 때 이전 회신 근거를 누적하지 않고 최신 저장값으로 다시 구성한다.
             evidence = [e for e in evidence if e.source != "specialist"]
@@ -387,7 +434,9 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
         retries = state.get("retries", 0) + (1 if state.get("fix_notes") else 0)
         return {
             "draft": result,
+            "followup_context_stale": False,
             "info_request": None,
+            "info_request_fields": [],
             "draft_specialist_revision": state.get("specialist_revision", 0),
             "draft_customer_revision": state.get("customer_revision", 0),
             "draft_information_reviewed_at": (state.get("information_review") or {}).get(
@@ -850,7 +899,18 @@ def build_ticket_graph(deps: GraphDeps, checkpointer: Any | None = None):
     g.add_conditional_edges(
         "review", after_review, ["rewrite", "info_request", "escalate", "finish", "hold"]
     )
-    g.add_edge("rewrite", "draft")
+    g.add_conditional_edges(
+        "rewrite",
+        lambda s: (
+            "draft"
+            if _review(s) and _review(s).draft_purpose == "answer"
+            else "info_request"
+            if (_review(s) and _review(s).draft_purpose == "request")
+            or s.get("pending") == "info_request"
+            else "draft"
+        ),
+        ["info_request", "draft"],
+    )
     g.add_conditional_edges(
         "finish",
         lambda s: "hold" if s.get("translation_error") or s.get("approval_error") else END,

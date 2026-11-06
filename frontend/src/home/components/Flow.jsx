@@ -3,9 +3,6 @@ import {
   NONE, getFamily, getProduct, groupByCode, issuePool, summarize,
 } from '../lib/catalog.js'
 import { FamilyStep, ModelStep, PathTags, STEPS, Stepper, Title, UNKNOWN } from './common.jsx'
-import MediaAttach from './MediaAttach.jsx'
-// 고장 모습 첨부에서는 QR을 받지 않는다 (QR은 모델 고르기 단계에서 받는다)
-const FAULT_KINDS = ['photo', 'video', 'sound']
 import { describe } from '../lib/media.js'
 
 const INIT = { hl: null, family: null, model: null, code: null, issues: [], picked: [], tried: [], result: null, handoff: false }
@@ -45,13 +42,11 @@ const confirmed = (c) => {
   return { ...c, issues: list.filter((x) => c.picked.some((p) => p.id === x.id)), tried: [], result: null }   // 보여 주는 순서는 목록 순서
 }
 
-// children = 제목 바로 아래, 선택지 위에 놓을 내용(첨부 올리기). 제목이 항상 맨 위다.
-function CodeStep({ s, pick, children }) {
+function CodeStep({ s, pick, unsure }) {
   const groups = groupByCode(poolOf(s))
   return (
     <>
       <Title emoji="🔎" sub="제품 화면이나 표시창에 보이는 글자를 골라 주세요.">화면에 표시된 글자가 있나요?</Title>
-      {children}
       <div className="opt-list cols">
         {[...groups.entries()].filter(([k]) => k !== NONE).map(([k, list]) => (
           <button type="button" key={k} className={`opt${s.code === k ? ' sel' : ''}`} onClick={() => pick(k)}>
@@ -64,17 +59,17 @@ function CodeStep({ s, pick, children }) {
           </button>
         )}
       </div>
+      <button type="button" className="unsure" onClick={unsure}>증상을 잘 모르겠어요 · 바로 문의 남기기 →</button>
     </>
   )
 }
 
-function SymptomStep({ s, toggle, confirm, children }) {
+function SymptomStep({ s, toggle, confirm, unsure }) {
   const list = groupByCode(poolOf(s)).get(s.code)
   const n = s.picked.length
   return (
     <>
       <Title emoji="🔎">{s.code !== NONE ? `${s.code}, 어떤 상황인가요?` : '어떤 증상인가요?'}</Title>
-      {children}
       <div className="opt-list" role="group" aria-label="증상 (여러 개 고를 수 있어요)">
         {list.map((it) => {
           const on = s.picked.some((x) => x.id === it.id)
@@ -89,6 +84,7 @@ function SymptomStep({ s, toggle, confirm, children }) {
       <div className="multi-foot">
         <button type="button" className="pbtn" disabled={!n} onClick={confirm}>{n ? `선택한 ${n}가지 해결 방법 보기` : '증상을 골라 주세요'}</button>
       </div>
+      <button type="button" className="unsure" onClick={unsure}>증상을 잘 모르겠어요 · 바로 문의 남기기 →</button>
     </>
   )
 }
@@ -103,10 +99,17 @@ const inquiryDraft = (s, withCurrent = false) => {
   const label = (x) => `${mixed ? `[${getProduct(x.model).name}] ` : ''}${x.symptom}`
   return {
     type: 'DEFECT', family: s.family, model: first.model,
+    codes: its.map((x) => x.code || x.symptom),   // 고른 에러 코드·증상 전부 (쉼표가 들어간 증상이 있어 배열로 넘긴다)
     vals: { error_code: its.map((x) => x.code || x.symptom).join(', ') },
     subject: `${getProduct(first.model).name} ${first.code ? `${first.code} ` : ''}${first.symptom}${its.length > 1 ? ` 외 ${its.length - 1}건` : ''}`.slice(0, 100),
     body: `${its.map((x) => `증상: ${label(x)}`).join('\n')}\n${tried.map((x) => `이미 해 본 조치: ${x.action} (확인: ${x.check}) → 해결되지 않았어요`).join('\n')}`,
   }
+}
+
+// 증상을 모르면 증상 없이 문의서로 간다. 에러 코드만 골랐으면 그것만 미리 채운다.
+const unsureDraft = (s) => {
+  const code = s.code && s.code !== NONE ? s.code : null
+  return { type: 'DEFECT', family: s.family, model: s.model, vals: code ? { error_code: code } : {}, codes: code ? [code] : [], subject: '', body: '' }
 }
 
 function Solution({ s, set, onHandoff, onExit, onInquire }) {
@@ -175,7 +178,7 @@ export default function Flow({ onExit, onContext, onHandoff, onInquire }) {
   const merge = (p) => setS((cur) => ({ ...cur, ...p }))
   const step = stepOf(s)
 
-  // 증상 단계에서 올린 사진·영상·소리·QR. 단계를 오가도 남도록 여기서 쥐고, 화면을 나갈 때 미리보기 주소를 푼다.
+  // 모델 고르기 단계에서 올린 QR·외관 사진. (증상 사진·영상·소리는 문의서 2단계에서 받는다) 단계를 오가도 남도록 여기서 쥐고, 화면을 나갈 때 미리보기 주소를 푼다.
   const [media, setMedia] = useState([])
   const mediaRef = useRef(media)
   mediaRef.current = media
@@ -211,15 +214,16 @@ export default function Flow({ onExit, onContext, onHandoff, onInquire }) {
         <Stepper step={step} onGo={(i) => goStep(i)} />
       </div>
       <PathTags items={[
+        { key: '유형', label: '제품 고장' },
         { key: '제품군', label: s.family ? getFamily(s.family).name : '' },
         { key: '모델', label: s.model ? (s.model === UNKNOWN ? '모델 모름' : getProduct(s.model).name) : '' },
         { key: '증상', label: s.code && s.code !== NONE ? s.code : (s.issues.length ? `${s.issues[0].symptom}${s.issues.length > 1 ? ` 외 ${s.issues.length - 1}` : ''}` : '') },
       ]} />
-      {step === 0 && <FamilyStep s={{ ...s, family: pending ?? s.hl }} pick={setPending} />}
+      {step === 0 && <FamilyStep s={{ ...s, family: pending ?? s.hl }} pick={setPending} pickModel={(fam, m) => setS((c) => settle({ ...c, hl: fam, family: fam, model: m, code: null, issues: [], picked: [], tried: [], result: null }))} />}
       {step === 1 && <ModelStep s={s} pick={pickModel} legacy={{ onInquire }} media={media} onMedia={setMedia} />}
       {step === 2 && (s.code === null
-        ? <CodeStep s={s} pick={pickCode}><MediaAttach value={media} onChange={setMedia} kinds={FAULT_KINDS} /></CodeStep>
-        : <SymptomStep s={s} toggle={toggleIssue} confirm={confirmIssues}><MediaAttach value={media} onChange={setMedia} kinds={FAULT_KINDS} /></SymptomStep>)}
+        ? <CodeStep s={s} pick={pickCode} unsure={() => onInquire?.(unsureDraft(s))} />
+        : <SymptomStep s={s} toggle={toggleIssue} confirm={confirmIssues} unsure={() => onInquire?.(unsureDraft(s))} />)}
       {sol && <Solution key={s.issues.map((x) => x.id).join('|')} s={s} set={merge} onHandoff={onHandoff} onExit={onExit} onInquire={onInquire} />}
     </div>
   )

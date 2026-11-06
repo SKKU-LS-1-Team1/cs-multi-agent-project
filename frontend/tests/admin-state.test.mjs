@@ -6,13 +6,15 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 import ts from 'typescript';
+import * as jsxRuntime from 'react/jsx-runtime';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const noop = () => {};
 const toast = Object.assign(noop, { error: noop });
 function load(file, imports, globals = {}) {
   const exports = {};
   const code = ts.transpileModule(fs.readFileSync(new URL(`../src/admin/${file}`, import.meta.url), 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   vm.runInNewContext(code, { exports, require: id => {
     if (id === "./investigation") return load("lib/investigation.ts", {});
@@ -90,6 +92,8 @@ function completionFixture() {
     './auth': { currentAccount: () => undefined, ACCOUNTS: [
       { userId: '1', name: 'Doyeon Kim', role: 'LEAD' }, { userId: '2', name: 'Minji Park' },
       { userId: '3', name: 'Jun Lee' }, { userId: '4', name: 'Hana Choi' },
+      { userId: '5', name: 'Sora Jung' }, { userId: '6', name: 'Daniel Han' },
+      { userId: '7', name: 'Yuna Kang' }, { userId: '8', name: 'Minho Seo' },
     ] },
     './store': { tickets: [], onBeforeCommit: noop, save: noop },
   }).completionDraft;
@@ -121,7 +125,7 @@ function apiFixture() {
   const calls = [], state = { reply: null, fail: false, release: null, commits: 0 };
   const logic = {
     people: [], signedIn: 'tester', contextKey: c => JSON.stringify(c),
-    answerContext: t => ({ references: [], specialistRevision: t.specialistRevision }),
+    answerContext: (t, purpose) => ({ purpose: purpose || t.purpose, references: [], specialistRevision: t.specialistRevision }),
     waitingReviews: t => t.events.filter(e => e.kind === 'escalation' && !t.events.some(r => r.requestId === e.id)),
     record: (t, kind, text, extra) => t.events.push({ kind, text, ...extra }),
   };
@@ -241,6 +245,8 @@ test('Copilot keeps all server replies and only labels actually cited replies as
     './auth': { currentAccount: () => undefined, ACCOUNTS: [
       { userId: '1', name: 'Doyeon Kim', role: 'LEAD' }, { userId: '2', name: 'Minji Park' },
       { userId: '3', name: 'Jun Lee' }, { userId: '4', name: 'Hana Choi' },
+      { userId: '5', name: 'Sora Jung' }, { userId: '6', name: 'Daniel Han' },
+      { userId: '7', name: 'Yuna Kang' }, { userId: '8', name: 'Minho Seo' },
     ] }, './store': { tickets: [], onBeforeCommit: noop, save: noop },
   });
   const t = { ...ticket(), product: 'iS7', events: [
@@ -331,6 +337,8 @@ function fullLogicFixture(rows = []) {
     './auth': { currentAccount: () => undefined, ACCOUNTS: [
       { userId: '1', name: 'Doyeon Kim', role: 'LEAD' }, { userId: '2', name: 'Minji Park' },
       { userId: '3', name: 'Jun Lee' }, { userId: '4', name: 'Hana Choi' },
+      { userId: '5', name: 'Sora Jung' }, { userId: '6', name: 'Daniel Han' },
+      { userId: '7', name: 'Yuna Kang' }, { userId: '8', name: 'Minho Seo' },
     ] }, './store': { tickets: rows, onBeforeCommit: noop, save: noop },
   });
 }
@@ -818,7 +826,7 @@ for (const source of ['api', 'local']) {
     const actions = load('lib/actions.ts', {
       sonner: { toast }, './api-sync': mod,
       './store': { commit: noop },
-      './logic': { contextIsNew: () => false, waitingReviews: () => [], contextKey: JSON.stringify,
+      './logic': { contextIsNew: () => false, waitingReviews: () => [], expertPhase: () => 'none', referralRows: () => [], contextKey: JSON.stringify,
         answerContext: () => ({}), needsLocalization: () => false, customerLanguage: () => 'English' },
     });
     const t = mod.apply(undefined, apiRow()); t.source = source;
@@ -831,6 +839,14 @@ for (const source of ['api', 'local']) {
     assert.equal(actions.canSend(t), false);
     actions.setReviewed(t, true);
     assert.equal(actions.canSend(t), true);
+    t.followupContextStale = true;
+    assert.equal(actions.canSend(t), false);
+    assert.equal(await actions.prepareCustomerReply(t), false);
+    t.purpose = 'request'; t.apiInfoRequest = true;
+    // A dismissed answer relationship must not block an independent information request.
+    setPreview(mod, t); t.reviewed = true;
+    assert.equal(actions.canSend(t), true);
+    t.purpose = 'answer'; t.apiInfoRequest = false; t.followupContextStale = false;
     actions.editDraft(t, 'Changed English draft');
     assert.equal(t.reviewed, false);
     assert.equal(mod.hasCurrentReplyPreview(t), false);
@@ -865,8 +881,8 @@ function nextActionFixture(rows) {
       latestCustomerReply: t => t.latestReply,
       requiredInformation: t => t.required || [],
       answerContext: () => ({ missingInfo: [] }),
-      waitingReviews: t => t.waiting ? [{}] : [],
-      contextIsNew: () => false,
+      waitingReviews: t => t.waiting ? [{}] : [], expertPhase: () => 'none', referralRows: () => [],
+      contextIsNew: () => false, escalationRecommended: () => false,
     },
     './store': { openModal: (...args) => opened.push(args) },
     './api-sync': api,
@@ -878,6 +894,7 @@ const actionableTicket = (extra = {}) => ({ ...ticket(), owner: 'tester', analys
 
 test('dashboard and detail prioritize the same stale information/customer/specialist draft', () => {
   for (const [extra, label] of [
+    [{ followupContextStale: true }, '답변 초안 재작성'],
     [{ informationReviewedAt: 'new' }, '확인된 자료 반영해 재작성'],
     [{ customerRevision: 2, draftCustomerRevision: 1 }, '최신 고객 회신 반영해 재작성'],
     [{ specialistRevision: 2, draftSpecialistRevision: 1 }, '전문부서 회신 반영해 재작성'],
@@ -921,17 +938,18 @@ function customerRules() {
   return load('lib/customers.ts', { react: {}, '../../api/client': {} });
 }
 const customerRow = (patch = {}) => ({ id: 'C-1', tier: 'STANDARD', safety: [], urgent: [], urgentN: 0, breach: 0, fam: [], ...patch });
-test('customer focus uses safety or premium overdue, not history or imminent alone', () => {
+test('customer focus uses premium overdue only: safety, history or imminent alone do not count', () => {
   const { focusOf } = customerRules();
   const late = [['T', 'Inquiry', 'P2', 24, 30, 'ON_HOLD']];
   assert.equal(focusOf(customerRow({ tier: 'GOLD', urgent: late })), 'issue');
   assert.equal(focusOf(customerRow({ urgent: late })), null);
-  assert.equal(focusOf(customerRow({ safety: [['T', 'Safety']] })), 'issue');
+  assert.equal(focusOf(customerRow({ safety: [['T', 'Safety']] })), null);
   assert.equal(focusOf(customerRow({ tier: 'PLATINUM', urgent: [['T', '', 'P2', 24, 20, 'ON_HOLD']], breach: 8 })), null);
 });
 test('care closure cannot hide active risk; manual pin persists after automatic risk resolves', () => {
   const { focusOf } = customerRules();
-  assert.equal(focusOf(customerRow({ safety: [['T', 'Safety']] }), { resolved: true }), 'issue');
+  const late = [['T', 'Inquiry', 'P2', 24, 30, 'ON_HOLD']];
+  assert.equal(focusOf(customerRow({ tier: 'GOLD', urgent: late }), { resolved: true }), 'issue');
   assert.equal(focusOf(customerRow(), { pinned: true }), 'pinned');
   assert.equal(focusOf(customerRow(), { resolved: true }), null);
 });
@@ -1053,4 +1071,415 @@ test('polling 3635 cached closed tickets fetches only active and selected detail
   await mod.syncFromApi(); assert.deepEqual(calls.sort(), ['ACTIVE', 'ARCH-1']);
   unwatch(); calls.length = 0;
   await mod.syncFromApi(); assert.deepEqual(calls, ['ACTIVE']);
+});
+
+test('selected request fields and source version reach API without adding other fields', async () => {
+  const { mod, state, calls } = apiFixture();
+  const t = mod.apply(undefined, apiRow({ copilot: { context_key: 'key-1', request_plan: [] } }));
+  t.requiredInformation = [{ id: 'serial_no' }, { id: 'photos' }];
+  state.reply = apiRow({ draft: null, info_request: 'Please provide photos.' });
+  assert.equal(await mod.infoRequestViaApi(t, ['photos'], 'key-1'), true);
+  assert.equal(calls[0].args[1].info_plan_key, 'key-1');
+  assert.deepEqual(Array.from(calls[0].args[1].info_items), ['photos']);
+});
+
+test('failed request selection preserves edited text and does not create a draft event', async () => {
+  const { mod, state } = apiFixture(); const t = mod.apply(undefined, apiRow());
+  t.draft = 'Staff wording'; state.fail = true;
+  assert.equal(await mod.infoRequestViaApi(t, ['photos'], 'stale'), false);
+  assert.equal(t.draft, 'Staff wording'); assert.equal(t.regenerating, false);
+  assert.equal(t.events.filter(e => e.kind === 'draft').length, 0);
+});
+
+test('old customer revision cannot restore a stale Copilot reading', () => {
+  const { mod } = apiFixture();
+  const t = mod.apply(undefined, apiRow({ customer_revision: 2, copilot: { context_key: 'new' } }));
+  t.draft = 'Current edit';
+  mod.apply(t, apiRow({ customer_revision: 1, copilot: { context_key: 'old' } }));
+  assert.equal(t.copilot.context_key, 'new'); assert.equal(t.draft, 'Current edit');
+});
+
+test('request generation cannot overwrite text edited while the request was running', async () => {
+  const { mod, state } = apiFixture(); const t = mod.apply(undefined, apiRow()); let release;
+  state.release = resolve => { release = resolve; };
+  const pending = mod.infoRequestViaApi(t, ['photos'], 'version');
+  t.draft = 'Edited during generation';
+  release(apiRow({ draft: null, info_request: 'Please provide photos.' }));
+  assert.equal(await pending, true);
+  assert.equal(t.draft, 'Edited during generation');
+  assert.equal(t.pendingAnswer.draft, 'Please provide photos.');
+});
+
+test('request response for older information preserves current text', async () => {
+  const { mod, state } = apiFixture(); const t = mod.apply(undefined, apiRow({ customer_revision: 2 }));
+  t.draft = 'Reviewed latest reply';
+  state.reply = apiRow({ customer_revision: 1, draft_customer_revision: 1, info_request: 'Old question' });
+  assert.equal(await mod.infoRequestViaApi(t, ['photos'], 'version'), false);
+  assert.equal(t.draft, 'Reviewed latest reply');
+});
+
+test('rewriting an information request keeps the request composer', async () => {
+  const { mod, state } = apiFixture();
+  const t = mod.apply(undefined, apiRow({ draft: null, info_request: 'Old question' }));
+  state.reply = apiRow({ draft: null, info_request: 'Shortened question' });
+  assert.equal(await mod.rewriteViaApi(t, 'Be concise'), true);
+  assert.equal(t.draft, 'Shortened question'); assert.equal(t.purpose, 'request');
+});
+
+
+test('Copilot recommendations follow the composer, never a future referral by category alone', () => {
+  const { copilotMode, referralSuggestions } = load('lib/investigation.ts', {});
+  const t = { apiStatus: 'ON_HOLD', purpose: 'request', draft: 'Please confirm firmware',
+    activeComposer: 'customer', customerRequestStatus: 'none', specialistRequests: [],
+    investigationInfo: { missing_fields: ['load_type'] },
+    copilot: { workflow: { mode: 'specialist_prepare' }, request_plan: [
+      { field: 'load_type', origin: 'recommended', status: 'missing' },
+      { field: 'cable_length', origin: 'recommended', status: 'confirmed' },
+    ] } };
+  assert.equal(copilotMode(t), 'customer_request');
+  assert.equal(referralSuggestions(t).length, 0);
+  t.purpose = 'answer';
+  assert.equal(copilotMode(t), 'customer_answer');
+  assert.equal(referralSuggestions(t).length, 0);
+  t.activeComposer = 'expert';
+  assert.equal(copilotMode(t), 'specialist_prepare');
+  assert.deepEqual(Array.from(referralSuggestions(t), r => r.field), ['load_type']);
+  t.customerRequestStatus = 'waiting';
+  assert.equal(copilotMode(t), 'wait_customer');
+  assert.equal(referralSuggestions(t).length, 0);
+  t.customerRequestStatus = 'none';
+  t.specialistRequests = [{ reply: null }];
+  assert.equal(referralSuggestions(t).length, 0);
+  t.activeComposer = 'customer'; t.draft = '';
+  assert.equal(copilotMode(t), 'wait_specialist');
+  t.sent = true;
+  assert.equal(copilotMode(t), 'closed');
+  assert.equal(referralSuggestions(t).length, 0);
+});
+
+test('Copilot distinguishes specialist requests, conclusions and waiting without asserting a final finding', () => {
+  const { copilotMode } = load('lib/investigation.ts', {});
+  const t = { apiStatus: 'READY_FOR_REVIEW', customerRequestStatus: 'none',
+    specialistFollowup: { status: 'in_progress', missing_fields: ['logs'], pending_replies: false,
+      reading: { conclusion: { evidence: 'Confirmed defect' } }, needs_review: false } };
+  assert.equal(copilotMode(t), 'customer_request');
+  t.specialistFollowup.missing_fields = [];
+  assert.equal(copilotMode(t), 'specialist_review');
+  t.specialistFollowup.pending_replies = true;
+  assert.equal(copilotMode(t), 'wait_specialist');
+  t.customerRequestStatus = 'waiting';
+  assert.equal(copilotMode(t), 'wait_customer');
+});
+
+test('request Copilot lists selected fields even when AI explains only one; unrelated fields stay out', () => {
+  const { copilotPresentation } = load('lib/investigation.ts', {});
+  const t = { purpose: 'request', draft: 'Please send photos and firmware', activeComposer: 'customer',
+    copilot: { workflow: { mode: 'customer_request', request_fields: ['photos', 'current_fw'] },
+      request_plan: [
+        { field: 'photos', status: 'missing', origin: 'required' },
+        { field: 'current_fw', status: 'clarify', origin: 'required' },
+        { field: 'logs', status: 'missing', origin: 'required' },
+        { field: 'serial_no', status: 'confirmed', origin: 'required' },
+      ], reading: { request_reasons: [{ field: 'current_fw', text: 'Withdrawn' }] } } };
+  const view = copilotPresentation(t);
+  assert.deepEqual(Array.from(view.requestRows, r => r.field), ['photos', 'current_fw']);
+  assert.equal(view.showTechnicalContext, false);
+  assert.equal(view.showUnresolved, false);
+  assert.equal(view.showNextReason, false);
+  t.copilot.reading = null;
+  assert.equal(copilotPresentation(t).requestRows.length, 2);
+});
+
+test('technical comparison appears only during answer, referral and specialist review, not waiting or closed', () => {
+  const { copilotPresentation } = load('lib/investigation.ts', {});
+  const t = { purpose: 'answer', draft: 'Draft', apiStatus: 'READY_FOR_REVIEW',
+    copilot: { workflow: { mode: 'customer_answer', request_fields: [] }, request_plan: [] } };
+  assert.equal(copilotPresentation(t).showTechnicalContext, true);
+  assert.equal(copilotPresentation({ ...t, activeComposer: 'expert' }).showTechnicalContext, true);
+  assert.equal(copilotPresentation({ ...t, specialistFollowup: { status: 'in_progress',
+    pending_replies: false, missing_fields: [], reading: { conclusion: {} }, needs_review: false } }).showTechnicalContext, true);
+  for (const update of [{customerRequestStatus:'waiting'}, {specialistRequests:[{reply:null}]}, {stage:5}, {sent:true}, {apiStatus:'ANALYSIS_PENDING'}]) {
+    const view = copilotPresentation({ ...t, ...update });
+    assert.equal(view.showTechnicalContext, false);
+    assert.equal(view.requestRows.length, 0);
+  }
+});
+
+test('retrieved API case is unassessed, never a hardcoded condition mismatch', () => {
+  const logic = fullLogicFixture();
+  const t = { ...ticket(), apiEvidence: [{source:'cases',doc_id:'CASE-X',text:'Same model and symptom.'}] };
+  assert.equal(logic.answerContext(t).technical.similarCases[0].matches, undefined);
+});
+
+
+test('explicit answer transition generates answer instead of relabeling question text', async () => {
+  const { mod, state, calls } = apiFixture();
+  const t = mod.apply(undefined, apiRow({ draft: null, info_request: 'Please send photos.' }));
+  t.activeComposer = 'expert';
+  state.reply = apiRow({ draft: { text: 'Evidence-based answer', cited: [] } });
+  assert.equal(await mod.rewriteViaApi(t, 'Write an answer', 'answer'), true);
+  assert.equal(calls[0].args[1].draft_purpose, 'answer');
+  assert.equal(calls[0].args[1].expected_customer_revision, 0);
+  assert.equal(t.draft, 'Evidence-based answer');
+  assert.equal(t.purpose, 'answer'); assert.equal(t.activeComposer, 'customer');
+  assert.equal(t.apiInfoRequest, false);
+  assert.ok(t.events.some(e => e.kind === 'draft-replaced' && e.draft === 'Please send photos.'));
+});
+
+test('wrong-kind or failed answer response never relabels the saved question', async () => {
+  const { mod, state } = apiFixture();
+  const t = mod.apply(undefined, apiRow({ draft: null, info_request: 'Please send photos.' }));
+  state.reply = apiRow({ draft: null, info_request: 'Still a question' });
+  assert.equal(await mod.rewriteViaApi(t, 'Answer', 'answer'), false);
+  assert.equal(t.draft, 'Please send photos.'); assert.equal(t.purpose, 'request');
+  state.fail = true;
+  assert.equal(await mod.rewriteViaApi(t, 'Answer', 'answer'), false);
+  assert.equal(t.draft, 'Please send photos.'); assert.equal(t.purpose, 'request');
+});
+
+test('answer transition preserves concurrent question edits and offers correctly typed replacement', async () => {
+  const { mod, state, calls } = apiFixture(); let release;
+  const t = mod.apply(undefined, apiRow({ draft: null, info_request: 'Original question' }));
+  state.release = resolve => { release = resolve; };
+  const pending = mod.rewriteViaApi(t, 'Answer', 'answer');
+  assert.equal(await mod.rewriteViaApi(t, 'Answer', 'answer'), false);
+  t.draft = 'Edited question';
+  release(apiRow({ draft: { text: 'New answer', cited: [] } }));
+  assert.equal(await pending, true); assert.equal(calls.length, 1);
+  assert.equal(t.draft, 'Edited question'); assert.equal(t.purpose, 'request');
+  assert.equal(t.pendingAnswer.context.purpose, 'answer');
+  assert.equal(t.pendingAnswer.draft, 'New answer');
+});
+
+test('Copilot answer action waits for server result before changing editor type', () => {
+  const calls = [];
+  const actions = load('lib/actions.ts', {
+    sonner: { toast }, './logic': { storeComposer: t => calls.push(['saved', t.draft]), FRONTLINE: 'CS' },
+    './store': { tickets: [], setUi: noop }, './api-sync': {
+      isApiTicket: () => true, isManualReplyTicket: () => false,
+      rewriteViaApi: (t, instruction, purpose) => { calls.push(['rewrite', purpose]); t.regenerating = true; },
+    },
+  });
+  const t = { source: 'api', purpose: 'request', apiInfoRequest: true, draft: 'Question' };
+  actions.composeFromCopilot(t, 'answer'); actions.composeFromCopilot(t, 'answer');
+  assert.equal(t.purpose, 'request'); assert.equal(t.draft, 'Question');
+  assert.deepEqual(calls, [['saved', 'Question'], ['rewrite', 'answer']]);
+});
+
+
+test('loading pending referral restores its own editor instead of old customer question', () => {
+  const { mod } = apiFixture();
+  const t = mod.apply(undefined, apiRow({ draft: null, info_request: 'Old question',
+    escalation_request: { text: '전문부서 검토 요청', to_dept: 'TS_AUTO' } }));
+  assert.equal(t.activeComposer, 'expert'); assert.equal(t.expertDraft, '전문부서 검토 요청');
+  assert.equal(t.draft, 'Old question'); assert.ok(t.apiEscalationRequest);
+  t.expertDraft = '담당자 수정';
+  mod.apply(t, apiRow({ draft: null, info_request: 'Old question',
+    escalation_request: { text: '전문부서 검토 요청', to_dept: 'TS_AUTO' } }));
+  assert.equal(t.expertDraft, '담당자 수정');
+});
+
+
+test('active answer review wins over a generic missing-information branch suggestion', () => {
+  const { copilotPresentation } = load('lib/investigation.ts', {});
+  const t = { purpose: 'answer', activeComposer: 'customer', composerOpen: true, draft: 'Answer',
+    copilot: { workflow: { mode: 'customer_answer', request_fields: [] }, request_plan: [
+      { field: 'photos', origin: 'required', status: 'missing' },
+    ] } };
+  const shown = copilotPresentation(t, 'request');
+  assert.equal(shown.mode, 'customer_answer'); assert.equal(shown.requestRows.length, 0);
+  assert.equal(shown.showTechnicalContext, true);
+});
+
+test('visible judgment and branch agree with an opened answer despite missing photos', () => {
+  const { mod: api } = apiFixture(); const logic = fullLogicFixture();
+  const t = api.apply(undefined, apiRow({
+    classification: { category: 'DEFECT' }, extraction: {},
+    rules: { required_info: ['photos'], missing_info: ['photos'], missing_blocking: [] },
+  }));
+  Object.assign(t, { owner: 'tester', analysisReady: true, composerOpen: true });
+  assert.equal(logic.branchChoice(t), 'answer');
+  const actions = load('lib/actions.ts', {
+    sonner: { toast }, './logic': logic, './store': { tickets: [], openModal: noop }, './api-sync': api,
+  });
+  assert.equal(actions.judgment(t).title, '고객 답변 작성 중');
+  assert.equal(actions.nextAction(t).label, '고객 언어로 변환');
+});
+
+
+test('retained text of a different document kind cannot be translated or sent as the server draft', async () => {
+  for (const purpose of ['answer', 'request']) {
+    const { mod, calls } = apiFixture();
+    const t = mod.apply(undefined, apiRow(purpose === 'answer' ? { draft: null, info_request: 'Server question' } : {}));
+    t.purpose = purpose; t.draft = 'Retained editing text'; setPreview(mod, t);
+    assert.equal(mod.hasCurrentReplyPreview(t), false);
+    assert.equal(await mod.prepareReplyViaApi(t), false);
+    assert.equal(await mod.sendViaApi(t), false);
+    assert.equal(calls.length, 0);
+  }
+});
+
+function specialistStepsFixture() {
+  const info = t => t.requiredInformation || [];
+  const assessed = t => info(t).map(field => ({ ...field, status: t.infoChecks?.[field.id]?.status || 'missing' }));
+  const steps = load('lib/flow-steps.ts', {
+    './logic': { informationAssessment: assessed, requiredInformation: info,
+      pendingCustomerInfo: t => assessed(t).filter(x => !['provided', 'confirmed'].includes(x.status)).length,
+      latestCustomerReply: () => null, informationSummary: () => '고객 회신 대기',
+      waitingReviews: t => (t.specialistRequests || []).filter(r => !r.reply), expertPhase: () => 'none', expertReviewModal: () => null },
+    './store': { openModal: noop },
+  });
+  const t = { owner: 'Doyeon Kim', source: 'api', analysisReady: true,
+    apiStatus: 'READY_FOR_REVIEW', stage: 0, events: [{ kind: 'expert' }],
+    draft: 'Old customer answer', purpose: 'answer', customerRequestStatus: 'none',
+    specialistFollowup: { status: 'in_progress', pending_replies: false,
+      needs_review: false, reading: { conclusion: { evidence: 'Final finding' } }, missing_fields: [] },
+  };
+  return { ...steps, t };
+}
+
+test('received specialist conclusion stays at specialist review despite an older answer draft', () => {
+  const { currentStep, flowSteps, t } = specialistStepsFixture();
+  assert.equal(currentStep(t).label, '전문부서');
+  assert.equal(currentStep(t).index, 2);
+  assert.equal(flowSteps(t).find(s => s.key === 'expert').sub, '전문부서 검토 결과 도착');
+  assert.equal(flowSteps(t).find(s => s.key === 'answer').state, 'todo');
+});
+
+test('failed or uncertain specialist reading is not treated as completed', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  for (const change of [{ reading: null, error: 'Failed' }, { needs_review: true }]) {
+    assert.equal(currentStep({ ...t, specialistFollowup: { ...t.specialistFollowup, ...change } }).label, '전문부서');
+  }
+});
+
+test('pending customer information keeps main priority over specialist review or request writing', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  const missing = { ...t, requiredInformation: [{ id: 'photos' }], infoChecks: {} };
+  assert.equal(currentStep(missing).label, '접수·확인');
+  assert.equal(currentStep({ ...missing, activeComposer: 'expert' }).label, '접수·확인');
+  assert.equal(currentStep({ ...missing, specialistRequests: [{ reply: null }] }).label, '접수·확인');
+  assert.equal(currentStep({ ...missing, infoChecks: { photos: { status: 'confirmed' } } }).label, '전문부서');
+});
+
+test('specialist additional material request respects customer info and customer waiting', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  const request = { ...t, specialistFollowup: { ...t.specialistFollowup, reading: {}, missing_fields: ['photos'] } };
+  assert.equal(currentStep(request).label, '전문부서');
+  const required = { ...request, requiredInformation: [{ id: 'photos' }], infoChecks: {} };
+  assert.equal(currentStep(required).label, '접수·확인');
+  assert.equal(currentStep({ ...required, customerRequestStatus: 'waiting', apiStatus: 'WAITING_CUSTOMER', draft: '' }).label, '접수·확인');
+  assert.equal(currentStep({ ...required, purpose: 'request', draft: 'Please provide photos' }).label, '접수·확인');
+});
+
+test('confirmed specialist findings return to answer writing and closed tickets do not reopen', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  assert.equal(currentStep({ ...t, specialistFollowup: { ...t.specialistFollowup, status: 'confirmed' } }).label, '답변 작성');
+  assert.notEqual(currentStep({ ...t, sent: true }).label, '전문부서');
+  assert.equal(currentStep({ ...t, stage: 5 }).label, '완료');
+  assert.equal(currentStep({ ...t, owner: '' }).label, '접수·확인');
+});
+
+test('normal answer, unsent referral and unanswered referral keep existing steps', () => {
+  const { currentStep, t } = specialistStepsFixture();
+  const normal = { ...t, specialistFollowup: null, events: [] };
+  assert.equal(currentStep(normal).label, '답변 작성');
+  assert.equal(currentStep({ ...normal, activeComposer: 'expert' }).label, '전문부서');
+  const pending = currentStep({ ...normal, specialistRequests: [{ reply: null }] });
+  assert.equal(pending.label, '전문부서');
+  assert.equal(pending.waiting, true);
+});
+
+test('follow-up relationship survives projection and a stale poll cannot restore a dismissed link', () => {
+  const { mod } = apiFixture();
+  const link = { previous_ticket_id: 'T-OLD', previous_subject: 'Previous issue', reason: '이전 조치 후 재문의', dismissed: false };
+  const t = mod.apply(undefined, apiRow({ followup_link: link }));
+  assert.equal(t.followupLink.previous_ticket_id, 'T-OLD');
+  setPreview(mod, t); t.reviewed = true;
+  assert.equal(mod.hasCurrentReplyPreview(t), true);
+  mod.apply(t, apiRow({ followup_link: { ...link, dismissed: true }, followup_context_stale: true }));
+  assert.equal(t.followupContextStale, true);
+  assert.equal(mod.hasCurrentReplyPreview(t), false);
+  assert.equal(t.reviewed, false);
+  mod.apply(t, apiRow({ followup_link: link, followup_context_stale: false }));
+  assert.equal(t.followupLink.dismissed, true);
+  assert.equal(t.followupContextStale, true);
+  mod.apply(t, apiRow({ followup_link: { ...link, dismissed: true }, followup_context_stale: false }));
+  assert.equal(t.followupContextStale, false);
+});
+
+test('follow-up evidence keeps reasoning visible and only folds deduplicated, escaped source quotes', () => {
+  const { FollowupEvidence } = load('components/admin/FollowupEvidence.tsx', { 'react/jsx-runtime': jsxRuntime });
+  const previous = { source_id: 'T-OLD/sent:0', quote: 'Previous answer <script>bad()</script>' };
+  const link = { previous_ticket_id: 'T-OLD', reason: '연결 이유 내용', new_information: '새 정보 내용',
+    references: [previous, { source_id: 'current', quote: 'Current customer statement' }],
+    previous_response: { text: '이전 대응 내용', references: [previous] } };
+  const html = renderToStaticMarkup(jsxRuntime.jsx(FollowupEvidence, { link }));
+  const detailStart = html.indexOf('<details');
+  for (const text of ['연결 이유 내용', '새 정보 내용', '이전 대응 내용']) assert.ok(html.indexOf(text) < detailStart);
+  assert.equal((html.match(/Previous answer/g) || []).length, 1);
+  assert.ok(html.indexOf('Current customer statement') > detailStart);
+  assert.ok(!html.includes('<script>') && !html.includes('<details open'));
+  assert.equal(renderToStaticMarkup(jsxRuntime.jsx(FollowupEvidence, { link: { ...link, dismissed: true } })), '');
+  assert.equal(renderToStaticMarkup(jsxRuntime.jsx(FollowupEvidence, {})), '');
+});
+
+test('referral preparation asks for missing recommended materials but never unavailable or received items', () => {
+  const { copilotPresentation, referralSuggestions } = load('lib/investigation.ts', {});
+  const t = { apiStatus: 'READY_FOR_REVIEW', purpose: 'request', draft: 'Please send materials',
+    copilot: { workflow: { mode: 'customer_request', request_fields: ['load_type'] }, request_plan: [
+      { field: 'load_type', origin: 'recommended', status: 'missing' },
+      { field: 'logs', origin: 'required', status: 'unavailable' },
+      { field: 'cable_length', origin: 'recommended', status: 'confirmed' },
+      { field: 'carrier_frequency', origin: 'recommended', status: 'unavailable' },
+    ] } };
+  assert.deepEqual(Array.from(copilotPresentation(t).requestRows, r => r.field), ['load_type']);
+  t.activeComposer = 'expert';
+  assert.deepEqual(Array.from(referralSuggestions(t), r => r.field), ['load_type']);
+});
+
+test('referral choice collects optional materials without making them a hard referral blocker', () => {
+  const logic = fullLogicFixture();
+  const { mod } = apiFixture();
+  const t = mod.apply(undefined, apiRow({
+    classification: { category: 'DEFECT' }, extraction: {},
+    rules: { required_info: [], missing_info: [], missing_blocking: [] },
+    escalation_advice: { decision: 'recommended' },
+    investigation_info: { missing_fields: ['load_type'] },
+  }));
+  Object.assign(t, { owner: 'tester', analysisReady: true, priority: 'P3', draft: '', aiDraft: '' });
+  assert.equal(logic.branchChoice(t), 'request');
+  assert.equal(logic.pendingCustomerInfo(t), 0); // staff may refer before optional materials arrive
+  t.investigationInfo.missing_fields = [];
+  assert.equal(logic.branchChoice(t), 'expert');
+  t.investigationInfo.missing_fields = ['load_type']; t.priority = 'P1';
+  assert.equal(logic.branchChoice(t), 'expert');
+});
+
+test('customer-declared unavailable material does not prevent referral, while a blocking field still does', () => {
+  const logic = fullLogicFixture();
+  const t = { source: 'api', analysisReady: true, requiredInformation: [{ id: 'logs' }, { id: 'serial_no' }],
+    infoChecks: { logs: { status: 'unusable' }, serial_no: { status: 'missing' } },
+    copilot: { request_plan: [{ field: 'logs', status: 'unavailable' }, { field: 'serial_no', status: 'clarify' }] } };
+  assert.equal(logic.pendingCustomerInfo(t), 1);
+  t.infoChecks.serial_no.status = 'confirmed';
+  assert.equal(logic.pendingCustomerInfo(t), 0);
+});
+
+test('referral is counted once: arrived reply is review only, unanswered request is waiting only', () => {
+  const reply = { kind: 'expert', id: 'p1', requestId: 'r1', source: 'specialist-api' };
+  const request = { kind: 'escalation', id: 'r1', source: 'specialist-api', department: 'QA' };
+  const base = { source: 'api', stage: 0, sent: false, activeComposer: null };
+  const arrived = { ...base, id: 'A', events: [request, reply],
+    specialistFollowup: { status: 'in_progress', pending_replies: false } };
+  const asked = { ...base, id: 'B', events: [{ ...request, id: 'r2' }],
+    specialistFollowup: { status: 'in_progress', pending_replies: true } };
+  const confirmed = { ...base, id: 'C', events: [{ ...request, id: 'r3' }, { ...reply, id: 'p3', requestId: 'r3' }],
+    specialistFollowup: { status: 'confirmed', pending_replies: false } };
+  const closed = { ...arrived, id: 'D', stage: 5 };
+  const logic = fullLogicFixture([arrived, asked, confirmed, closed]);
+  const rows = logic.referralRows();
+  const ids = (ok) => rows.filter(ok).map((r) => r.ticket.id).join('');
+  assert.equal(ids(logic.isReviewReferral), 'A');
+  assert.equal(ids(logic.isWaitingReferral), 'B');
 });

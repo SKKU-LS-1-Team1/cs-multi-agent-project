@@ -49,13 +49,24 @@
 # - 지식 그래프 (CSA-71): GRAPH_ENABLED=true 면 finalize_evidence 의 사례 자리를
 #   agents/knowledge_graph.py 검색 결과로 바꾼다 (제품·에러코드 경로로 좁힌 고장 위 2개).
 #   꺼져 있거나 Neo4j·임베딩이 실패하면 아래 패턴 DB 경로 그대로.
+# - reranker (CSA-81 · 김동규): 벡터 점수 + 규칙 가산점으로 정렬한 docs 후보 위 RERANK_POOL 개를
+#   "이 절이 문의에 답하는 내용인가" 로 판단 모델(llm.judge, task "rerank")에 절마다 병렬로 묻고,
+#   관련도(yes 확신도, no 면 1 - 확신도) × settings.rerank_weight 를 점수에 더해 다시 정렬한다.
+#   벡터 유사도는 "비슷한 말" 이라 같은 제품의 다른 절이 앞에 오는 일이 많아서다 (멘토링 2번).
+#   에러코드가 절 제목과 정확히 맞는 TG 절(ERROR_CODE_BONUS)은 정확 조회라 판단과 상관없이
+#   위에 둔다.
+#   RERANK_ENABLED=false · 라우터 없음 · LLM 꺼짐(fake) · 호출 실패면 지금 규칙 정렬 그대로.
+#   비교: uv run python -m cs_agent.agents.retrieval --split valid --rerank (끔/켬 K3 를 같이 출력)
 import argparse
+import contextvars
 import csv
 import logging
 import math
 import re
+import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
@@ -72,6 +83,10 @@ FINAL_CASES_K = 2
 ERROR_CODE_K = 3
 TYPE_BONUS = 0.3  # 유형에 맞는 문서 종류
 ERROR_CODE_BONUS = 1.0  # 절 제목이 문의의 에러코드와 같은 TG 절 (정확 조회라 가장 우선)
+RERANK_TASK = "rerank"
+RERANK_POOL = 8  # 규칙 정렬 위 몇 개를 판단 모델에 다시 묻는가 (first_pass docs top-8 과 같게)
+RERANK_WORKERS = 8
+RERANK_TEXT_CHARS = 1500  # 절 본문은 앞부분만 (긴 절 = 같은 절 조각 중 점수 높은 것)
 
 # 유형별로 먼저 볼 문서. "DS" 는 doc_type, "POL-ORDER" 처럼 '-' 가 있으면 doc_id
 PREFERRED_DOCS: dict[Category, tuple[str, ...]] = {
@@ -419,6 +434,78 @@ def _has_error_code(evidence: Evidence, code: str | None, category: Category | N
     return bool(_error_code_pattern(code).search(evidence.metadata.get("title", "")))
 
 
+def rerank_prompt(query: str, evidence: Evidence) -> str:
+    title = evidence.metadata.get("title", "")
+    return (
+        "You rank knowledge-base sections for a B2B industrial-equipment customer-support team.\n\n"
+        f"Customer inquiry:\n{query.strip()}\n\n"
+        f"Section: {evidence.doc_id} {evidence.section or ''} {title}\n"
+        f"{evidence.text[:RERANK_TEXT_CHARS]}\n\n"
+        "Question: does this section contain the information an agent needs to answer this "
+        "inquiry (the asked value, procedure, cause/fix, or policy)? Answer yes or no."
+    )
+
+
+def rerank_enabled(llm: Any) -> bool:
+    settings = getattr(llm, "settings", None)
+    return llm is not None and bool(getattr(settings, "rerank_enabled", False))
+
+
+def relevance(llm: Any, query: str, evidence: list[Evidence]) -> list[float] | None:
+    """절마다 관련도 0~1 (yes 확신도). LLM 꺼짐(fake)·호출 실패면 None (규칙 정렬 그대로)."""
+    if not evidence:
+        return []
+
+    def judge(e: Evidence) -> Any:
+        return llm.judge(RERANK_TASK, rerank_prompt(query, e), ["yes", "no"])
+
+    trace_context = contextvars.copy_context()  # 문의 단위 Langfuse trace 를 스레드에도
+    try:
+        with ThreadPoolExecutor(min(RERANK_WORKERS, len(evidence))) as pool:
+            results = list(pool.map(lambda e: trace_context.copy().run(judge, e), evidence))
+    except Exception:
+        _LOGGER.exception("reranker 판단 실패 → 규칙 정렬 그대로")
+        return None
+    if any(r.model == "fake" for r in results):
+        return None
+    return [r.confidence if r.answer == "yes" else 1.0 - r.confidence for r in results]
+
+
+def rerank(
+    ranked: list[Evidence],
+    query: str,
+    llm: Any,
+    *,
+    pinned: set[tuple[str, str | None]] = frozenset(),
+    weight: float | None = None,
+    scores: list[float] | None = None,
+) -> list[Evidence]:
+    """규칙 정렬된 docs 위 RERANK_POOL 개를 관련도로 다시 정렬. pinned(에러코드 정확 일치)는 위에.
+
+    scores 를 주면 판단 모델을 다시 부르지 않는다 (K3 비교에서 가중치만 바꿔 볼 때).
+    """
+    pool, rest = ranked[:RERANK_POOL], ranked[RERANK_POOL:]
+    if not query or len(pool) < 2:
+        return ranked
+    if scores is None:
+        scores = relevance(llm, query, pool)
+    if scores is None:
+        return ranked
+    if weight is None:
+        weight = llm.settings.rerank_weight
+    rescored = [
+        e.model_copy(
+            update={
+                "score": round(e.score + weight * r, 4),
+                "metadata": {**e.metadata, "rerank": f"{r:.3f}"},
+            }
+        )
+        for e, r in zip(pool, scores, strict=True)
+    ]
+    rescored.sort(key=lambda e: ((e.doc_id, e.section) in pinned, e.score), reverse=True)
+    return rescored + rest
+
+
 def finalize_evidence(
     candidates: list[Evidence],
     extraction: Extraction,
@@ -427,26 +514,32 @@ def finalize_evidence(
     *,
     graph: Any = None,
     query: str = "",
+    llm: Any = None,
 ) -> list[Evidence]:
     """⑧ 제품·유형으로 거르고 재정렬한 확정 근거. docs k개 + cases FINAL_CASES_K개.
 
     graph(agents/knowledge_graph.KnowledgeGraph)가 있으면 사례는 지식 그래프에서 찾는다 (CSA-71).
     그래프가 실패하면 후보의 패턴 DB 사례로 대체한다.
+    llm(LLMRouter)과 query 를 주고 RERANK_ENABLED 면 docs 를 reranker 로 다시 정렬한다 (CSA-81).
     """
     docs: dict[tuple[str, str | None], Evidence] = {}
+    pinned: set[tuple[str, str | None]] = set()
     for evidence in candidates:
         if evidence.source != "docs" or not _matches_product(evidence, extraction):
             continue
         score = evidence.score
         if _is_preferred(evidence, category):
             score += TYPE_BONUS
+        key = (evidence.doc_id, evidence.section)  # 긴 절을 나눈 조각은 한 번만
         if _has_error_code(evidence, extraction.error_code, category):
             score += ERROR_CODE_BONUS
-        key = (evidence.doc_id, evidence.section)  # 긴 절을 나눈 조각은 한 번만
+            pinned.add(key)
         if key not in docs or score > docs[key].score:
             docs[key] = evidence.model_copy(update={"score": round(score, 4)})
 
     ranked = sorted(docs.values(), key=lambda e: e.score, reverse=True)
+    if rerank_enabled(llm):
+        ranked = rerank(ranked, query, llm, pinned=pinned)
     if graph is not None:
         try:
             return ranked[:k] + graph.search(query, extraction, category, FINAL_CASES_K)
@@ -505,22 +598,123 @@ def measure_k3(
     }
 
 
+def measure_rerank(
+    tickets: Iterable[dict[str, str]],
+    docs: Retriever,
+    cases: Retriever,
+    llm: Any,
+    weights: Sequence[float] = (0.3, 0.5, 1.0, 2.0),
+    k: int = 3,
+) -> dict[str, Any]:
+    """reranker 끔/켬 K3 비교. 같은 후보·같은 판단으로 가중치만 바꿔 본다 (판단은 문의당 1번).
+
+    정답 절이 규칙 정렬 위 RERANK_POOL 안에 없으면 reranker 로도 못 올리므로 pool_hits 도 같이 낸다.
+    """
+    total = base_hits = pool_hits = failed = 0
+    hits = dict.fromkeys(weights, 0)
+    by_category: dict[str, dict[str, int]] = {}
+    changed: list[dict[str, str]] = []
+    for row in tickets:
+        if not row["reference_doc_id"]:
+            continue
+        text = f"{row['inquiry_subject']}\n{row['inquiry_body']}"
+        extraction = Extraction(
+            product_code=row["product_code"] or None,
+            product_family=row["product_family"] or None,
+            error_code=row["error_code_reported"] or None,
+        )
+        category = Category(row["category_code"])
+        candidates = first_pass(docs, cases, text)
+        pool = [
+            e
+            for e in finalize_evidence(candidates, extraction, k=RERANK_POOL, category=category)
+            if e.source == "docs"
+        ]
+        pinned = {
+            (e.doc_id, e.section)
+            for e in pool
+            if _has_error_code(e, extraction.error_code, category)
+        }
+        ref = (row["reference_doc_id"], row["reference_section"])
+        base = k3_hit(pool[:k], *ref)
+        scores = relevance(llm, text, pool)
+        if scores is None:
+            failed += 1
+        total += 1
+        base_hits += base
+        pool_hits += k3_hit(pool, *ref)
+        counts = by_category.setdefault(row["category_code"], {"n": 0, "base": 0})
+        counts["n"] += 1
+        counts["base"] += base
+        for w in weights:
+            after = (
+                rerank(pool, text, llm, pinned=pinned, weight=w, scores=scores)
+                if scores is not None
+                else pool
+            )
+            hit = k3_hit(after[:k], *ref)
+            hits[w] += hit
+            counts[str(w)] = counts.get(str(w), 0) + hit
+            if w == weights[0] and hit != base:
+                changed.append({"ticket_id": row.get("ticket_id", ""), "gain": str(hit - base)})
+    return {
+        "total": total,
+        "base": base_hits,
+        "pool": pool_hits,
+        "failed": failed,
+        "rerank": hits,
+        "by_category": by_category,
+        "changed": changed,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="근거 일치율 K3 측정")
     parser.add_argument("--split", default="valid", choices=("train", "valid", "test"))
+    parser.add_argument(
+        "--rerank", action="store_true", help="reranker 끔/켬 비교 (LLM_PROVIDER=live 필요, CSA-81)"
+    )
+    parser.add_argument("--limit", type=int, default=0, help="앞 N건만 (0 이면 전부)")
     args = parser.parse_args()
 
     docs, cases = default_retrievers()
     rows = [
         r
         for r in _read_csv(get_settings().raw_data_dir / "tickets.csv")
-        if r["data_split"] == args.split
+        if r["data_split"] == args.split and r["reference_doc_id"]
     ]
-    result = measure_k3(rows, docs, cases)
+    if args.limit:
+        rows = rows[: args.limit]
     print(f"retriever={type(docs).__name__} split={args.split}")
-    print(f"K3 = {result['hits']}/{result['total']} ({result['k3']:.1%})")
-    for category, (hit, n) in sorted(result["by_category"].items()):
-        print(f"  {category:<11} {hit}/{n} ({hit / n:.1%})")
+    if not args.rerank:
+        result = measure_k3(rows, docs, cases)
+        print(f"K3 = {result['hits']}/{result['total']} ({result['k3']:.1%})")
+        for category, (hit, n) in sorted(result["by_category"].items()):
+            print(f"  {category:<11} {hit}/{n} ({hit / n:.1%})")
+        return
+
+    from cs_agent.llm.router import get_router
+
+    llm = get_router()
+    if not llm.enabled:
+        raise SystemExit("--rerank 는 LLM_PROVIDER=live 와 판단 모델 키가 필요하다")
+    weights = (0.3, 0.5, 1.0, 2.0)
+    started = time.perf_counter()
+    result = measure_rerank(rows, docs, cases, llm, weights)
+    elapsed = time.perf_counter() - started
+    n = result["total"]
+    print(f"문의 {n}건 · 판단 실패 {result['failed']}건 · {elapsed:.0f}초 ({elapsed / n:.1f}초/건)")
+    print(
+        f"정답 절이 rerank 후보(위 {RERANK_POOL}) 안: "
+        f"{result['pool']}/{n} ({result['pool'] / n:.1%})"
+    )
+    print(f"K3 끔            = {result['base']}/{n} ({result['base'] / n:.1%})")
+    for w, hit in result["rerank"].items():
+        print(f"K3 켬 weight={w:<4} = {hit}/{n} ({hit / n:.1%})  {hit - result['base']:+d}")
+    print("유형별 (끔 → 켬 weight 별)")
+    for category, c in sorted(result["by_category"].items()):
+        after = " ".join(f"{c[str(w)]}" for w in weights)
+        print(f"  {category:<11} n={c['n']:<4} 끔 {c['base']:<4} 켬 {after}")
 
 
 if __name__ == "__main__":

@@ -2,8 +2,40 @@ import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { myInquiries, setInquiryEmail } from '../../lib/myInquiries'
 import {
-  CHANNEL, CHANNEL_SHORT, ESC_REASON, FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, dept, fieldLabel, fmtTime, mailEvents, notifyEmail, pauseRule, split, titleOf,
+  FILTERS, FINAL_ACTION, STATUS, STEPS, attachmentsOf, fieldLabel, fmtTime, mailEvents, notifyEmail, pauseRule, split, titleOf,
 } from '../lib/inquiry.js'
+import InquiryBody from './InquiryBody.jsx'
+import Attachments from './Attachments.jsx'
+import { getFamily, getProduct, productImage } from '../lib/catalog.js'
+import { CATEGORIES, typeInfo } from '../lib/inquiryForm.js'
+import { LEGACY_TYPE } from '../lib/legacy.js'
+
+// 문의 태그는 홈의 큰 분류 4가지(제품 고장 · 설치 · 사용 방법 · 제품 정보 · 자료 · 보증 · 주문 · 견적)로만 보여 준다.
+// 단종·호환은 서버에 유형이 없어 본문 머리의 표시로 알아보고, 제품 정보 · 자료로 묶는다. 펌웨어(FW_UPDATE)는 설치 · 사용 방법으로 묶는다.
+const typeOf = (t) => {
+  const code = String(t.inquiry_body ?? '').startsWith('[단종·호환·대체 문의]') ? LEGACY_TYPE : t.category_code === 'FW_UPDATE' ? 'USAGE' : t.category_code
+  const cat = typeInfo(code)?.cat
+  return CATEGORIES.find((c) => c.id === cat)?.label ?? ''
+}
+
+// 문의한 제품을 이름표 카드로 보여 준다: 제품 이미지 · 제품군 · 모델명 · 주문 코드.
+function ProductTag({ t }) {
+  const p = t.product_code ? getProduct(t.product_code) : null
+  const fam = p ? getFamily(p.family) : null
+  if (!t.product_name && !t.product_code) return null
+  return (
+    <section className="ib-sec ptag-sec"><h5>제품 모델</h5>
+      <div className="ptag-card">
+        {p && <img src={productImage(p.code)} alt="" />}
+        <div className="ptc-t">
+          {fam && <small>{fam.name}</small>}
+          <b>{t.product_name || p?.name}</b>
+          {t.product_code && <code>{t.product_code}</code>}
+        </div>
+      </div>
+    </section>
+  )
+}
 
 function Long({ text, lines = 5 }) {
   const [open, setOpen] = useState(false)
@@ -132,20 +164,45 @@ function Sheet({ kind, t, onClose, onSend }) {
   )
 }
 
+// 서버에 올린 첨부 파일(GET /api/inquiries/{id}/attachments)을 본문의 이름 순서에 맞춘다.
+// 서버에 없는 이름(전화·메일 접수, 업로드 전 문의)은 이름만 보인다.
+function useAttachments(ticketId, names) {
+  const [stored, setStored] = useState([])
+  useEffect(() => {
+    let live = true
+    api.inquiryAttachments(ticketId).then((rows) => {
+      if (live) setStored(rows.map((r) => ({ name: r.name, size: r.size, type: r.content_type, url: api.attachmentUrl(ticketId, r.attachment_id) })))
+    }, () => {})
+    return () => { live = false }
+  }, [ticketId])
+  const left = [...stored]
+  const items = names.map((name) => {
+    const i = left.findIndex((r) => r.name === name)
+    return i >= 0 ? left.splice(i, 1)[0] : { name }
+  })
+  return [...items, ...left]
+}
+
 function Detail({ t, onBack, onSend, onAgain, email, onEmail }) {
   const st = STATUS[t.status]
-  const ch = CHANNEL[t.channel]
   const miss = split(t.missing_info), blocking = split(t.missing_blocking_info), prov = split(t.provided_info)
   const [sheet, setSheet] = useState(null)
   const att = attachmentsOf(t)
+  const media = useAttachments(t.ticket_id, att)
   const done = st.kind === 'done'
-  const phone = t.channel === 'PHONE'
 
   return (
     <div className="inqd">
       <div className="fhead"><button type="button" className="backbtn" onClick={onBack}>← 내 문의</button></div>
       <p className="inq-id">문의번호 {t.ticket_id}</p>
       <h2 className="inq-title">{titleOf(t)}</h2>
+      {(typeOf(t) || t.product_code) && (
+        <ul className="inq-tags" aria-label="문의 분류">
+          {typeOf(t) && <li><i>유형</i>{typeOf(t)}</li>}
+          {t.product_code && getProduct(t.product_code) && <li><i>제품군</i>{getFamily(getProduct(t.product_code).family).name}</li>}
+          {(t.product_name || t.product_code) && <li><i>모델</i>{t.product_name || getProduct(t.product_code)?.name}</li>}
+        </ul>
+      )}
 
 
       <Progress t={t} />
@@ -168,24 +225,12 @@ function Detail({ t, onBack, onSend, onAgain, email, onEmail }) {
       {sheet && <Sheet kind={sheet} t={t} onClose={() => setSheet(null)} onSend={onSend} key={sheet} />}
 
       <div className="blk"><h4>접수한 내용</h4>
-        <ul className="kv">
-          {(t.product_name || t.product_code) && <li><span>제품 · 모델</span><b>{[t.product_name, t.product_code].filter(Boolean).join(' · ')}</b></li>}
-          <li><span>접수 채널</span><b>{ch.emoji} {ch.label}</b></li>
-          {t.error_code_reported && <li><span>에러 코드</span><b>{t.error_code_reported}</b></li>}
-        </ul>
-        {phone && <p className="phone-note">전화로 접수한 <strong>상담 메모</strong>예요. 통화 녹음이나 전체 대화 내용은 기록에 없어요.</p>}
-        <Long text={t.inquiry_body} />
-        {att.length > 0 && <p className="atts">{att.map((a) => <span key={a}>📎 {a}<em> (파일 없음 · 이름만 기록됐어요)</em></span>)}</p>}
+        <ProductTag t={t} />
+        {t.error_code_reported && <ul className="kv"><li><span>에러 코드</span><b>{t.error_code_reported}</b></li></ul>}
+        <InquiryBody text={t.inquiry_body} files={media.map((x) => x.name)} media={media.some((x) => x.url) ? media : null} required={split(t.required_info)} provided={split(t.provided_info)} fallback={{ product_model: [t.product_name, t.product_code].filter(Boolean).join(' · '), error_code: t.error_code_reported }} />
       </div>
 
-      {t.assigned_dept && <div className="blk"><h4>담당 부서</h4>
-        <ul className="kv">
-          <li><span>담당</span><b>{dept(t.assigned_dept)}</b></li>
-          {t.escalated === 'Y' && <li><span>전문 부서 확인</span><b>{dept(t.escalated_to)}{t.escalation_reason ? ` · ${ESC_REASON[t.escalation_reason] ?? t.escalation_reason}` : ''}</b></li>}
-        </ul>
-      </div>}
-
-      {t.final_reply && st.kind !== 'need' && <div className="blk"><h4>답변</h4><Long text={t.final_reply} /></div>}
+      {t.final_reply && st.kind !== 'need' && <div className="blk"><h4>답변</h4><div className="ib-notes"><Long text={t.final_reply} /></div></div>}
 
       {done && (t.final_action || t.rma_no || t.reference_doc_id || t.resolved_at_utc) && (
         <div className="blk res"><h4>처리 결과</h4>
@@ -222,7 +267,7 @@ export default function Inquiries({ onNew, onSend, onAgain, extra = [], initialO
   useEffect(() => {
     let live = true
     const mine = myInquiries()
-    Promise.all(mine.map((m) => api.customerInquiry(m.ticket_id).then((c) => ({ ...fromServer(c), notify_email: m.notify_email ?? '' }), () => null)))
+    Promise.all(mine.map((m) => api.customerInquiry(m.ticket_id).then((c) => ({ ...fromServer(c), notify_email: m.notify_email ?? '', category_code: m.category_code ?? '', product_code: m.product_code ?? '', product_name: getProduct(m.product_code ?? '')?.name ?? '' }), () => null)))
       .then((r) => {
         if (!live) return
         setFailed(r.filter((x) => !x).length)
@@ -259,7 +304,7 @@ export default function Inquiries({ onNew, onSend, onAgain, extra = [], initialO
               <li key={t.ticket_id}>
                 <button type="button" className="irow2" onClick={() => setOpenId(t.ticket_id)}>
                   <b>{titleOf(t)}</b>
-                  <span className="im">{t.received_at_utc ? t.received_at_utc.slice(0, 10) : ''} · {CHANNEL_SHORT[t.channel]}</span>
+                  <span className="im">{typeOf(t) && <i className="ttag">{typeOf(t)}</i>}{t.received_at_utc ? t.received_at_utc.slice(0, 10) : ''}</span>
                   {STATUS[t.status].kind === 'need' && <em className="needtag">추가 정보 필요</em>}
                 </button>
               </li>

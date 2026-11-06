@@ -177,6 +177,7 @@ class Mailbox:
         self.llm, self.tables = llm, tables
         self._analyses: dict[tuple[str, str | None, str | None], MailAnalysis] = {}
         self._lock = Lock()
+        self._copilot_cache: dict[str, dict] = {}
 
     @classmethod
     def from_deps(cls, mails: Sequence[Mail], tickets: Any, deps: Any) -> "Mailbox":
@@ -284,6 +285,30 @@ class Mailbox:
         return result
 
     # 등록 ---------------------------------------------------------------------------------------
+
+    def copilot(self, mail_id: str, change: MailAnalyzeIn | None = None) -> dict:
+        from cs_agent.agents import copilot
+
+        change = change or MailAnalyzeIn()
+        analysis = self.analyze(mail_id, change)
+        mail = self._mail(mail_id)
+        state = {
+            "inquiry": mail.inquiry(change.category, change.product_code),
+            "classification": analysis.classification,
+            "extraction": analysis.extraction,
+            "rules": analysis.rules,
+            "status": "NEW",
+        }
+        key = copilot.context(state, self.tables)[0]
+        with self._lock:
+            saved = self._copilot_cache.get(mail_id)
+        state["copilot_insight"] = saved
+        if not saved or saved["context_key"] != key:
+            saved = copilot.generate(state, self.tables, self.llm)
+            with self._lock:
+                self._copilot_cache[mail_id] = saved
+        state["copilot_insight"] = saved
+        return copilot.view(state, self.tables)
 
     def register(self, mail_id: str, body: MailRegisterIn) -> TicketOut:
         """확인한 유형 · 제품으로 티켓을 만든다. 이미 등록한 메일이면 그 티켓."""

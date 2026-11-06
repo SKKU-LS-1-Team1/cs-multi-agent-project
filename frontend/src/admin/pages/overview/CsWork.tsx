@@ -1,6 +1,6 @@
 import { todayTasks } from "@admin/lib/actions";
-// C/S 업무 홈(2단): 위 = 오늘 내가 할 일 | SLA 안정도, 아래 = 팀 현황 | 전문부서 협업 요약. 위쪽 버튼으로 카드를 켜고 끌 수 있다.
-import { ArrowRight, ArrowUpRight, CheckCheck, ChevronRight, FileCheck2, FilePenLine, MessageSquareReply, Plus, Send, TriangleAlert, type LucideIcon } from "lucide-react";
+// C/S 업무 홈(2단): 위 = 할 일 | SLA 안정도, 아래 = 팀 현황 | 전문부서 협업 요약. 위쪽 버튼으로 카드를 켜고 끌 수 있다.
+import { ArrowRight, ArrowUpRight, ChevronRight, FileCheck2, Plus, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { CustomizeMenu, Ring, useWidgets } from "@admin/components/admin/charts";
 import { Mono, PageHeader, PersonAvatar, SlaTag, Tag, rise, useGo } from "@admin/components/admin/common";
@@ -8,7 +8,7 @@ import { departmentRank, departmentRisk, openTickets, people, referralRows, canA
 import { openModal, setUi, useStore } from "@admin/lib/store";
 import { cn } from "@admin/lib/utils";
 
-export const CS_WIDGETS = [["today", "오늘 내가 할 일"], ["sla", "SLA·바로가기"], ["team", "팀 현황"], ["collab", "전문부서 협업"]] as const;
+export const CS_WIDGETS = [["today", "할 일"], ["sla", "SLA·바로가기"], ["team", "팀 현황"], ["collab", "전문부서 협업"]] as const;
 
 /** 위험 건수에 따른 색: 0건 초록 · 1~2건 노랑 · 3건 이상 빨강. */
 const riskTone = (n: number) => (n === 0 ? "success" : n < 3 ? "warning" : "destructive") as "success" | "warning" | "destructive";
@@ -16,17 +16,6 @@ const RISK_TEXT = { success: "위험 없음", warning: "주의 필요", destruct
 const RISK_TAG = { success: "green", warning: "amber", destructive: "red" } as const;
 /** 할 일 카드에 보여 주는 줄 수(급한 순). 전체 건수는 제목 옆에 쓴다. */
 const TASK_ROWS = 4;
-const TASK_ICON: Record<string, [LucideIcon, string]> = {
-  "고객 회신 확인하기": [MessageSquareReply, "bg-info/10 text-info"],
-  "답변 작성 시작하기": [FilePenLine, "bg-info/10 text-info"],
-  "영어 초안 검토하기": [FilePenLine, "bg-info/10 text-info"],
-  "승인하고 발송하기": [Send, "bg-success/10 text-success"],
-  "처리 결과 기록하고 완료하기": [CheckCheck, "bg-success/10 text-success"],
-  "고객 질의서 작성하기": [FilePenLine, "bg-info/10 text-info"],
-  "전문부서 요청서 작성하기": [FilePenLine, "bg-info/10 text-info"],
-};
-const TaskIcon = ({ label }: { label: string }) => { const [Icon, tone] = TASK_ICON[label] || [FilePenLine, "bg-muted text-foreground"]; return <span className={cn("grid size-10 place-items-center rounded-full transition-transform duration-200 group-hover:scale-105", tone)}><Icon className="size-[18px]" aria-hidden /></span>; };
-
 /** 대시보드 카드: 제목 + 한 줄 설명(desc) + 오른쪽 링크. */
 const Card = ({ title, sub, desc, aside, children, className, order = 0 }: { title: string; sub?: string; desc?: string; aside?: React.ReactNode; children: React.ReactNode; className?: string; order?: number }) => (
   <section aria-label={title} style={rise(order).style} className={cn("flex flex-col rounded-3xl bg-card p-6 shadow-card", rise(order).className, className)}>
@@ -51,10 +40,10 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
   const waitRisk = new Set(waiting.filter((r) => departmentRisk(r.ticket)).map((r) => r.ticket.id)).size;
   const list = (filter: string) => { setUi({ filter }); go.list({ filter }); };
   const quick: [string, number, LucideIcon, string, () => void][] = [
-    ["SLA 위험", s.risk, TriangleAlert, s.risk ? (tone === "destructive" ? "bg-destructive/10 text-destructive" : "bg-warning/15 text-warning-ink") : "bg-muted text-muted-foreground", () => list("전체")],
+    ["SLA 위험", s.risk, TriangleAlert, s.risk ? (tone === "destructive" ? "bg-destructive/10 text-destructive" : "bg-warning/15 text-warning-ink") : "bg-muted text-muted-foreground", () => { setUi({ filter: "전체" }); go.list({ filter: "전체", riskOnly: true }); }],
     ["답변 검토 대기", s.review, FileCheck2, s.review ? "bg-info/10 text-info" : "bg-muted text-muted-foreground", () => list("답변 준비")],
   ];
-  const row = "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto_16px] items-center gap-4 px-6 py-4 text-left transition-colors duration-200 hover:bg-muted/70 active:bg-muted";
+  const row = "group grid w-full grid-cols-[minmax(0,1fr)_auto_16px] items-center gap-4 px-6 py-4 text-left transition-colors duration-200 hover:bg-muted/70 active:bg-muted";
   const chev = "size-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-foreground";
   const link = "text-sm font-medium text-info transition-colors hover:text-[#003377]";
 
@@ -63,12 +52,11 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
       <PageHeader title="고객지원 업무 현황" actions={<><CustomizeMenu all={CS_WIDGETS} shown={w.shown} toggle={w.toggle} /><Button onClick={() => openModal("new-ticket")}><Plus aria-hidden />새 문의 등록</Button></>}>{tabs}</PageHeader>
       <div className="grid grid-cols-[minmax(0,1fr)_340px] items-stretch gap-5 px-10 pb-12">
         {w.shown("today") && (
-          <Card title="오늘 내가 할 일" sub={allTasks.length ? `${allTasks.length}건` : undefined} desc="기한이 급한 순" aside={<button onClick={() => list("내 담당")} className={link}>내 문의 전체 ›</button>} className="overflow-hidden p-0 [&>div:first-child]:px-6 [&>div:first-child]:pt-6">
+          <Card title="할 일" sub={allTasks.length ? `${allTasks.length}건` : undefined} desc="기한이 급한 순" aside={<button onClick={() => list("내 담당")} className={link}>내 문의 전체 ›</button>} className="overflow-hidden p-0 [&>div:first-child]:px-6 [&>div:first-child]:pt-6">
             <ul className="divide-y">
               {tasks.map(({ ticket: t, label }) => (
                 <li key={t.id}>
                   <button onClick={() => go.ticket(t.id)} className={row}>
-                    <TaskIcon label={label} />
                     <span className="grid gap-0.5"><span className="font-semibold">{label}</span><span className="truncate text-sm text-muted-foreground">{t.title} · <Mono>{t.id}</Mono></span></span>
                     <SlaTag t={t} />
                     <ChevronRight className={chev} aria-hidden />
@@ -99,7 +87,7 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
           </Card>
         )}
         {w.shown("team") && (
-          <Card title="팀 현황" sub={FRONTLINE} desc="담당자별 진행 중 문의" order={2} aside={<div className="flex items-center gap-3">
+          <Card title="팀 현황" sub={FRONTLINE} order={2} aside={<div className="flex items-center gap-3">
             {s.unassigned > 0 && <button onClick={() => go.to("/resources")} className="rounded-full bg-warning/20 px-2.5 py-0.5 text-xs font-semibold text-warning-ink transition-colors hover:bg-warning/30">미배정 {s.unassigned}건</button>}
             <button onClick={() => go.to("/resources")} className={link}>{canAssign ? "배정하기 ›" : "자세히 ›"}</button></div>}>
             <ul className="grid grid-cols-2 gap-x-4 gap-y-1">
@@ -120,7 +108,7 @@ export default function CsWork({ tabs }: { tabs: React.ReactNode }) {
           </Card>
         )}
         {w.shown("collab") && (
-          <Card title="전문부서 협업" desc="전문부서 회신을 기다리는 요청" order={3} aside={<button onClick={() => go.to("/collab")} className={link}>자세히 ›</button>}>
+          <Card title="전문부서 협업" order={3} aside={<button onClick={() => go.to("/collab")} className={link}>자세히 ›</button>}>
             <div className="flex items-baseline gap-2"><span className="text-4xl font-bold tracking-tight tabular-nums">{waiting.length}</span><span className="text-muted-foreground">건 회신 대기</span>{waitRisk > 0 && <Tag tone="red" className="ml-auto">SLA 위험 {waitRisk}</Tag>}</div>
             <ul className="mt-3 divide-y">
               {waiting.slice(0, 3).map((r) => (

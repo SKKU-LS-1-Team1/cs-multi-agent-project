@@ -7,6 +7,17 @@ export type { Customer };
 export const SEGMENT_KO: Record<string, string> = { DISTRIBUTOR: "유통사", EPC: "EPC", END_USER: "최종 사용자", PANEL_BUILDER: "판넬 제작사", SYSTEM_INTEGRATOR: "시스템 통합사", UTILITY: "전력사" };
 export const CATEGORY_KO: Record<string, string> = { TECH_SPEC: "기술 사양", DEFECT: "불량", INSTALL: "설치", MANUAL: "매뉴얼", FW_UPDATE: "펌웨어", COMPLIANCE: "인증", ORDER_LEAD: "납기", RETURN: "반품", QUOTE: "견적", WARRANTY: "보증" };
 export const FAMILY_KO: Record<string, string> = { DRIVE: "인버터", PLC: "PLC", HMI: "HMI", LV_BREAKER: "저압 차단기", MV_EQUIP: "고압 설비", TRANSFORMER: "변압기", METER: "계량기", ESS: "ESS", PV: "태양광", UPS: "UPS", CONTROL: "제어" };
+/** 고객 화면의 4개 분류에 문의 유형(백엔드 category 코드)을 묶는다. 해결 사례 분류·업무 메일 유형 선택이 함께 쓴다. */
+export const CASE_GROUPS: [string, string, string[]][] = [
+  ["FAULT", "제품 고장", ["DEFECT"]],
+  ["INSTALL", "설치·사용", ["INSTALL", "FW_UPDATE"]],
+  ["INFO", "제품 정보·자료", ["TECH_SPEC", "MANUAL", "COMPLIANCE"]],
+  ["ORDER", "보증·주문·견적", ["WARRANTY", "RETURN", "ORDER_LEAD", "QUOTE"]],
+];
+/** 문의 유형 코드가 속한 분류 키("" = 어디에도 없음). */
+export const groupOfCategory = (code: string): string => CASE_GROUPS.find(([, , codes]) => codes.includes(code))?.[0] || "";
+/** 문의가 들어온 경로(서버 channel 값). */
+export const CHANNEL_KO: Record<string, string> = { WEB_FORM: "웹 문의", EMAIL: "메일", CHAT: "챗봇", PARTNER_PORTAL: "파트너 포털", PHONE: "전화" };
 export const PRIORITY_KO: Record<string, string> = { P1: "위급", P2: "높음", P3: "보통", P4: "낮음" };
 export const STATUS_KO: Record<string, string> = { CLOSED: "종료", RESOLVED: "해결", IN_PROGRESS: "진행 중", ESCALATED: "이관", WAITING_CUSTOMER: "고객 회신 대기", NEW: "신규", READY_FOR_REVIEW: "답변 검토", ON_HOLD: "보류", HUMAN_QUEUE: "사람 검토", ANALYSIS_PENDING: "분석 대기", APPROVED: "답변 발송", REJECTED: "반려" };
 
@@ -14,11 +25,11 @@ export const STATUS_KO: Record<string, string> = { CLOSED: "종료", RESOLVED: "
 export const flag = (code: string) => /^[A-Za-z]{2}$/.test(code) ? String.fromCodePoint(...[...code.toUpperCase()].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65)) : "—";
 
 /** 대응 판단에 사용하는 사실(이슈 기준). 같은 고객이 여러 개에 해당할 수 있다. 예측이 아니라 확인된 사실만 쓴다. */
-export type Reason = "safety" | "urgent" | "breach" | "repeat";
-export const hasReason = (c: Customer, r: Reason) => (r === "safety" ? c.safety.length > 0 : r === "urgent" ? c.urgentN > 0 : r === "breach" ? c.breach >= 4 : (c.fam[0]?.[1] ?? 0) >= 4);
-export const reasonsOf = (c: Customer): Reason[] => (["safety", "urgent", "breach", "repeat"] as Reason[]).filter((r) => hasReason(c, r));
+export type Reason = "urgent" | "breach" | "repeat";
+export const hasReason = (c: Customer, r: Reason) => (r === "urgent" ? c.urgentN > 0 : r === "breach" ? c.breach >= 4 : (c.fam[0]?.[1] ?? 0) >= 4);
+export const reasonsOf = (c: Customer): Reason[] => (["urgent", "breach", "repeat"] as Reason[]).filter((r) => hasReason(c, r));
 /** 줄에 보여 줄 대표 사실 하나: 지연·임박 문의(대응 버튼 있음) > 반복 문의 > 지연 이력(참고용). */
-export const primaryReason = (c: Customer): Reason | undefined => (["safety", "urgent", "repeat", "breach"] as Reason[]).find((r) => hasReason(c, r)); // 대응 버튼이 있는 이유(지연·임박 문의)를 먼저
+export const primaryReason = (c: Customer): Reason | undefined => (["urgent", "repeat", "breach"] as Reason[]).find((r) => hasReason(c, r)); // 대응 버튼이 있는 이유(지연·임박 문의)를 먼저
 
 /** 사실 한 줄(상세의 대응 항목). */
 export function factText(c: Customer, r: Reason): string {
@@ -36,22 +47,21 @@ export const maxLate = (c: Customer) => Math.max(0, ...c.urgent.filter(isLate).m
 export const SEVERE_DAYS = 7;
 
 /** 카드용 사실: 색(red 위급 · amber 주의 · blue 참고) + 짧은 이름 + 값. 문장으로 풀지 않고 이름과 값으로 나눠 쓴다. */
-export function factParts(c: Customer, r: Reason): { tone: "severe" | "red" | "amber" | "blue"; title: string; value: string } {
-  if (r === "safety") return { tone: "red", title: `안전 검토 문의 ${c.safety.length}건`, value: "미완료" };
+export function factParts(c: Customer, r: Reason): { tone: "severe" | "red" | "amber" | "blue"; title: string; value: string; count: string } {
   if (r === "urgent") {
     const late = c.urgent.filter(isLate);
-    if (late.length) { const d = Math.max(1, maxLate(c)); return { tone: d >= SEVERE_DAYS ? "severe" : "red", title: `지연 문의 ${late.length}건`, value: `최대 ${d}일 지연` }; }
+    if (late.length) { const d = Math.max(1, maxLate(c)); return { tone: d >= SEVERE_DAYS ? "severe" : "red", title: `지연 문의 ${late.length}건`, value: `최대 ${d}일 지연`, count: `${late.length}건` }; }
     const soon = Math.min(...c.urgent.map((u) => u[3] - u[4]));
-    return { tone: "amber", title: `임박 문의 ${c.urgentN}건`, value: `${Math.max(1, Math.round(soon))}시간 남음` };
+    return { tone: "amber", title: `임박 문의 ${c.urgentN}건`, value: `${Math.max(1, Math.round(soon))}시간 남음`, count: `${c.urgentN}건` };
   }
-  if (r === "breach") return { tone: "amber", title: `지연 이력 ${c.breach}회`, value: "최근 12개월" };
-  return { tone: "blue", title: `${FAMILY_KO[c.fam[0][0]] || c.fam[0][0]} ${c.fam[0][1]}회 반복`, value: "최근 12개월" };
+  if (r === "breach") return { tone: "amber", title: `지연 이력 ${c.breach}회`, value: "최근 12개월", count: `${c.breach}회` };
+  return { tone: "blue", title: `${FAMILY_KO[c.fam[0][0]] || c.fam[0][0]} ${c.fam[0][1]}회 반복`, value: "최근 12개월", count: `${c.fam[0][1]}회` };
 }
 
-/** 미완료 안전 문의 또는 GOLD·PLATINUM 지연 문의. 고객 대응 종결은 실제 문의 사유를 해제하지 않는다. */
+/** GOLD·PLATINUM 고객의 지연 문의. 고객 대응 종결은 실제 문의 사유를 해제하지 않는다. */
 export type Focus = "issue" | "pinned" | null;
 export function focusOf(c: Customer, rec?: { resolved?: boolean; pinned?: boolean }): Focus {
-  if (c.safety.length > 0 || (["GOLD", "PLATINUM"].includes(c.tier) && c.urgent.some(isLate))) return "issue";
+  if (["GOLD", "PLATINUM"].includes(c.tier) && c.urgent.some(isLate)) return "issue";
   return rec?.pinned ? "pinned" : null;
 }
 /** 정렬 점수: 등급이 높고 SLA 초과가 많을수록 위로. */

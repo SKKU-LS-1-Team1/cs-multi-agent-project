@@ -35,6 +35,10 @@ class TicketState(TypedDict, total=False):
     manual_reply: bool  # 담당자가 사람 검토 문의에 직접 작성한 답변
     processing_history: list[dict]  # 발송·완료·반려 이력, 고객 회신 시에도 보존
     progress_notices: list[dict]  # 진행 안내 영어 초안·담당자 승인·고객 언어 최종 문구, 발송 없음
+    info_request_fields: list[str]  # 선택한 요청 항목, 재작성에서도 유지
+    followup_link: dict | None  # Customer-history relationship, separate from specialist followup
+    followup_context_stale: bool  # Unlinked draft must be regenerated before approval
+    copilot_insight: dict | None  # 근거 검증된 관리자 요약; 업무 상태를 변경하지 않는다
     body_ko: str | None  # 상담원 표시용. 원문 분석에는 사용하지 않는다 (CSA-57)
     translation_parts: list[TranslationPart]  # 회신별 원문·번역 성공 구간 (체크포인트)
     translation_job: str | None  # 배경 번역 작업 id (intake 가 시작, ready·hold 등이 받음)
@@ -54,6 +58,7 @@ class TicketState(TypedDict, total=False):
     escalation_request: EscalationRequest | None  # CSA-55: 검토 전 생성, 회신 시 무효화
     specialist_requests: list[dict]  # CSA-62 요청·회신 기록 (서비스가 갱신)
     specialist_replies: list[dict]  # 작성·검증에 사용하는 현재 문의 회신
+    escalation_advice: dict | None  # 접수 때 판단한 이관 권장 (agents/escalation_advice.py)
     specialist_followup: dict | None  # 회신 해석·원문 근거·담당자 최종 판정 확인
     specialist_revision: int  # 요청·회신 갱신 버전
     draft_specialist_revision: int  # 현재 초안이 반영한 전문부서 버전

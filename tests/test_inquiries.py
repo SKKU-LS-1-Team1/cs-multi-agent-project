@@ -18,13 +18,14 @@ INQUIRY = {
 
 
 @pytest.fixture
-def client():
+def client(tmp_path):
     with TestClient(
         create_app(
             llm=LLMRouter(Settings(_env_file=None)),
             agents=ANALYSIS,
             storage="memory",
             retrievers=(None, None),
+            attachments_dir=tmp_path,
         )
     ) as c:
         yield c
@@ -46,6 +47,8 @@ def test_customer_sees_status_and_reply_but_not_the_ai_draft(client) -> None:
         "status",
         "message",
         "message_language",
+        "first_response_target_h",
+        "resolution_target_h",
     }  # 초안·근거·점검·담당자는 내보내지 않는다
 
     held = client.post(
@@ -148,6 +151,8 @@ def test_customer_submits_and_replies_without_seeing_internal_fields(client) -> 
         "status",
         "message",
         "message_language",
+        "first_response_target_h",
+        "resolution_target_h",
     }  # AI 초안·근거·점검·담당자는 응답에도 없다
     tid = body["ticket_id"]
     client.post(f"/api/tickets/{tid}/action", json={"action": "info_request"})
@@ -156,3 +161,79 @@ def test_customer_submits_and_replies_without_seeing_internal_fields(client) -> 
     reply = {"channel": "WEB_FORM", "body": "Serial SN-1.", "thread_ref": INQUIRY["thread_ref"]}
     again = client.post("/api/inquiries", json=reply).json()
     assert again["ticket_id"] == tid  # 같은 문의로 이어진다
+
+
+def test_customer_sees_expected_response_times(client) -> None:
+    """접수 화면의 예상 소요시간: 규칙이 정한 SLA 목표 시간을 고객 응답에 싣는다."""
+    sent = client.post("/api/inquiries", json=INQUIRY).json()
+    assert sent["first_response_target_h"] > 0
+    assert sent["resolution_target_h"] >= sent["first_response_target_h"]
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+
+
+def test_customer_uploads_photos_and_sees_them_again(client) -> None:
+    tid = client.post("/api/inquiries", json=INQUIRY).json()["ticket_id"]
+    up = client.post(
+        f"/api/inquiries/{tid}/attachments",
+        params={"name": "현장 사진.png"},
+        content=PNG,
+        headers={"Content-Type": "image/png"},
+    )
+    assert up.status_code == 201
+    meta = up.json()
+    assert (meta["name"], meta["content_type"]) == ("현장 사진.png", "image/png")
+    assert meta["size"] == len(PNG)
+
+    listed = client.get(f"/api/inquiries/{tid}/attachments").json()
+    assert [a["attachment_id"] for a in listed] == [meta["attachment_id"]]
+
+    got = client.get(f"/api/inquiries/{tid}/attachments/{meta['attachment_id']}")
+    assert got.status_code == 200 and got.content == PNG
+    assert got.headers["content-type"] == "image/png"
+    assert got.headers["content-disposition"].startswith("inline")
+    assert got.headers["x-content-type-options"] == "nosniff"
+
+
+def test_scriptable_files_are_downloaded_not_shown(client) -> None:
+    """SVG·HTML 은 스크립트를 품을 수 있어 화면 안에서 열지 않는다."""
+    tid = client.post("/api/inquiries", json=INQUIRY).json()["ticket_id"]
+    svg = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"
+    aid = client.post(
+        f"/api/inquiries/{tid}/attachments",
+        params={"name": "../../etc/x.svg"},
+        content=svg,
+        headers={"Content-Type": "image/svg+xml"},
+    ).json()["attachment_id"]
+    got = client.get(f"/api/inquiries/{tid}/attachments/{aid}")
+    assert got.headers["content-type"] == "application/octet-stream"
+    assert got.headers["content-disposition"].startswith("attachment")
+    assert client.get(f"/api/inquiries/{tid}/attachments").json()[0]["name"] == "x.svg"
+
+
+def test_attachment_upload_limits(client, monkeypatch) -> None:
+    """없는 문의 · 잘못된 id · 빈 파일 · 크기 · 개수 제한."""
+    from cs_agent.api import inquiries
+    from cs_agent.services import attachments
+
+    tid = client.post("/api/inquiries", json=INQUIRY).json()["ticket_id"]
+    url = f"/api/inquiries/{tid}/attachments"
+    unknown = "/api/inquiries/T-000000000000/attachments"
+    assert client.post(unknown, params={"name": "a.png"}, content=PNG).status_code == 404
+    assert client.get(unknown).status_code == 404
+    assert client.get(f"{url}/{'0' * 32}").status_code == 404
+    assert client.get(f"{url}/..%2F..%2Fx").status_code == 404
+    assert client.post(url, params={"name": "a.png"}, content=b"").status_code == 422
+
+    monkeypatch.setattr(inquiries, "MAX_BYTES", 10)
+    monkeypatch.setattr(attachments, "MAX_BYTES", 10)
+    assert client.post(url, params={"name": "a.png"}, content=PNG).status_code == 413
+
+    monkeypatch.setattr(attachments, "MAX_FILES", 1)
+    assert client.post(url, params={"name": "a.png"}, content=b"12345").status_code == 201
+    assert client.post(url, params={"name": "b.png"}, content=b"12345").status_code == 422
+
+    # 받다가 실패한 업로드(빈 파일 · 너무 큼 · 개수 초과)는 임시 파일을 남기지 않는다
+    store = client.app.state.attachments
+    assert not list((store.root / tid).glob(".upload-*"))

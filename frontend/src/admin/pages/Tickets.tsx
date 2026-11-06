@@ -8,27 +8,32 @@ import { Input } from "@admin/components/ui/input";
 import { NativeSelect, PageHeader, TicketRow, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import { CompletedTickets } from "@admin/pages/Knowledge";
 import { bulkAssign } from "@admin/lib/actions";
-import { canAssign, completedTickets, departmentRisk, people, scopeTickets } from "@admin/lib/logic";
+import { canAssign, completedTickets, departmentRisk, overdue, people, scopeTickets, slaMinutes } from "@admin/lib/logic";
 import { openModal, setUi, tickets, ui, useStore } from "@admin/lib/store";
+import { currentStep, STEP_LABELS } from "@admin/lib/flow-steps";
+import { CHANNEL_KO } from "@admin/lib/customers";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
 
-const SCOPES = ["내 담당", "전체"] as const;
+const SCOPES = ["전체", "내 담당"] as const;
 const DONE_TAB = "완료 문의";
 const Count = ({ label, n }: { label: string; n: number }) => <>{label}<span className="ml-1.5 text-sm font-normal tabular-nums text-muted-foreground">{n}</span></>;
-const scoped = (scope: string) => scopeTickets(scope).filter((t) => (!ui.listOwner || t.owner === ui.listOwner));
+const UNASSIGNED = "미배정"; // 담당자 필터의 "담당자 없음" 값
+const scoped = (scope: string) => scopeTickets(scope).filter((t) => (!ui.listOwner || (ui.listOwner === UNASSIGNED ? !t.owner : t.owner === ui.listOwner)));
+/** SLA 마감까지 남은 분. 초과는 음수(더 많이 넘길수록 작다), 시간 정보가 없으면 맨 뒤. */
+const remaining = (t: Ticket) => { const m = slaMinutes(t); return m === null ? Infinity : overdue(t) ? -m : m; };
 function filtered() {
   const q = ui.query.toLowerCase();
   return scoped(ui.filter).filter(
     (t) =>
       (!q || [t.id, t.title, t.company, t.product, t.country].join(" ").toLowerCase().includes(q)) &&
-      (!ui.status || t.status === ui.status) && (!ui.priority || t.priority === ui.priority) && (!ui.product || t.product === ui.product),
-  );
+      (!ui.riskOnly || (t.risk && t.stage !== 5)) && (!ui.step || currentStep(t).label === ui.step) && (!ui.channel || t.channel === ui.channel) && (!ui.status || t.status === ui.status) && (!ui.priority || t.priority === ui.priority) && (!ui.product || t.product === ui.product),
+  ).sort((a, b) => remaining(a) - remaining(b) || a.priority.localeCompare(b.priority)); // 긴급한 순: 초과 → 남은 시간이 짧은 순, 같으면 우선순위(P1 먼저)
 }
 /** 지금 봐야 할 것부터 묶는다: 위험 → 미배정 → 진행 중 → 완료. */
 function groups(rows: Ticket[]) {
   const defs: [string, (t: Ticket) => boolean][] = [
-    ["지금 위험", (t) => departmentRisk(t)],
+    ["위험", (t) => departmentRisk(t)],
     ["미배정", (t) => t.stage !== 5 && !t.owner],
     ["진행 중", (t) => t.stage !== 5],
     ["완료", () => true],
@@ -52,11 +57,29 @@ export default function Tickets() {
   const doneTab = ui.filter === DONE_TAB;
   const rows = doneTab ? [] : filtered();
   const picked = [...sel].filter((id) => rows.some((t) => t.id === id));
-  const activeFilters = [ui.status, ui.priority, ui.product].filter(Boolean).length;
+  const activeFilters = [ui.status, ui.priority, ui.product, ui.listOwner, ui.step, ui.channel].filter(Boolean).length;
   const toggle = (id: string, on: boolean) => setSel((s) => { const n = new Set(s); on ? n.add(id) : n.delete(id); return n; });
   const opt = (first: string, values: string[]) => [<option key="" value="">{first}</option>, ...values.map((v) => <option key={v}>{v}</option>)];
   const exitSelect = () => { setSelectMode(false); setSel(new Set()); };
-  const hasFilter = ui.query || activeFilters || ui.listOwner;
+  const hasFilter = ui.query || activeFilters || ui.listOwner || ui.riskOnly;
+  const split = ui.filter === "전체"; // 전체 탭만: 새 문의(미배정)와 나머지를 나눠 보여 준다
+  const fresh = rows.filter((t) => t.stage !== 5 && !t.owner), rest = rows.filter((t) => !(t.stage !== 5 && !t.owner));
+  const renderRows = (list: Ticket[]) => (
+    <div className="divide-y">
+      {list.map((t) => (
+        <div key={t.id} className={cn(sel.has(t.id) && "bg-accent/60")}>
+          <TicketRow t={t} onOpen={() => (selectMode ? t.stage !== 5 && toggle(t.id, !sel.has(t.id)) : go.ticket(t.id))}
+            lead={selectMode ? <span className="grid size-10 place-items-center">{t.stage !== 5 && <Checkbox aria-label={`${t.id} 선택`} checked={sel.has(t.id)} onCheckedChange={(v) => toggle(t.id, v === true)} onClick={(e) => e.stopPropagation()} />}</span> : undefined} />
+        </div>
+      ))}
+    </div>
+  );
+  const renderGroups = (gs: ReturnType<typeof groups>) => gs.map((g) => (
+    <section key={g.label} aria-label={g.label}>
+      <h2 className="mb-2 px-1 text-sm text-muted-foreground">{g.label} <span className="tabular-nums">{g.list.length}</span></h2>
+      <div className="overflow-hidden rounded-2xl bg-card shadow-card">{renderRows(g.list)}</div>
+    </section>
+  ));
 
   return (
     <>
@@ -64,7 +87,7 @@ export default function Tickets() {
         <UnderlineTabs
           tabs={[...SCOPES.map((v) => [v, <Count key={v} label={v} n={scoped(v).filter((t) => v !== "내 담당" || t.stage !== 5).length} />] as const), [DONE_TAB, <Count key={DONE_TAB} label={DONE_TAB} n={ui.completedTotal ?? completedTickets().length} />] as const]}
           value={ui.filter as string}
-          onChange={(v) => { exitSelect(); setUi(v === DONE_TAB ? { filter: v, kquery: "" } : { filter: v }); }} />
+          onChange={(v) => { exitSelect(); setUi(v === DONE_TAB ? { filter: v, kquery: "", riskOnly: false } : { filter: v, riskOnly: false }); }} />
       </PageHeader>
       {ui.ticketSync !== "ready" && <p role={ui.ticketSync === "error" ? "alert" : "status"} className="px-10 pb-4 text-sm text-muted-foreground">{ui.ticketSyncError || "서버 문의를 불러오는 중입니다."}{tickets.length > 0 && " 마지막 조회 정보를 표시합니다."}</p>}
       {doneTab ? <CompletedTickets /> : <>
@@ -75,15 +98,23 @@ export default function Tickets() {
           <SlidersHorizontal />필터{activeFilters > 0 && <span className="tabular-nums text-info"> {activeFilters}</span>}
         </Button>
         {ui.listOwner && <Button variant="secondary" onClick={() => setUi({ listOwner: "" })}>{ui.listOwner} ×</Button>}
-        {canAssign && <Button className="ml-auto" variant={selectMode ? "secondary" : "ghost"} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}>{selectMode ? "선택 끝내기" : "여러 건 선택"}</Button>}
+        {ui.riskOnly && <Button variant="secondary" onClick={() => setUi({ riskOnly: false })}>SLA 위험만 ×</Button>}
+        {canAssign && <Button className="ml-auto" variant={selectMode ? "secondary" : "ghost"} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}>{selectMode ? "배분 끝내기" : "티켓 배분"}</Button>}
       </div>
 
       {showFilters && (
         <div className="mx-10 mb-4 flex flex-wrap items-center gap-2 rounded-2xl bg-card p-3 shadow-card">
           <NativeSelect className="rounded-full pl-4" aria-label="전체 상태" value={ui.status} onChange={(e) => setUi({ status: e.target.value })}>{opt("전체 상태", [...new Set(tickets.map((t) => t.status))])}</NativeSelect>
           <NativeSelect className="rounded-full pl-4" aria-label="우선순위" value={ui.priority} onChange={(e) => setUi({ priority: e.target.value })}>{opt("우선순위", ["P1", "P2", "P3", "P4"])}</NativeSelect>
+          {ui.filter !== "내 담당" && <NativeSelect className="rounded-full pl-4" aria-label="담당자" value={ui.listOwner} onChange={(e) => setUi({ listOwner: e.target.value })}>{opt("전체 담당자", [...people.map((p) => p.name), UNASSIGNED])}</NativeSelect>}
+          <NativeSelect className="rounded-full pl-4" aria-label="처리 단계" value={ui.step} onChange={(e) => setUi({ step: e.target.value })}>
+            <option value="">전체 단계</option>{STEP_LABELS.map((l, i) => <option key={l} value={l}>{i + 1}/{STEP_LABELS.length} {l}</option>)}
+          </NativeSelect>
+          <NativeSelect className="rounded-full pl-4" aria-label="접수 경로" value={ui.channel} onChange={(e) => setUi({ channel: e.target.value })}>
+            <option value="">전체 경로</option>{[...new Set(tickets.map((x) => x.channel).filter(Boolean))].map((c) => <option key={c} value={c}>{CHANNEL_KO[c] || c}</option>)}
+          </NativeSelect>
           <NativeSelect className="rounded-full pl-4" aria-label="전체 제품" value={ui.product} onChange={(e) => setUi({ product: e.target.value })}>{opt("전체 제품", [...new Set(tickets.map((t) => t.product))])}</NativeSelect>
-          {activeFilters > 0 && <Button size="sm" variant="ghost" onClick={() => setUi({ status: "", priority: "", product: "" })}>초기화</Button>}
+          {activeFilters > 0 && <Button size="sm" variant="ghost" onClick={() => setUi({ status: "", priority: "", product: "", listOwner: "", step: "", channel: "" })}>초기화</Button>}
         </div>
       )}
 
@@ -96,30 +127,28 @@ export default function Tickets() {
         </div>
       )}
 
-      <div className="grid gap-6 px-10 pb-12">
+      <div className={cn("grid gap-6 px-10 pb-12", split && "grid-cols-[minmax(0,32rem)_minmax(0,1fr)] items-start max-[1100px]:grid-cols-1")}>
         {rows.length === 0 ? (
-          <div className="grid justify-items-center gap-3 rounded-2xl bg-card px-6 py-16 text-center shadow-card">
+          <div className={cn("grid justify-items-center gap-3 rounded-2xl bg-card px-6 py-16 text-center shadow-card", split && "col-span-full")}>
             <strong className="font-medium">{ui.ticketSync === "loading" ? "문의 조회 중입니다." : ui.ticketSync === "error" ? "문의 조회를 완료하지 못했습니다." : "조건에 맞는 문의가 없습니다."}</strong>
             <p className="max-w-sm text-sm text-muted-foreground">{ui.ticketSync !== "ready" ? "서버 조회가 완료되면 문의 목록을 갱신합니다." : hasFilter ? "걸어 둔 검색·필터를 풀면 더 많은 문의가 보입니다." : "이 범위에는 처리할 문의가 없습니다. 전체 범위를 보거나 새 문의를 등록하세요."}</p>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setUi({ query: "", status: "", priority: "", product: "", listOwner: "", filter: "전체" })}>검색·필터 초기화</Button>
+              <Button variant="outline" onClick={() => setUi({ query: "", status: "", priority: "", product: "", listOwner: "", step: "", channel: "", riskOnly: false, filter: "전체" })}>검색·필터 초기화</Button>
               <Button onClick={() => openModal("new-ticket")}>새 문의 등록</Button>
             </div>
           </div>
-        ) : groups(rows).map((g) => (
-          <section key={g.label} aria-label={g.label}>
-            <h2 className="mb-2 px-1 text-sm text-muted-foreground">{g.label} <span className="tabular-nums">{g.list.length}</span></h2>
-            <div className="divide-y overflow-hidden rounded-2xl bg-card shadow-card">
-              {g.list.map((t) => (
-                <div key={t.id} className={cn(sel.has(t.id) && "bg-accent/60")}>
-                  <TicketRow t={t} onOpen={() => (selectMode ? t.stage !== 5 && toggle(t.id, !sel.has(t.id)) : go.ticket(t.id))}
-                    lead={selectMode ? <span className="grid size-10 place-items-center">{t.stage !== 5 && <Checkbox aria-label={`${t.id} 선택`} checked={sel.has(t.id)} onCheckedChange={(v) => toggle(t.id, v === true)} onClick={(e) => e.stopPropagation()} />}</span> : undefined} />
-                </div>
-              ))}
-            </div>
+        ) : split ? <>
+          {/* 전체 탭: 새로 들어온(미배정) 문의는 위험·진행 중과 따로, 자기 스크롤 영역에 둔다 */}
+          <section aria-label="새 문의" className="grid min-w-0 gap-2">
+            <h2 className="px-1 text-sm text-muted-foreground">새 문의 <span className="tabular-nums">{fresh.length}</span></h2>
+            {fresh.length ? <div className="max-h-[calc(100dvh-20rem)] min-h-40 overflow-y-auto rounded-2xl bg-card shadow-card">{renderRows(fresh)}</div>
+              : <p className="rounded-2xl bg-card px-6 py-10 text-center text-sm text-muted-foreground shadow-card">새로 들어온 문의가 없습니다.</p>}
           </section>
-        ))}
-        {rows.length > 0 && <p className="px-1 text-xs text-muted-foreground">{rows.filter((t) => t.stage !== 5).length}건 진행 중{rows.some((t) => t.stage === 5) ? ` · 완료 ${rows.filter((t) => t.stage === 5).length}건` : ""}{selectMode ? " · 행을 눌러 선택하세요" : ""}</p>}
+          <div className="grid min-w-0 content-start gap-6 max-h-[calc(100dvh-18rem)] overflow-y-auto pr-1 max-[1100px]:max-h-none">
+            {groups(rest).length ? renderGroups(groups(rest)) : <p className="rounded-2xl bg-card px-6 py-10 text-center text-sm text-muted-foreground shadow-card">배정된 문의가 없습니다.</p>}
+          </div>
+        </> : renderGroups(groups(rows))}
+        {rows.length > 0 && <p className={cn("px-1 text-xs text-muted-foreground", split && "col-span-full")}>{rows.filter((t) => t.stage !== 5).length}건 진행 중{rows.some((t) => t.stage === 5) ? ` · 완료 ${rows.filter((t) => t.stage === 5).length}건` : ""}{selectMode ? " · 행을 눌러 선택하세요" : ""}</p>}
       </div>
       </>}
     </>

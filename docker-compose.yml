@@ -1,8 +1,10 @@
 # 로컬·GCP VM 공통 구성 (CSA-44 · 김도연): React+Nginx · FastAPI · PostgreSQL(+pgvector) · Redis
 #   + Neo4j (사례 학습 지식 그래프, CSA-69. GRAPH_ENABLED=true 일 때만 api 가 쓴다)
 # 실행: cp .env.example .env && docker compose up --build
+# 모든 서비스는 restart: unless-stopped — 컨테이너가 죽거나 VM 이 재부팅돼도 다시 뜬다 (직접 stop 한 것만 빼고)
 services:
   nginx:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: infra/nginx/Dockerfile
@@ -21,6 +23,7 @@ services:
 
   # HTTPS 인증서 자동 갱신 (CSA-46). 첫 발급은 infra/gcp/issue-cert.sh. 인증서가 없으면 아무것도 안 한다.
   certbot:
+    restart: unless-stopped
     image: certbot/certbot:v2.11.0
     volumes:
       - ./infra/certbot/conf:/etc/letsencrypt
@@ -30,6 +33,7 @@ services:
       certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
 
   api:
+    restart: unless-stopped
     build: .
     env_file: .env
     environment:
@@ -38,13 +42,22 @@ services:
       NEO4J_URI: bolt://neo4j:7687
     volumes:
       - ./data/raw:/app/data/raw:ro
+      - attachments:/app/data/attachments  # 문의 첨부 파일 (services/attachments.py)
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
+    # 시작 때 마이그레이션 · 인덱스 적재가 있어 처음 60초는 실패로 세지 않는다
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   postgres:
+    restart: unless-stopped
     # 벡터 검색(RAG)도 PostgreSQL 안에서 한다 (pgvector, CSA-18). 확장은 Alembic 첫 리비전에서 켠다.
     image: pgvector/pgvector:0.8.0-pg16
     # 이 컴퓨터(127.0.0.1)에서만 접속 가능. 외부에는 열리지 않는다 (GCP 에서는 SSH 터널로 접속).
@@ -63,6 +76,7 @@ services:
       retries: 10
 
   redis:
+    restart: unless-stopped
     image: redis:7-alpine
 
   # 사례 학습 지식 그래프 (CSA-69). 벡터 함수(vector.similarity.cosine)가 있는 5.18 이상으로 고정.
@@ -70,6 +84,7 @@ services:
   # (GCP 에서는 ssh -L 7474:localhost:7474 -L 7687:localhost:7687 로 터널).
   # 데이터가 수천 노드 수준이라 메모리를 heap 512m · page cache 256m 로 묶는다.
   neo4j:
+    restart: unless-stopped
     image: neo4j:5.26.2-community
     ports:
       - "127.0.0.1:7474:7474"
@@ -88,4 +103,5 @@ services:
 
 volumes:
   pgdata:
+  attachments:
   neo4jdata:

@@ -689,14 +689,18 @@ field_definitions에 따라 추출합니다.
 # UNCONFIRMED FIELDS
 
 unconfirmed_fields는 고객이 이전 정보를 철회하거나 미확인으로 바꾸었거나,
-서로 충돌하는 발언을 명확하게 해결하지 못했을 때 사용합니다.
+서로 충돌하는 발언을 해결하지 못했거나 자료를 제공할 수 없다고 명시했을 때 사용합니다.
 
 1. requested_fields에 포함된 필드만 보고합니다.
 2. 각 항목은 reason과 evidence만 포함합니다.
-3. reason은 다음 세 값 중 하나입니다.
+3. reason은 다음 네 값 중 하나입니다.
    - RETRACTED: 고객이 이전 정보를 명시적으로 부정하거나 철회했고 새 확정값이 없습니다.
    - UNKNOWN: 고객이 기존 정보의 정확성을 모른다고 하거나 재확인이 필요하다고 밝혔습니다.
    - CONFLICT: 현재 문의 대상의 값들이 충돌하며 어느 값이 최종 정보인지 해결되지 않았습니다.
+   - UNAVAILABLE: 고객이 해당 자료가 없거나 제공·확인이 불가능하다고 명시했습니다.
+     처음 요청받은 자료에도 사용할 수 있습니다. 단순 미언급이나 답변 대기는 해당하지 않습니다.
+     "자료를 찾아 보내겠다"처럼 제공 예정인 정보는 UNAVAILABLE이 아닙니다.
+     이후 고객이 자료를 제공하면 최신 값을 fields로 반환합니다.
 4. evidence는 해당 판단을 뒷받침하는 최신 관련 고객 발언의 직접 인용이어야 합니다.
 5. 단순히 정보가 처음부터 없다는 이유만으로 모든 미추출 필드를 UNKNOWN으로 채우지 않습니다.
 6. 최신 정정값을 명확하게 확정할 수 있으면 fields에 그 값만 넣습니다.
@@ -709,7 +713,8 @@ unconfirmed_fields는 고객이 이전 정보를 철회하거나 미확인으로
 2. fields 객체에는 추출에 성공한 필드만 포함합니다. 각 필드는 value와 evidence만 포함합니다.
 3. 불확실한 필드를 null, 빈 문자열, UNKNOWN 등의 값으로 채우지 않습니다.
    UNKNOWN은 unconfirmed_fields의 reason에서만 사용하는 상태 코드입니다.
-4. 철회·미확인·충돌을 보고할 근거가 있으면 unconfirmed_fields에 reason과 evidence를 넣습니다.
+4. 철회·미확인·충돌·제공 불가의 근거가 있으면
+   unconfirmed_fields에 reason과 evidence를 넣습니다.
 5. 추출 가능한 정보가 없으면 빈 fields 객체를 반환합니다.
    재확인 상태를 보고할 근거도 없으면 unconfirmed_fields도 빈 객체로 반환합니다.
 6. model 등 Schema에서 요청하지 않은 키를 생성하지 않습니다. 모델 식별자는 호출 코드가 붙입니다.
@@ -1027,7 +1032,7 @@ class _ExtractedValue(BaseModel):
 
 class _UnconfirmedField(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    reason: Literal["RETRACTED", "UNKNOWN", "CONFLICT"]
+    reason: Literal["RETRACTED", "UNKNOWN", "CONFLICT", "UNAVAILABLE"]
     evidence: str
 
 
@@ -1052,6 +1057,15 @@ _ALIASES = {
 }
 # 개인정보로 가려진 값(**MASKED**)은 고객이 준 값이다 (가린 건 저장 단계). 비어 있는 값만 뺀다.
 _MISSING = {"", "none", "null", "n/a", "unknown", "미확인"}
+_UNAVAILABLE_FORM_VALUES = {
+    "없음",
+    "자료 없음",
+    "확인 불가",
+    "제공 불가",
+    "unavailable",
+    "not available",
+    "cannot provide",
+}
 _PATTERNS = {
     "error_code": r"(?<![A-Za-z0-9_.])(?:E\.[A-Z][A-Z0-9]*(?:\.[A-Z0-9]+)*|E-\d+|F\d{1,4})"
     r"(?![A-Za-z0-9_])",
@@ -1590,7 +1604,10 @@ def extract_details(
     for key, raw in inquiry.provided_fields.items():
         value = _value(raw)
         if key in allowed_fields and value is not None:
-            _set_field(result, key, value, "customer", value)
+            if value.strip().lower() in _UNAVAILABLE_FORM_VALUES:
+                _unconfirm_field(result, key, "UNAVAILABLE", value)
+            else:
+                _set_field(result, key, value, "customer", value)
 
     matches = _product_matches(text, products)
     result.product_candidates = sorted(matches)
@@ -1613,7 +1630,9 @@ def extract_details(
         result.issues.append("ambiguous_product")
 
     for key, pattern in _PATTERNS.items():
-        if key in result.fields:
+        if key in result.fields or (
+            not transcript and result.unconfirmed_fields.get(key) == "UNAVAILABLE"
+        ):
             continue
         found = {}
         for match in re.finditer(pattern, text, re.IGNORECASE):
@@ -1724,6 +1743,9 @@ def extract_details(
         if key not in allowed_fields or value is None:
             continue
         current_keys.append(key)
+        if value.strip().lower() in _UNAVAILABLE_FORM_VALUES:
+            _unconfirm_field(result, key, "UNAVAILABLE", value)
+            continue
         if key == "product_model":
             current_matches = _product_matches(value, products)
             if len(current_matches) != 1:
@@ -1741,11 +1763,17 @@ def extract_details(
         requested += current_keys
         if requested_fields is None:
             requested += auto_required_fields()
+    protected_unavailable = {
+        key
+        for key, reason in result.unconfirmed_fields.items()
+        if reason == "UNAVAILABLE" and (not transcript or key in current_keys)
+    }
     targets = [
         key
         for key in dict.fromkeys(requested)
         if (bool(transcript) or key not in result.fields)
         and result.sources.get(key) != "customer_form"
+        and key not in protected_unavailable
     ]
     # 안전 건도 추출한다. 사람 큐로 가더라도 상담원이 고객이 준 정보를 보고 바로 처리할 수 있어야
     # 하고, 같은 정보를 다시 묻지 않게 한다 (분기는 그래프의 urgency 로 그대로 사람 큐).
@@ -1773,7 +1801,9 @@ def extract_details(
                 additional = [
                     key
                     for key in auto_required_fields()
-                    if key not in result.fields and key not in targets
+                    if key not in result.fields
+                    and key not in targets
+                    and key not in protected_unavailable
                 ]
                 if additional:
                     _extract_structured(

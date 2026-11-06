@@ -35,7 +35,7 @@ export const FIELD_CONF = {
   purchase_doc: { type: 'text', help: '구매할 때 받은 PO(주문서) 번호나 송장 번호예요.', placeholder: '예: PO-12345' },
   po_number: { type: 'text', help: '구매 주문서(PO)에 적힌 번호예요.', placeholder: '예: PO-12345' },
   error_code: { type: 'text', help: '화면에 뜬 글자(예: E.OC)를 적어 주세요. 에러 코드가 없는 제품은 보이는 증상을 설명해 주세요.', placeholder: '예: E.OC, 또는 "가속할 때 멈춰요"' },
-  operating_condition: { type: 'textarea', help: '고장 났을 때 부하, 속도, 주변 온도가 어땠는지 알려 주세요.', placeholder: '예: 80% 부하, 주변 온도 40°C' },
+  operating_condition: { type: 'textarea', placeholder: '예: 80% 부하, 주변 온도 40°C' },
   failure_description: { type: 'textarea', help: '무엇이 언제부터 어떻게 고장 났는지 적어 주세요.', placeholder: '예: 어제 오후부터 전원이 켜지지 않아요' },
   site_condition: { type: 'text', help: '설치한 곳의 주변 온도, 높이(고도), 습도예요.', placeholder: '예: 35°C, 800m, 습도 60%' },
   application: { type: 'text', help: '어떤 설비에 어떤 전압·부하로 쓰는지 알려 주세요.', placeholder: '예: 수처리 설비, 380V' },
@@ -51,13 +51,14 @@ export const FIELD_CONF = {
   return_reason: { type: 'text', list: ['처음부터 불량', '오배송', '배송 중 파손', '주문 실수 · 잉여 재고'], help: '반품하려는 이유를 알려 주세요.', placeholder: '예: 오배송' },
   packaging_condition: { type: 'text', list: ['원래 포장 그대로', '포장 훼손', '포장을 뜯음'], help: '제품이 도착했을 때 포장 상태예요.', placeholder: '예: 원래 포장 그대로' },
   motor_nameplate: { type: 'text', help: '모터 명판에 적힌 정격(전력, 전류, 전압 등)이에요.', placeholder: '예: 75kW, 135A, 380V' },
-  load_profile: { type: 'textarea', help: '부하 전류나 온도 기록이 있으면 적어 주세요.', placeholder: '예: 평균 60%, 최대 85%' },
+  load_profile: { type: 'textarea', placeholder: '예: 평균 60%, 최대 85%' },
   battery_age: { type: 'text', help: '배터리를 설치한 날이나 사용한 기간이에요.', placeholder: '예: 2024-03 설치' },
   battery_status: { type: 'text', help: '이벤트 당시 배터리 충전량(SOC)과 셀 온도예요.' },
   string_config: { type: 'text', help: '스트링 하나에 모듈이 몇 장 연결됐는지 알려 주세요.' },
   manufacture_year: { type: 'text', help: '제품 명판에 적힌 제조 연도(또는 연월)예요. 안 보이면 설치한 해를 적고, 모르면 "모름"이라고 적어 주세요.', placeholder: '예: 2003', needsHelp: true },
   legacy_goal: { type: 'text', list: ['대체 모델 안내', '기존 자리에 호환 설치', '수리 · 부품 구하기', '교체 견적'], help: '무엇이 필요한지 골라 주세요. 여러 개면 직접 적어도 돼요.', placeholder: '예: 대체 모델 안내', needsHelp: true },
-  photos: { ...FILE, help: '제품 전체와 명판이 보이는 사진이에요.' },
+  // 고장 증상 사진·영상·소리. 제품 고장 문의서에서만 받는다(제품·명판 사진은 받지 않는다).
+  photos: { ...FILE, media: true },
   logs: { ...FILE, help: '제품에서 내려받은 이벤트·트립 기록 파일이에요.' },
   parameter_backup: { ...FILE, help: '제품 설정(파라미터)을 저장한 백업 파일이에요.' },
   program_backup: { ...FILE, help: 'PLC·HMI 프로젝트 백업 파일이에요.' },
@@ -70,12 +71,15 @@ export const confOf = (key) => FIELD_CONF[key] ?? { type: 'text' }
 export function fieldsFor(type, family) {
   if (type === LEGACY_TYPE) return LEGACY_FIELDS.map((f) => ({ key: f.key, blocking: f.blocking, label: fieldLabel(f.key) }))
   if (!type || type === 'USAGE') return [{ key: 'product_model', blocking: true, label: fieldLabel('product_model') }]
-  return (biz.required[family]?.[type] ?? [{ key: 'product_model', blocking: true }]).map((f) => ({ key: f.key, blocking: f.blocking, label: fieldLabel(f.key) }))
+  return (biz.required[family]?.[type] ?? [{ key: 'product_model', blocking: true }])
+    .filter((f) => f.key !== 'photos' || type === 'DEFECT')
+    .map((f) => ({ key: f.key, blocking: f.blocking || f.key === 'operating_condition', label: f.key === 'photos' ? '증상 사진 · 영상 · 소리' : fieldLabel(f.key) }))
 }
 
 export const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v ?? '')
 export const filled = (f, vals, files) => (confOf(f.key).type === 'file' ? (files[f.key]?.length ?? 0) > 0 : !!String(vals[f.key] ?? '').trim())
-export const missingOf = (fields, vals, files) => fields.filter((f) => !filled(f, vals, files))
+// 빠진 정보로 알리고 제출을 막는 것은 꼭 필요한 항목(blocking)뿐이다. 나머지는 비워도 제출할 수 있다.
+export const missingOf = (fields, vals, files) => fields.filter((f) => f.blocking && !filled(f, vals, files))
 export const errorText = (f) => `${f.label}: ${confOf(f.key).type === 'file' ? '파일을 첨부해 주세요' : '입력해 주세요'}${f.blocking ? ' (꼭 필요해요)' : ''}`
 
 export const EXAMPLES = {

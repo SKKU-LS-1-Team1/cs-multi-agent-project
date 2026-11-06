@@ -6,7 +6,9 @@
 #   검색기를 바꿔 만든다 (agents 키는 GraphDeps 필드 이름).
 #   app.state.llm(llm/router.py), app.state.tickets(services/tickets.py, 그래프 포함),
 #   app.state.docs·cases(agents/retrieval.py), app.state.chat_sessions(cache/store.py),
-#   app.state.sessionmaker(db/session.py, DB 없으면 None). 꺼내 쓰는 쪽은 api/deps.py.
+#   app.state.sessionmaker(db/session.py, DB 없으면 None),
+#   app.state.attachments(services/attachments.py, 테스트는 attachments_dir 로 임시 폴더).
+#   꺼내 쓰는 쪽은 api/deps.py.
 # - 저장소 (storage="auto"): 시작할 때 DB·Redis 에 붙어 본다.
 #   - DB 가 붙고 스키마가 최신(alembic head)이면 PostgresSaver 체크포인트 + SqlRecords 로 기록한다.
 #   - Redis 가 붙으면 챗봇 대화와 LLM 캐시·호출 횟수(live 일 때, cache/store.py)를 Redis 에 둔다.
@@ -30,6 +32,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack, asynccontextmanager, suppress
 from functools import partial
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI
@@ -40,7 +43,17 @@ from cs_agent.agents.case_memory import with_graph_learning, with_live_cases
 from cs_agent.agents.retrieval import default_retrievers
 from cs_agent.agents.specialist_followup import read_replies
 from cs_agent.api import agents as agents_api
-from cs_agent.api import chat, customers, dashboard, inquiries, mail, products, progress, tickets
+from cs_agent.api import (
+    chat,
+    customers,
+    dashboard,
+    i18n,
+    inquiries,
+    mail,
+    products,
+    progress,
+    tickets,
+)
 from cs_agent.cache.store import ChatSessionStore, MemoryKV, connect_redis
 from cs_agent.config import Settings, get_settings
 from cs_agent.graph.builder import GraphDeps, build_ticket_graph, postgres_checkpointer
@@ -48,6 +61,7 @@ from cs_agent.llm import tracing
 from cs_agent.llm.router import LLMRouter, get_router
 from cs_agent.rules.tables import load_tables
 from cs_agent.services.assignment import load_agents
+from cs_agent.services.attachments import AttachmentStore
 from cs_agent.services.mailbox import Mailbox, load_mails
 from cs_agent.services.progress import ProgressService
 from cs_agent.services.records import MemoryRecords, SqlRecords
@@ -120,6 +134,7 @@ def create_app(
     storage: Literal["auto", "memory"] = "auto",
     retrievers: tuple[Any, Any] | None = None,
     graph: Any = None,
+    attachments_dir: Path | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -127,6 +142,7 @@ def create_app(
         tables = load_tables()
         roster = load_agents()  # 담당자 명단 (CSA-53). 표가 틀리면 여기서 멈춘다
         app.state.llm = llm or get_router()
+        app.state.attachments = AttachmentStore(attachments_dir or settings.attachments_dir)
         app.state.docs, app.state.cases = retrievers or _retrievers()
         # 검색기를 넘긴 테스트는 설정과 상관없이 그래프를 켜지 않는다 (넘긴 graph 만 쓴다)
         owns_graph = graph is None and retrievers is None
@@ -183,6 +199,24 @@ def create_app(
                     llm=deps.llm,
                 ),
             )
+            history_task = None
+            if (
+                settings.customer_history_enabled
+                and app.state.sessionmaker is not None
+                and app.state.llm.enabled
+            ):
+                from cs_agent.pipeline.embed_docs import embed
+                from cs_agent.services.customer_history import CustomerHistory, index_loop
+
+                history = CustomerHistory(
+                    app.state.sessionmaker,
+                    embed,
+                    settings.embedding_model,
+                    lambda ticket_id: app.state.tickets._state(ticket_id).values,
+                    app.state.llm,
+                )
+                app.state.tickets.history_matcher = history.match
+                history_task = asyncio.create_task(index_loop(history))
             # 업무 메일함: 앞단을 거치지 않은 메일 문의를 같은 분석·규칙으로 검토 후 티켓 등록
             app.state.mailbox = Mailbox.from_deps(load_mails(), app.state.tickets, deps)
             app.state.progress = ProgressService(
@@ -201,7 +235,7 @@ def create_app(
                 else None
             )
             yield
-            for task in (retry, embed_cases):
+            for task in (retry, embed_cases, history_task):
                 if task:
                     task.cancel()
                     with suppress(asyncio.CancelledError):
@@ -216,7 +250,18 @@ def create_app(
     def health() -> dict:
         return {"status": "ok", "version": __version__}
 
-    routers = (tickets, inquiries, chat, products, dashboard, agents_api, progress, customers, mail)
+    routers = (
+        tickets,
+        inquiries,
+        chat,
+        i18n,
+        products,
+        dashboard,
+        agents_api,
+        progress,
+        customers,
+        mail,
+    )
     for module in routers:
         app.include_router(module.router, prefix="/api")
     return app

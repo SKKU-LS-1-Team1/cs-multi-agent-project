@@ -109,6 +109,11 @@ def _dump(value: Any) -> dict:
     return value.model_dump(mode="json") if value is not None else {}
 
 
+def _clip(value: Any, size: int) -> Any:
+    """고객이 자유롭게 적은 값을 칼럼 길이에 맞춘다. 원문은 provided_fields·body 에 남는다."""
+    return value[:size] if isinstance(value, str) else value
+
+
 def ticket_row(values: dict) -> dict:
     """그래프 상태 → tickets 행 (ticket_id 제외 열)."""
     inquiry: InquiryIn = values["inquiry"]
@@ -126,6 +131,7 @@ def ticket_row(values: dict) -> dict:
         "body": inquiry.body,
         "body_ko": values.get("body_ko"),
         "resolution": values.get("resolution"),
+        "followup_link": values.get("followup_link"),
         "provided_fields": dict(inquiry.provided_fields),
         "thread_ref": inquiry.thread_ref,
         "received_at": inquiry.received_at,
@@ -135,9 +141,9 @@ def ticket_row(values: dict) -> dict:
         "category_model": classification.get("model"),
         "product_code": extraction.get("product_code"),
         "product_family": extraction.get("product_family"),
-        "error_code": extraction.get("error_code"),
-        "fw_version": extraction.get("fw_version"),
-        "serial_no": extraction.get("serial_no"),
+        "error_code": _clip(extraction.get("error_code"), 32),
+        "fw_version": _clip(extraction.get("fw_version"), 32),
+        "serial_no": _clip(extraction.get("serial_no"), 64),
         "urgency_flag": extraction.get("urgency"),
         "return_defect": extraction.get("return_defect"),
         "provided_info": extraction.get("provided_info") or [],

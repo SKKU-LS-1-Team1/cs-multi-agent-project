@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@admin/lib/utils";
-import { ArrowRight, Building2, ChevronDown, CircleCheck, Clock, LoaderCircle, ShieldAlert, Paperclip } from "lucide-react";
+import { ArrowRight, ChevronDown, CircleCheck, LoaderCircle, ShieldAlert, Paperclip } from "lucide-react";
 import { Button } from "@admin/components/ui/button";
 import { Checkbox } from "@admin/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@admin/components/ui/dialog";
@@ -13,24 +13,25 @@ import { AiMark, Facts, Field, Mono, NativeSelect, PersonAvatar, Tag } from "./c
 import DocContent from "./DocContent";
 import { useNavigate } from "react-router-dom";
 import {
-  canSend, applyPendingAnswer, assignOwner, completeTicket, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply,
+  canSend, applyPendingAnswer, assignOwner, completeTicket, confirmSend, createTicket, keepCurrentAnswer, saveInfoReview, submitExpertReply, submitExpertRequest,
 } from "@admin/lib/actions";
 import {
-  candidates, completionDraft, customerLanguage, informationAssessment, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, referralRows, resource, resourceReason, signedIn, waitingReviews,
+  candidates, completionDraft, customerLanguage, informationAssessment, replyLanguages, runChecks, latestCustomerReply, people, expertDepartments, recommend, expertPhase, referralRows, resource, resourceReason, signedIn, waitingReviews,
 } from "@admin/lib/logic";
-import { closeModal, findTicket, openModal, tickets, ui, useStore } from "@admin/lib/store";
+import { closeModal, setUi, findTicket, openModal, tickets, ui, useStore } from "@admin/lib/store";
 import { kindLabel, rememberProgressNotice, type CareKind } from "@admin/lib/care";
 import { NoticeSession, preparedNotice, type NoticeState } from "@admin/lib/progress-notice";
 import { checkBeforeSend, SendQcSession, type QcState } from "@admin/lib/send-qc";
-import { isApiTicket, replyPreviewKey, specialistFollowupViaApi } from "@admin/lib/api-sync";
+import { infoRequestViaApi, isApiTicket, replyPreviewKey, specialistFollowupViaApi } from "@admin/lib/api-sync";
 import { AI_STYLE } from "./CareButtons";
 import { SEGMENT_KO, STATUS_KO, useCustomers, type Customer } from "@admin/lib/customers";
 import type { Ticket } from "@admin/lib/types";
 
 const TITLES: Record<string, string> = {
+  "request-plan": "고객에게 확인할 정보",
   "specialist-finding": "전문부서 검토 결과 확인",
   "new-ticket": "새 문의 등록", assign: "담당자 및 리소스 확인", send: "발송 확인", "answer-comparison": "답변 초안 갱신", "review-customer": "수신 자료 확인",
-  "expert-receive": "전문부서 회신 등록", completion: "문의 완료 처리", "customer-reply": "고객 회신", "department-review": "전문부서 요청·회신", file: "첨부파일",
+  "expert-receive": "전문부서 회신 등록", completion: "문의 완료 처리", "customer-reply": "고객 회신", "department-review": "전문부서 회신 대기 중", file: "첨부파일",
   document: "기술문서 · iS7 고장 가이드", "knowledge-document": "근거 문서",
 };
 const WIDE = ["care", "new-ticket", "review-customer", "answer-comparison", "department-review", "knowledge-document", "completion"];
@@ -44,7 +45,7 @@ export default function ModalHost() {
     <Dialog open={!!m} onOpenChange={(o) => !o && !sendBusy && closeModal()}>
       {m && (
         <DialogContent showCloseButton={!sendBusy} className={cn(MODAL, WIDE.includes(m.type) ? "sm:max-w-2xl" : "sm:max-w-lg")}>
-          <DialogHeader className="pr-8"><DialogTitle className="text-[22px] font-semibold">{m.type === "send" && t ? (t.purpose === "request" ? "고객 질의서 발송" : "고객 답변 발송") : m.type === "care" ? kindLabel(m.props?.kind) : TITLES[m.type] || "알림"}</DialogTitle></DialogHeader>
+          <DialogHeader className="pr-8"><DialogTitle className="text-[22px] font-semibold">{m.type === "send" && t ? (t.purpose === "request" ? "고객 질의서 발송" : "고객 답변 발송") : m.type === "care" ? kindLabel(m.props?.kind) : m.type === "department-review" ? reviewTitle(m.props || {}) : TITLES[m.type] || "알림"}</DialogTitle></DialogHeader>
           {m.type === "send" && t ? <Send key={t.id} t={t} onBusy={setSendBusy} /> : <Body type={m.type} props={m.props || {}} t={t} />}
         </DialogContent>
       )}
@@ -54,6 +55,7 @@ export default function ModalHost() {
 
 function Body({ type, props, t }: { type: string; props: Record<string, any>; t?: Ticket }) {
   switch (type) {
+    case "request-plan": return t ? <RequestPlan key={t.id} t={t} /> : null;
     case "new-ticket": return <NewTicket />;
     case "assign": return t ? <Assign t={t} /> : null;
     case "answer-comparison": return t ? <Comparison t={t} /> : null;
@@ -326,7 +328,7 @@ function CareModal({ customerId, ticketId }: { customerId: string; kind: CareKin
   const { rows, error } = useCustomers();
   const known = rows?.find((x) => x.id === customerId);
   const linked: NoticeTicket[] = (known?.notice_tickets || []).map((t) => ({ ...t,
-    apiLanguage: t.language, status: findTicket(t.id)?.specialistFollowup?.status === "in_progress" && t.status !== "WAITING_CUSTOMER" ? "사내 분석 중" : STATUS_KO[t.status] || t.status }));
+    apiLanguage: t.language, status: findTicket(t.id)?.specialistFollowup?.status === "in_progress" && t.status !== "WAITING_CUSTOMER" ? "전문부서 분석 중" : STATUS_KO[t.status] || t.status }));
   const c = known;
   return c ? <><p role={error ? "alert" : undefined} className="text-sm text-destructive">{error && `${error} 마지막 조회 정보를 표시합니다.`}</p><CareForm key={customerId} c={c} ticketId={ticketId} linked={linked} /></>
     : <p className="text-sm text-muted-foreground">{error || (rows ? "서버에 연결된 고객 문의가 없습니다." : "고객 문의를 불러오는 중입니다.")}</p>;
@@ -400,37 +402,49 @@ const Cell = ({ label, children, wide }: { label: string; children: ReactNode; w
   <div className={wide ? "col-span-3" : ""}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 font-medium">{children}</dd></div>
 );
 
-/** 전문부서 요청·회신: 위에서 아래로 "무슨 요청인가 → 누구에게 언제 → 요청 내용 → 회신" 순서. 회신 상태는 색으로 바로 보인다. */
+/** 부서 요청 한 건: 화면 열기 키(key 또는 ticketId+requestId)로 referralRows 에서 찾는다. 제목과 본문이 같은 건을 가리킨다. */
+const findReferral = (props: Record<string, any>) => (props.key ? referralRows().find((x) => x.key === props.key) : referralRows().find((x) => x.ticket.id === props.ticketId && x.requestId === props.requestId));
+/** 모달 제목: 회신을 기다리는 중인지, 회신이 왔는지가 제목에서 바로 보인다. */
+const reviewTitle = (props: Record<string, any>) => { const r = findReferral(props); return r?.response ? "전문부서 회신 도착" : "전문부서 회신 대기 중"; };
+
+/** 전문부서 요청·회신: "무슨 요청인가 → 누구에게 언제 → 내가 보낸 요청 내용 → (회신이 왔다면) 회신과 답장". 회신 대기 중에는 회신 칸이 없다. */
 function DepartmentReview({ props }: { props: Record<string, any> }) {
   const nav = useNavigate();
-  const r = props.key ? referralRows().find((x) => x.key === props.key) : referralRows().find((x) => x.ticket.id === props.ticketId && x.requestId === props.requestId);
+  const [reply, setReply] = useState(""), [sending, setSending] = useState(false);
+  const r = findReferral(props);
   if (!r?.event) return null;
   const e = r.event, c = e.requestContext, files: string[] | null = Array.isArray(e.transmittedFiles) ? e.transmittedFiles : null;
-  const canReply = !r.response && r.ticket.stage !== 5;
+  const toReview = !!r.response && !r.response.reviewed && expertPhase(r.ticket) === "review"; // 회신이 도착했고 담당자가 아직 확인하지 않았다
+  const canAnswer = !!r.response && r.ticket.stage !== 5 && !!r.target;
+  const send = async () => {
+    if (!reply.trim() || sending || !r.target) return;
+    setSending(true);
+    await submitExpertRequest(r.ticket, { department: r.target, channel: e.channel === "기업 메신저" ? "기업 메신저" : "이메일", body: reply.trim(), files: [] });
+    setSending(false);
+  };
   return (
-    <div className="grid gap-5">
-      <header className="grid gap-2">
+    <div className="grid gap-8">
+      <header className="grid gap-3">
         <div className="flex items-center justify-between">
-          <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-slate-200/70 px-2.5 text-xs font-medium text-slate-700"><Building2 className="size-3.5" aria-hidden />전문부서 요청</span>
-          <Tag tone={r.response ? "green" : "amber"}>{r.response ? "회신 받음" : "회신 대기"}</Tag>
+          <Tag tone={r.response ? (toReview ? "blue" : "green") : "amber"}>{r.response ? (toReview ? "회신 도착 · 검토 필요" : r.response.reviewed ? "회신 반영 완료" : "회신 받음") : "회신 대기"}</Tag>
         </div>
         <h3 className="text-xl font-bold leading-snug">{r.ticket.title}</h3>
-        <p className="text-sm text-muted-foreground"><Mono>{r.requestId}</Mono> · <Mono>{r.ticket.id}</Mono> · {r.ticket.product}</p>
+        <p className="text-sm leading-relaxed text-muted-foreground"><Mono>{r.requestId}</Mono> · <Mono>{r.ticket.id}</Mono> · {r.ticket.product}</p>
       </header>
 
-      <dl className="grid grid-cols-3 gap-x-6 gap-y-4 rounded-xl bg-muted/60 p-4 text-[15px]">
+      <dl className="grid grid-cols-3 gap-x-6 gap-y-6 rounded-2xl bg-muted/60 p-6 text-[15px]">
         <Cell wide label="요청 → 대상 부서"><span className="inline-flex items-center gap-2">{r.source || "부서 미기록"}<ArrowRight className="size-4 text-muted-foreground" aria-hidden />{r.target || "부서 미기록"}</span></Cell>
         <Cell label="요청 담당자">{e.actor || "미기록"}</Cell>
         <Cell label="요청일">{stamp(r.when)}</Cell>
         <Cell label="전달 방식">{e.channel || "미기록"}</Cell>
       </dl>
 
-      <section className="grid gap-2">
+      <section className="grid gap-3">
         <h4 className="text-sm font-semibold">검토 요청사항</h4>
-        <p className="whitespace-pre-line rounded-xl bg-[#003377]/[0.05] p-4 text-[15px] leading-relaxed">{e.request || e.text}</p>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+        <p className="whitespace-pre-line rounded-2xl bg-[#003377]/[0.05] p-5 text-[15px] leading-[1.8]">{e.request || e.text}</p>
+        <div className="flex flex-wrap items-center gap-2.5 pt-1 text-sm">
           <span className="text-muted-foreground">전달 자료</span>
-          {files?.length ? files.map((f) => <span key={f} className="inline-flex h-6 items-center gap-1.5 rounded-full bg-muted px-2.5 text-xs"><Paperclip className="size-3" aria-hidden />{f}</span>) : <span className="text-muted-foreground">{files ? "없음" : "미기록"}</span>}
+          {files?.length ? files.map((f) => <span key={f} className="inline-flex h-7 items-center gap-1.5 rounded-full bg-muted px-3 text-xs"><Paperclip className="size-3" aria-hidden />{f}</span>) : <Tag>{files ? "없음" : "미기록"}</Tag>}
         </div>
       </section>
 
@@ -439,19 +453,23 @@ function DepartmentReview({ props }: { props: Record<string, any> }) {
           <Facts className="mt-3" rows={[["제품·오류", c.analysis.product + (c.analysis.errorCode ? " · " + c.analysis.errorCode : "")], ["누락 항목", c.missingInfo.join(" · ") || "확인된 누락 항목 없음"], ["참고 근거", c.references.map((x: any) => x.label).join(" · ") || "연결된 근거 없음"]]} /></details>
       )}
 
-      {r.response ? (
-        <section className="grid gap-2 rounded-xl bg-success/10 p-4">
+      {r.response && (
+        <section className="grid gap-3 rounded-2xl bg-success/10 p-6">
           <div className="flex items-center justify-between"><h4 className="flex items-center gap-1.5 text-sm font-semibold text-success"><CircleCheck className="size-4" aria-hidden />전문부서 회신</h4><small className="text-muted-foreground">{r.response.time} · 등록 {r.response.actor || "미기록"}</small></div>
-          <p className="whitespace-pre-line text-[15px] leading-relaxed">{r.response.text}</p>
+          <p className="whitespace-pre-line text-[15px] leading-[1.8]">{r.response.text}</p>
         </section>
-      ) : (
-        <section className="flex items-center gap-2.5 rounded-xl border border-dashed p-4 text-sm text-muted-foreground"><Clock className="size-4 text-warning" aria-hidden />전문부서의 회신을 기다리고 있습니다.</section>
+      )}
+
+      {canAnswer && (
+        <section className="grid gap-3">
+          <h4 className="text-sm font-semibold">{r.target}에 답장</h4>
+          <Textarea aria-label="전문부서에 보낼 답장" disabled={sending} className="min-h-28 leading-relaxed" value={reply} onChange={(ev) => setReply(ev.target.value)} placeholder="회신에 대한 추가 질문이나 요청을 적어 보내세요." />
+          <div className="flex items-center justify-between gap-3"><small className="text-muted-foreground">보낸 내용은 새 검토 요청으로 기록됩니다.</small><Button type="button" disabled={!reply.trim() || sending} onClick={send}>{sending ? "저장 중…" : "답장 보내기"}</Button></div>
+        </section>
       )}
 
       <Footer>
-        <Close />
-        <Button variant="outline" onClick={() => { closeModal(); nav("/tickets/" + r.ticket.id); }}>원본 문의 열기</Button>
-        {canReply && <Button onClick={() => openModal("expert-receive", { id: r.ticket.id, requestId: r.requestId })}>회신 등록</Button>}
+        <Button onClick={() => { closeModal(); nav("/tickets/" + r.ticket.id); }}>문의 관리에서 열기</Button>
       </Footer>
     </div>
   );
@@ -505,18 +523,59 @@ function SpecialistFinding({ t }: { t: Ticket }) {
     finally { setBusy(false); }
   };
   if (!f) return <p>현재 확인할 조사 정보가 없습니다.</p>;
-  return <div className="grid gap-4">
-    <p className="text-sm text-muted-foreground">회신이 현재 문의에 대한 최종 검토 결과인지 확인하세요. 확인을 완료하면 이 결과를 반영해 고객 답변을 작성할 수 있습니다.</p>
+  return <div className="grid gap-7">
+    <p className="text-sm leading-relaxed text-muted-foreground">회신이 현재 문의에 대한 최종 검토 결과인지 확인하세요. 확인을 완료하면 이 결과를 반영해 고객 답변을 작성할 수 있습니다.</p>
     {stale && <p role="alert" className="text-sm text-warning-ink">문의 또는 회신이 변경됐습니다. 창을 닫고 최신 내용을 다시 확인해 주세요.</p>}
     {f.error && <p role="alert" className="text-sm text-warning-ink">{f.error}</p>}
     {(f.error || !f.reading || f.needs_review) && <Button variant="outline" disabled={busy || stale || t.followupBusy} onClick={() => void specialistFollowupViaApi(t)}>회신 내용 다시 분석</Button>}
     <NativeSelect aria-label="확인할 회신" value={replyId} onChange={e => { setReplyId(e.target.value); setEvidence(""); setConfirmed(false); }}>
-      {replies.map((r: any) => <option key={r.reply_id} value={r.reply_id}>{r.author} · {r.created_at}</option>)}
+      {replies.map((r: any) => <option key={r.reply_id} value={r.reply_id}>{r.author} · {stamp(r.created_at)}</option>)}
     </NativeSelect>
-    <details className="rounded-2xl bg-muted p-4 text-sm"><summary className="cursor-pointer font-medium">회신 원문 보기</summary><p className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap">{source?.text || "아직 등록된 회신이 없습니다."}</p></details>
-    <Field label="고객 답변에 반영할 검토 결과 (회신 원문 그대로)"><Textarea value={evidence} onChange={e => { setEvidence(e.target.value); setConfirmed(false); }} /></Field>
-    <label className="flex items-start gap-2 text-sm"><Checkbox checked={confirmed} onCheckedChange={v => setConfirmed(v === true)} />위 내용이 현재 문의에 대한 전문부서의 최종 검토 결과이며, 고객 답변에 반영할 수 있음을 확인했습니다.</label>
+    <details className="rounded-2xl bg-muted px-5 py-4 text-sm"><summary className="cursor-pointer font-medium">회신 원문 보기</summary><p className="mt-4 max-h-56 overflow-auto whitespace-pre-wrap leading-relaxed">{source?.text || "아직 등록된 회신이 없습니다."}</p></details>
+    <Field label="고객 답변에 반영할 검토 결과 (회신 원문 그대로)"><Textarea className="min-h-32 leading-relaxed" value={evidence} onChange={e => { setEvidence(e.target.value); setConfirmed(false); }} /></Field>
+    <label className="flex items-start gap-3 text-sm leading-relaxed"><Checkbox checked={confirmed} onCheckedChange={v => setConfirmed(v === true)} />위 내용이 현재 문의에 대한 전문부서의 최종 검토 결과이며, 고객 답변에 반영할 수 있음을 확인했습니다.</label>
     {f.pending_replies && <p className="text-sm text-warning-ink">다른 전문부서의 회신을 기다리고 있습니다.</p>}
-    <DialogFooter><Button variant="outline" disabled={busy} onClick={closeModal}>닫기</Button><Button disabled={busy || stale || t.followupBusy || !confirmed || f.pending_replies || !evidence.trim() || !source?.text.includes(evidence.trim())} onClick={() => void save()}>{busy ? "저장 중…" : "확인 완료"}</Button></DialogFooter>
+    <DialogFooter className="pt-1"><Button variant="outline" disabled={busy} onClick={closeModal}>닫기</Button><Button disabled={busy || stale || t.followupBusy || !confirmed || f.pending_replies || !evidence.trim() || !source?.text.includes(evidence.trim())} onClick={() => void save()}>{busy ? "저장 중…" : "확인 완료"}</Button></DialogFooter>
   </div>;
+}
+
+function RequestPlan({ t }: { t: Ticket }) {
+  const [plan] = useState(() => t.copilot as import("../../../api/client").CopilotInsight);
+  const items = plan.request_plan.filter((r) => ["missing", "clarify"].includes(r.status) &&
+    (r.origin !== "recommended" || t.activeComposer === "expert" || plan.workflow?.request_fields.includes(r.field)));
+  const known = plan.request_plan.filter((r) => r.status === "confirmed");
+  const unavailable = plan.request_plan.filter((r) => r.status === "unavailable");
+  const [selected, setSelected] = useState(() => items.map((r) => r.field));
+  const [busy, setBusy] = useState(false);
+  const stale = plan.context_key !== t.copilot?.context_key;
+  const reasons = new Map(plan.reading?.request_reasons.map((r) => [r.field, r.text]));
+  return <form className="grid gap-4" onSubmit={async (e) => {
+    e.preventDefault(); if (busy || stale || !selected.length) return;
+    setBusy(true);
+    try { if (await infoRequestViaApi(t, selected, plan.context_key)) { setUi({ tab: "문의·답변" }); if (ui.modal?.type === "request-plan") closeModal(); } }
+    finally { setBusy(false); }
+  }}>
+    <p className="text-sm leading-relaxed text-muted-foreground">이번에 확인할 항목을 선택하세요. 이미 받은 정보는 다시 요청하지 않습니다. 선택한 항목으로 영어 초안을 작성합니다.</p>
+    {stale && <p role="alert" className="text-sm text-warning-ink">문의 정보가 바뀌었습니다. 닫은 뒤 최신 항목을 확인해 주세요.</p>}
+    <div className="grid max-h-[50vh] gap-4 overflow-y-auto">
+      {!!known.length && <section aria-label="이미 받은 정보" className="rounded-xl bg-muted/60 p-4">
+        <h3 className="mb-2 text-sm font-semibold">이미 받은 정보 · {known.length}건</h3>
+        <dl className="grid gap-2 text-sm">{known.map((r) => <div key={r.field} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3"><dt className="break-words text-muted-foreground">{r.label}</dt><dd className="break-words font-medium">{r.value}</dd></div>)}</dl>
+      </section>}
+      {!!unavailable.length && <section aria-label="고객이 제공할 수 없는 자료" className="rounded-xl bg-muted/60 p-4">
+        <h3 className="mb-2 text-sm font-semibold">미확보 사유 확인 · 재요청 제외</h3>
+        <ul className="grid gap-2 text-sm">{unavailable.map((r) => <li key={r.field} className="break-words">{r.label}: {r.evidence}</li>)}</ul>
+      </section>}
+      <div className="grid gap-3">{items.map((r) => <label key={r.field} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border p-4">
+      <Checkbox className="mt-1 shrink-0" checked={selected.includes(r.field)} disabled={busy || stale}
+        onCheckedChange={(checked) => setSelected((old) => checked ? [...old, r.field] : old.filter((f) => f !== r.field))} />
+      <span className="min-w-0"><span className="flex flex-wrap items-center gap-2 font-medium">{r.label}<Tag tone={r.origin === "recommended" ? "" : "blue"}>{r.status === "clarify" ? "재확인" : r.origin === "specialist" ? "전문부서 요청" : r.origin === "recommended" ? "권장" : "필수정보"}</Tag></span>
+        <span className="mt-1 block text-sm leading-relaxed text-muted-foreground">{reasons.get(r.field) || r.reason}</span>
+        {r.evidence && <span className="mt-2 block text-xs text-muted-foreground">회신 원문: {r.evidence}</span>}
+      </span>
+    </label>)}</div></div>
+    {!items.length && <p className="text-sm">현재 요청할 미확인 항목이 없습니다.</p>}
+
+    <Footer><Close label="취소" /><Button type="submit" disabled={busy || stale || !selected.length}>{busy ? "요청문 작성 중…" : "선택 항목으로 요청문 작성"}</Button></Footer>
+  </form>;
 }

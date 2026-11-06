@@ -67,7 +67,29 @@ export type SpecialistFollowup = {
     conclusion: { reply_id: string; evidence: string } | null; needs_review: boolean } | null;
   confirmation: { reviewer: string; confirmed_at: string; finding: { reply_id: string; evidence: string } } | null;
 };
+export type CopilotStatement = { text: string; references: { source_id: string; quote: string }[] };
+export type CopilotInsight = {
+  workflow?: { mode: string; next_action: string; request_fields: string[] };
+  context_key: string;
+  request_plan: { field: string; label: string; status: "confirmed" | "clarify" | "missing" | "unavailable"; origin: "required" | "specialist" | "recommended" | "selected"; blocking: boolean; value: string; reason: string; evidence: string }[];
+  reading: { request: CopilotStatement; confirmed: CopilotStatement[]; unresolved: CopilotStatement[]; next_reason: CopilotStatement | null;
+    request_reasons: (CopilotStatement & { field: string })[];
+    cases: { case_id: string; matches: CopilotStatement[]; differences: CopilotStatement[]; unknowns: CopilotStatement[]; use_limit: CopilotStatement }[] } | null;
+  sources: Record<string, { label: string; text: string }>;
+  changes: { field: string; label: string; before: string | null; after: string | null }[];
+  generated_at: string | null;
+};
+export type FollowupQuote = { source_id: string; quote: string };
+export type FollowupLink = {
+  previous_ticket_id: string; previous_subject: string; reason: string; relation: string;
+  dismissed: boolean; new_information: string; references: FollowupQuote[];
+  previous_response?: { text: string; references: FollowupQuote[] } | null;
+  current_source?: string; sources: Record<string, string>;
+};
 export type Ticket = {
+  followup_link?: FollowupLink | null;
+  followup_context_stale?: boolean;
+  copilot?: CopilotInsight;
   ticket_id: string;
   inquiry: InquiryIn | null; // 문의 원문 (회신이 오면 이어 붙인 본문)
   body_ko: string | null; // 상담원용 한국어 번역 (CSA-57)
@@ -104,7 +126,8 @@ export type Ticket = {
   draft_information_reviewed_at?: string | null;
   information_review?: InformationReview | null;
   information_reviews?: InformationReview[];
-  investigation_info?: { recommended_fields: string[]; provided_fields: string[]; missing_fields: string[]; note: string } | null;
+  investigation_info?: { recommended_fields: string[]; provided_fields: string[]; missing_fields: string[]; unavailable_fields?: Record<string, string>; note: string } | null;
+  escalation_advice?: { decision: "recommended" | "not_needed"; source: "rule" | "ai"; to_dept: string; condition: string; reason: string; quote: string; model: string } | null;
   specialist_followup?: SpecialistFollowup | null;
   specialist_requests?: SpecialistRequest[];
   specialist_revision?: number;
@@ -118,6 +141,9 @@ export type WorkItem = Pick<Ticket, "ticket_id" | "status" | "category" | "prior
 };
 // 고객용 문의 조회 (GET /api/inquiries/{id}, CSA-61). 내부 초안·근거·담당자는 오지 않는다.
 export type CustomerStatus = "RECEIVED" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "ANSWERED" | "CLOSED";
+// 문의 첨부 파일 (services/attachments.py). 파일 주소는 api.attachmentUrl 로 만든다
+export type InquiryAttachment = { attachment_id: string; name: string; content_type: string; size: number; uploaded_at: string };
+
 export type CustomerInquiry = {
   ticket_id: string;
   subject: string;
@@ -126,6 +152,8 @@ export type CustomerInquiry = {
   status: CustomerStatus;
   message: string | null; // 상담원이 보낸 회신 · 추가정보 요청
   message_language: string | null;
+  first_response_target_h?: number | null; // 예상 소요시간 안내용 SLA 목표 (시간)
+  resolution_target_h?: number | null;
 };
 export type Agent = { agent_id: string; name: string; dept: string; active: boolean; max_open: number; open_count: number };
 export type Navigation = { product_code: string | null; tab: string | null; anchor: string | null; candidates: string[] };
@@ -253,6 +281,13 @@ export const api = {
   // 고객 화면은 이것으로 문의·회신을 보낸다 (고객 도메인은 /api/tickets 를 막는다, CSA-46)
   createInquiry: (body: InquiryIn) => request<CustomerInquiry>("/inquiries", { method: "POST", body: JSON.stringify(body) }),
   customerInquiry: (id: string) => request<CustomerInquiry>(`/inquiries/${id}`),
+  // 본문이 파일 내용 그대로다 (multipart 아님). 형식은 Content-Type 으로 보낸다
+  uploadAttachment: (id: string, file: File) =>
+    request<InquiryAttachment>(`/inquiries/${id}/attachments?name=${encodeURIComponent(file.name)}`, {
+      method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" },
+    }),
+  inquiryAttachments: (id: string) => request<InquiryAttachment[]>(`/inquiries/${id}/attachments`),
+  attachmentUrl: (id: string, attachmentId: string) => `/api/inquiries/${id}/attachments/${attachmentId}`,
   resolve: (id: string, body?: ResolutionIn) => request<Ticket>(`/tickets/${id}/resolve`, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
   agents: (dept?: string) => request<Agent[]>(`/agents${dept ? `?dept=${dept}` : ""}`),
   workList: (dept?: string) => request<WorkItem[]>(`/tickets${dept ? `?dept=${dept}` : ""}`),
@@ -261,6 +296,8 @@ export const api = {
   closed: () => request<string[]>("/tickets/closed"),
   manualReply: (id: string, body: { text: string; reviewer: string; expected_customer_revision: number; expected_specialist_revision: number; expected_information_reviewed_at: string | null }) =>
     request<Ticket>(`/tickets/${id}/manual-reply`, { method: "POST", body: JSON.stringify(body) }),
+  // 사람 검토 문의의 영어 답변 초안 제안(저장·발송 안 함): 처음 문의와 전문부서 회신으로 만든다
+  manualDraft: (id: string) => request<{ text: string }>(`/tickets/${id}/manual-draft`, { method: "POST" }),
   assign: (id: string, body: { assignee: string; reason?: string; by?: string }) =>
     request<Ticket>(`/tickets/${id}/assign`, { method: "POST", body: JSON.stringify(body) }),
   // 전문부서 이관 요청서 초안 만들기 (CSA-55). 실제 이관은 act(escalate)
@@ -283,6 +320,9 @@ export const api = {
   ticket: (id: string) => request<Ticket>(`/tickets/${id}`),
   act: (id: string, body: { action: ReviewAction } & Record<string, unknown>) =>
     request<Ticket>(`/tickets/${id}/action`, { method: "POST", body: JSON.stringify(body) }),
+  unlinkFollowup: (id: string) => request<Ticket>(`/tickets/${id}/followup/unlink`, { method: "POST" }),
+  copilot: (id: string) => request<CopilotInsight>(`/tickets/${id}/copilot`, { method: "POST" }),
+  mailCopilot: (id: string, review: MailReview) => request<CopilotInsight>(`/mail/${id}/copilot`, { method: "POST", body: JSON.stringify(review) }),
   mails: () => request<MailItem[]>("/mail"),
   // AI 분석 + 담당 부서·우선순위 (티켓은 만들지 않는다). 담당자가 고친 유형·제품이 있으면 그 값으로
   analyzeMail: (id: string, review: MailReview = {}) =>

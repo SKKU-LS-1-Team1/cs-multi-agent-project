@@ -244,6 +244,8 @@ class ReviewIn(BaseModel):
     feedback: str | None = None  # 한 줄
     feedback_reason: FeedbackReason | None = None
     escalate_to: str | None = None
+    draft_purpose: Literal["answer", "request"] | None = None  # rewrite의 명시적 작성 대상
+    info_plan_key: str | None = None  # 선택한 요청 항목이 현재 확인값에 기반하는지 검증
     info_items: list[str] = Field(default_factory=list)  # 요청할 항목
 
 
@@ -263,6 +265,9 @@ class TicketOut(BaseModel):
         None  # 고객 문의 원문 (회신이 오면 이어 붙인 본문). 관리자 화면 표시용
     )
     body_ko: str | None = None
+    followup_link: dict | None = None
+    followup_context_stale: bool = False
+    copilot: dict | None = None
     status: TicketStatus
     manual_reply: bool = False
     processing_history: list[dict] = Field(default_factory=list)
@@ -274,6 +279,8 @@ class TicketOut(BaseModel):
     assigned_dept: str | None = None  # 이관됐으면 이관 부서
     assignee: str | None = None  # 담당 상담원 agent_id (CSA-53). 없으면 부서 큐
     sla_due_at: datetime | None = None
+    sla_first_response_h: float | None = None  # 첫 응답 목표 (규칙 판정 전이면 None)
+    sla_resolution_h: float | None = None
     draft: Draft | None = None
     info_request: str | None = None
     escalation_request: EscalationRequest | None = None
@@ -289,6 +296,7 @@ class TicketOut(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
     specialist_requests: list[SpecialistRequest] = Field(default_factory=list)
     investigation_info: dict | None = None  # 이관 전 권장 자료, 차단 조건 아님
+    escalation_advice: dict | None = None  # 이관 권장. 없으면 담당자가 판단 (기존 문의 포함)
     specialist_followup: dict | None = None
     specialist_revision: int = 0
     draft_specialist_revision: int = 0

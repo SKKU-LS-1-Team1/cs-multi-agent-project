@@ -1,63 +1,35 @@
-import { investigationTask } from "@admin/lib/investigation";
+import { useCopilot, ReadingSummary, Statement, InsightStatus, CaseComparisons, RequestChecklist } from "../components/admin/CopilotReading";
+import { investigationTask, copilotPresentation, referralSuggestions } from "@admin/lib/investigation";
 // 문의 상세: 대기열 · 문의 요약 · 처리 상황 · 문의·답변/처리 이력/고객·제품 정보 · AI Copilot.
 import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
-import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Paperclip, Send, User, type LucideIcon } from "lucide-react";
-import { Button } from "@admin/components/ui/button";
+import { ArrowRight, BookOpen, Building2, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDot, Circle, Clock, Compass, FileText, Headset, Image as ImageIcon, Link2, Paperclip, Send, User, type LucideIcon } from "lucide-react";
+import { FAMILY_KO } from "@admin/lib/customers";
+import { Button, buttonVariants } from "@admin/components/ui/button";
 import { Card } from "@admin/components/ui/card";
 import { Checkbox } from "@admin/components/ui/checkbox";
 import { Input } from "@admin/components/ui/input";
 import { Textarea } from "@admin/components/ui/textarea";
 import { AiMark, Facts, Mono, NativeSelect, PersonAvatar, PriorityTag, SlaTag, StatusTag, Tag, UnderlineTabs, useGo } from "@admin/components/admin/common";
 import {
-  answerContext, assignmentSummary, branchChoice, cases, contextIsNew, customerLanguage, expertDepartments, feedbackLabel, informationAssessment, informationSummary, inquirySummary, isEdited,
-  canAssign, latestCustomerReply, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
+  answerContext, assignmentSummary, branchChoice, escalationRecommended, cases, contextIsNew, customerLanguage, expertDepartments, expertPhase, feedbackLabel, inquirySummary, isEdited,
+  canAssign, isNewAssignment, latestCustomerReply, pendingCustomerInfo, referralRows, requiredInformation, runChecks, sourceInquiry, unreadReplies, waitingReviews,
 } from "@admin/lib/logic";
 import {
-  requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
+  requestInvestigationInfo, judgment, nextAction, prepareCustomerReply, canSend, closeComposer, composeFromCopilot, editDraft, markSeen, openCompletion, openExpertComposer, openExpertReview, QUICK_INSTRUCTIONS, regenerateDraft, setReviewed, submitExpertRequest, toggleTranslate,
 } from "@admin/lib/actions";
-import { loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi } from "@admin/lib/api-sync";
+import { DEPT_LABEL, rewriteViaApi, loadTicketDetail, watchTicketDetail, isManualReplyTicket, hasCurrentReplyPreview, escalationDraftViaApi, manualDraftViaApi } from "@admin/lib/api-sync";
 import { commit, findTicket, openModal, setUi, ui, useStore } from "@admin/lib/store";
+import { flowSteps, type Step, type StepState } from "@admin/lib/flow-steps";
 import { cn } from "@admin/lib/utils";
 import type { Ticket } from "@admin/lib/types";
+import { api, type InquiryAttachment } from "../../api/client";
+import { FollowupEvidence } from "../components/admin/FollowupEvidence";
 
 type Choice = "answer" | "expert" | "request";
 const SAMPLE = "CSV1-000050";
 /** 샘플 문의가 접수된 시각. 대화 머리와 처리 이력이 같은 값을 쓴다. */
 const INQUIRY_AT = "10.06 · 17:43";
-type StepState = "done" | "current" | "waiting" | "todo" | "optional";
-type Step = { key: string; label: string; sub: string; state: StepState; action?: { label: string; run: () => void } };
-function flowSteps(t: Ticket): Step[] {
-  const items = informationAssessment(t), req = requiredInformation(t).length, reply = latestCustomerReply(t);
-  const pending = waitingReviews(t).length + (t.legacyReviewPending ? 1 : 0), gotExpert = t.events.some((e) => e.kind === "expert");
-  const missing = items.filter((x) => !["provided", "confirmed"].includes(x.status)).length, needsCheck = t.customerRequestStatus === "received" && reply && req > 0 && reply.id !== t.reviewedReplyKey;
-  const writing = !!t.draft && t.purpose === "answer";
-  const done = t.stage === 5, analysisReady = t.source !== "api" || t.analysisReady;
-  const steps: Step[] = [
-    { key: "intake", label: "접수·분석", sub: analysisReady ? "완료" : t.status, state: analysisReady ? "done" : "current" },
-    { key: "info", label: "고객 정보", sub: !analysisReady ? "필수정보 확인 대기" : !req ? "추가 자료 불필요" : t.customerRequestStatus === "none" && missing ? `자료 필요 ${missing}건` : informationSummary(t), state: !analysisReady ? "todo" : !req || !missing ? "done" : t.customerRequestStatus === "waiting" ? "waiting" : "current",
-      action: needsCheck && !done ? { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) } : undefined },
-    { key: "expert", label: "전문부서", sub: pending ? `회신 대기 ${pending}건` : gotExpert ? "회신 수신" : "요청 없음 (선택)", state: pending ? "current" : gotExpert ? "done" : "optional",
-      action: pending && !done ? { label: "회신 등록", run: () => openModal("expert-receive", { id: t.id }) } : undefined },
-    { key: "answer", label: "답변 작성", sub: t.sent ? "작성 완료" : writing ? (t.reviewed ? "발송 준비 완료" : "영어 초안 검토 중") : "작성 전", state: t.sent ? "done" : writing ? "current" : "todo" },
-    { key: "send", label: "발송", sub: t.sent ? (t.customerOutcome === "resolved" ? "해결 회신 수신" : t.customerOutcome === "provided" ? "정보 확인 회신" : "발송 완료") : "대기", state: t.sent ? "done" : "todo",
-      action: reply ? { label: "고객 회신 보기", run: () => openModal("customer-reply", { id: t.id }) } : undefined },
-    { key: "done", label: "완료", sub: done ? "처리 완료" : "대기", state: done ? "done" : "todo" },
-  ];
-  if (done) steps.forEach((x) => (x.state = "done"));
-  else if (!steps.some((x) => x.state === "current")) { const i = steps.findIndex((x) => x.state === "todo"); if (i >= 0) steps[i].state = "current"; }
-  // 병행 중인 단계가 둘 이상이면 하나만 "지금 단계"로 펼치고(답변 작성 중이면 답변 작성), 나머지는 "대기"로 접는다.
-  const live = steps.map((x, i) => (x.state === "current" ? i : -1)).filter((i) => i >= 0);
-  if (live.length > 1) {
-    // 전문부서 회신을 기다리는 중이면 그 단계가 지금 단계(답변 초안이 있어도 회신 전에는 발송하지 못한다).
-    const focus = live.find((i) => steps[i].key === (pending ? "expert" : "answer")) ?? live[0];
-    live.forEach((i) => { if (i !== focus) steps[i].state = steps[i].key === "expert" ? "waiting" : "todo"; });
-    if (pending && steps[focus].key === "expert") steps[focus].state = "waiting";
-  }
-  if (pending && !done) { const e = steps.find((x) => x.key === "expert"); if (e) e.state = "waiting"; } // 회신을 기다리는 단계는 항상 시계 아이콘
-  return steps;
-}
-
 const DETAIL_TABS = [["문의·답변", "문의·답변"], ["처리 이력", "처리 이력"], ["고객·제품 정보", "고객·제품 정보"]] as const;
 
 export default function TicketDetail() {
@@ -74,14 +46,15 @@ export default function TicketDetail() {
     void loadTicketDetail(ticketId).catch(() => { if (!cancelled) setLoadError("문의 상세를 불러오지 못했습니다."); });
     return () => { cancelled = true; stop(); };
   }, [ticketId, retry]);
-  useEffect(() => { if (t && unreadReplies(t) > 0) markSeen(t); }, [t?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (t && (unreadReplies(t) > 0 || isNewAssignment(t))) markSeen(t); }, [t?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!t) return <div className="p-10" role={loadError ? "alert" : "status"}>{loadError || "문의 상세를 불러오는 중입니다."}{loadError && <Button variant="outline" onClick={() => setRetry((v) => v + 1)}>다시 시도</Button>}</div>;
   return (
-    <div data-ticket-id={t.id} className="grid grid-cols-1 items-start min-[1360px]:grid-cols-[minmax(0,1fr)_400px]">
-      <section aria-label="문의 상세" key={t.id} className="grid min-w-0 content-start gap-8 px-12 pb-16">
+    <div data-ticket-id={t.id} className="grid h-[calc(100dvh-1.5rem)] min-h-0 grid-cols-1 items-start overflow-y-auto overscroll-contain min-[1360px]:grid-cols-[minmax(0,1fr)_400px] min-[1360px]:items-stretch min-[1360px]:overflow-hidden">
+      <section aria-label="문의 상세" tabIndex={0} key={t.id} className="grid min-h-0 min-w-0 content-start gap-8 px-12 pb-16 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 min-[1360px]:h-full min-[1360px]:overflow-y-auto min-[1360px]:overscroll-contain">
         {/* 제목·진행 단계·탭은 스크롤해도 맨 위에 고정된다 */}
         <div className="sticky top-0 z-20 -mx-12 grid gap-6 bg-background px-12 pb-1 pt-10">
           <Header t={t} />
+          <FollowupLink key={t.id} t={t} />
           <Progress t={t} />
           <UnderlineTabs tabs={DETAIL_TABS} value={ui.tab as (typeof DETAIL_TABS)[number][0]} onChange={(v) => setUi({ tab: v })} />
         </div>
@@ -90,6 +63,26 @@ export default function TicketDetail() {
       <Copilot t={t} />
     </div>
   );
+}
+
+function FollowupLink({ t }: { t: Ticket }) {
+  const go = useGo();
+  const link = t.followupLink;
+  if ((!link || link.dismissed) && !t.followupContextStale) return null;
+  return <section aria-label="후속 문의 연결" className="min-w-0 rounded-2xl border border-info/50 bg-info/5 p-5 text-foreground shadow-card">
+    {link && !link.dismissed && <div className="flex flex-wrap items-center gap-5">
+      <div className="flex min-w-0 flex-1 items-start gap-3.5">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-info/10 text-info"><Link2 className="size-5" aria-hidden="true" /></span>
+        <div className="min-w-0 [overflow-wrap:anywhere]">
+          <h2 className="text-base font-semibold">이전 문의에서 이어진 후속 문의</h2>
+          <p className="mt-2 text-base font-semibold">{link.previous_subject || "이전 문의"}</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{link.previous_ticket_id}</p>
+        </div>
+      </div>
+      <Button variant="outline" size="sm" className="shrink-0 bg-card text-foreground" onClick={() => go.ticket(link.previous_ticket_id)}>이전 문의 보기<ArrowRight className="size-4" aria-hidden="true" /></Button>
+    </div>}
+    {t.followupContextStale && <div className="grid gap-2"><p role="status" className="text-sm text-amber-700">이전 문의 연결이 해제되었습니다. 답변 초안을 재작성한 뒤 발송해 주세요.</p><Button variant="outline" size="sm" className="w-fit bg-card text-foreground" disabled={t.regenerating} onClick={() => void rewriteViaApi(t, "이전 문의 연결을 제외하고 현재 문의와 확인된 근거로 다시 작성해 주세요.", "answer")}>답변 초안 재작성</Button></div>}
+  </section>;
 }
 
 function evidenceCount(t: Ticket) {
@@ -174,14 +167,69 @@ const Attachments = ({ files, t }: { files: string[]; t: Ticket }) => (
   </div>
 );
 
+// 고객이 문의서에 올린 파일 (GET /api/inquiries/{id}/attachments). 사진은 썸네일, 누르면 새 탭에서 원본
+const INLINE = /^image\/(png|jpeg|gif|webp|bmp)$/;
+function UploadedFiles({ ticketId }: { ticketId: string }) {
+  const [rows, setRows] = useState<InquiryAttachment[]>([]);
+  useEffect(() => {
+    let live = true;
+    api.inquiryAttachments(ticketId).then((r) => { if (live) setRows(r); }, () => {});
+    return () => { live = false; };
+  }, [ticketId]);
+  if (!rows.length) return null;
+  return (
+    <div className="grid gap-2">
+      <small className="text-muted-foreground">고객 첨부 {rows.length}건</small>
+      <div className="flex flex-wrap gap-3">
+        {rows.map((a) => {
+          const url = api.attachmentUrl(ticketId, a.attachment_id);
+          return INLINE.test(a.content_type) ? (
+            <a key={a.attachment_id} href={url} target="_blank" rel="noreferrer" title={a.name} className="block w-28 overflow-hidden rounded-xl ring-1 ring-black/10 hover:ring-primary">
+              <img src={url} alt={a.name} loading="lazy" className="aspect-square w-full object-cover" />
+              <span className="block truncate px-2 py-1 text-xs text-muted-foreground">{a.name}</span>
+            </a>
+          ) : (
+            <a key={a.attachment_id} href={url} download={a.name} className={buttonVariants({ size: "sm", variant: "outline" })}><Paperclip />{a.name}</a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 제품군 코드: 서버 분석 값이 있으면 그것, 없으면(로컬 샘플) 제품명으로 짐작한다. */
+const familyCode = (t: Ticket): string => t.apiExtraction?.product_family
+  || (/MCCB|ACB|Breaker/i.test(t.product) ? "LV_BREAKER" : /Transformer/i.test(t.product) ? "TRANSFORMER" : /XGI|PLC/i.test(t.product) ? "PLC" : /HMI/i.test(t.product) ? "HMI" : /ESS/i.test(t.product) ? "ESS" : /Contactor/i.test(t.product) ? "CONTROL" : /iS7|S100|H100|inverter/i.test(t.product) ? "DRIVE" : "");
+const imageName = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
 function Original({ t }: { t: Ticket }) {
   const sample = t.source !== "api" && t.id === SAMPLE;
   const text = t.translate ? (sample ? "iS7 75kW가 운전 명령 직후 E.OC로 트립합니다. 재시작해도 같은 현상이 발생합니다." : t.bodyKo || "한국어 번역이 아직 준비되지 않았습니다. 원문을 확인해 주세요.") : sourceInquiry(t);
+  const family = familyCode(t), files = [...new Set([...(t.files || []), ...(sample ? ["event_log.csv", "params.bak"] : [])])];
   return (
     <Message role="customer" label="고객 문의" title={t.company} right={<small className="text-muted-foreground">{t.receivedLabel || (t.source === "api" ? "접수 시각 미기록" : `${INQUIRY_AT} UTC`)}</small>}>
-      <div className="flex items-center gap-3"><Tag className="rounded-md">원문 · {t.language}</Tag><button className="text-xs text-info hover:underline" onClick={() => toggleTranslate(t)}>{t.translate ? "원문 보기" : "한국어 번역"}</button></div>
-      <p className="leading-relaxed">{text}</p>
-      {sample && <><p className="text-muted-foreground">FW 4.00 · 부하 69% · 재시작 후 반복</p><Attachments t={t} files={["event_log.csv", "params.bak"]} /></>}
+      <div className="mt-3 grid gap-8">
+        <dl className="grid grid-cols-3 gap-4 rounded-2xl bg-muted/60 px-6 py-5 text-sm max-[900px]:grid-cols-1">
+          <div className="grid gap-1"><dt className="text-xs text-muted-foreground">제품군</dt><dd className="font-semibold">{(family && FAMILY_KO[family]) || "제품군 미확인"}</dd></div>
+          <div className="grid gap-1"><dt className="text-xs text-muted-foreground">제품</dt><dd className="font-semibold">{t.product}</dd></div>
+          <div className="grid gap-1"><dt className="text-xs text-muted-foreground">문의 유형</dt><dd className="font-semibold">{t.type || "미분류"}</dd></div>
+        </dl>
+        <section aria-label="문의 내용" className="grid gap-3.5">
+          <div className="flex items-center gap-3"><h3 className="text-sm font-medium">문의 내용</h3><Tag className="rounded-md">원문 · {t.language}</Tag><button className="text-xs text-info hover:underline" onClick={() => toggleTranslate(t)}>{t.translate ? "원문 보기" : "한국어 번역"}</button></div>
+          <div className="rounded-2xl bg-muted/60 px-5 py-4 text-base leading-[1.8]">{text}</div>
+          {sample && <p className="text-sm text-muted-foreground">FW 4.00 · 부하 69% · 재시작 후 반복</p>}
+        </section>
+        {t.source === "api" ? <UploadedFiles ticketId={t.id} /> : (
+          <section aria-label="첨부 자료" className="grid gap-3.5">
+            <h3 className="text-sm font-medium">첨부 자료 {files.length ? `${files.length}건` : ""}</h3>
+            {files.length ? (
+              <div className="flex flex-wrap gap-2">
+                {files.map((f) => <Button key={f} size="sm" variant="outline" onClick={() => openModal("file", { file: f, id: t.id })}>{imageName.test(f) ? <ImageIcon /> : <Paperclip />}{f}</Button>)}
+              </div>
+            ) : <p className="text-sm text-muted-foreground">고객이 첨부한 자료가 없습니다.</p>}
+          </section>
+        )}
+      </div>
     </Message>
   );
 }
@@ -243,12 +291,20 @@ function Completed({ t }: { t: Ticket }) {
 
 /** 작성 카드: 화면 아래에 붙어 있고, 내용이 길면 카드 안에서만 스크롤된다. 영어로 쓴 초안을 검토·수정하고, AI 에게 수정을 지시하고, 승인한다. */
 function Editor({ t }: { t: Ticket }) {
-  const [folded, setFolded] = useState(false);
   if (t.activeComposer === "expert") return <ExpertEditor t={t} />;
   if (!t.draft && !t.composerOpen) return null;
   const manual = isManualReplyTicket(t);
   const isRequestDraft = t.purpose === "request", expertWaiting = waitingReviews(t).length > 0 || !!t.legacyReviewPending;
   // 전문부서 회신을 기다리는 동안은 고객 답변 작성칸을 열지 않는다(회신을 보고 써야 하므로). 고객에게 보내는 질의서는 해당 없음.
+  if (!isRequestDraft && expertPhase(t) === "review" && !t.sent && t.stage !== 5 && !t.specialistFollowup) {
+    return (
+      <Card className="grid justify-items-center gap-2 p-8 text-center">
+        <strong className="text-base">전문부서 회신이 도착했습니다</strong>
+        <p className="text-sm text-muted-foreground">회신이 요청에 맞는지 확인한 뒤 답변에 반영하세요. 부족하면 추가 질의나 고객 자료 요청으로 돌아갈 수 있습니다.</p>
+        <Button className="mt-1" onClick={() => openExpertReview(t)}>회신 검토</Button>
+      </Card>
+    );
+  }
   if (!isRequestDraft && expertWaiting && !t.sent && t.stage !== 5) {
     return (
       <Card className="grid gap-1.5 p-8 text-center">
@@ -261,22 +317,24 @@ function Editor({ t }: { t: Ticket }) {
   const isNew = contextIsNew(t), isRequest = (t.purpose || live.purpose) === "request";
   const lang = customerLanguage(t), busy = !!t.regenerating || !!t.sending;
   return (
-    <Card id="answer-editor" className="scroll-mt-6 gap-0 p-0 shadow-float ring-1 ring-black/5">
+    <Card id="answer-editor" className="min-w-0 scroll-mt-6 gap-0 p-0 shadow-float ring-1 ring-black/5">
       <div className="flex items-center justify-between gap-4 px-8 pb-3 pt-7">
-        <h2 className="flex items-center gap-3 text-xl font-bold">{isRequest ? "고객 질의서 작성" : "고객 답변 작성"}
-          {t.draft && <button type="button" aria-expanded={!folded} onClick={() => setFolded((v) => !v)} className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"><ChevronDown className={cn("size-3.5 transition-transform", folded && "-rotate-90")} aria-hidden />{folded ? "펼치기" : "접기"}</button>}
+        <h2 className="flex items-center gap-3 text-base font-semibold"><span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-[#d6336c]/10 px-3 text-[13px] font-medium text-[#c2255c]"><Headset className="size-3.5" aria-hidden />{isRequest ? "관리자 질의" : "관리자 답변"}</span>{isRequest ? "고객 질의서 작성" : "고객 답변 작성"}
         </h2>
         <div className="flex items-center gap-2 text-sm text-muted-foreground"><span>작성 English</span><span>→ 고객 언어 <b className="font-medium text-foreground">{lang}</b></span></div>
       </div>
-      {!folded && (
-        <div className="grid gap-6 px-8 pb-7 pt-2">
-          {t.draft ? <Sources c={used} /> : live.purpose === "request" ? <Sources c={live} /> : null}
+      {(
+        <div className="grid min-w-0 grid-cols-1 gap-6 px-8 pb-7 pt-2 *:min-w-0">
+          {isRequest && t.copilot && <div><Button variant="outline" size="sm" disabled={busy} onClick={() => openModal("request-plan", { id: t.id })}>요청 항목 선택</Button></div>}
+          {t.draft ? <Sources c={used} t={t} /> : live.purpose === "request" ? <Sources c={live} t={t} /> : null}
           {isNew && <div className="rounded-2xl bg-warning/15 px-5 py-3 text-sm text-warning-ink">{t.source === "api" && (t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0) ? "새 전문부서 회신을 반영해 AI에게 답변 재작성을 요청한 뒤 검토하세요. 기존 초안은 보존됩니다." : "새 자료가 도착했습니다. 작성 중인 내용과 함께 확인해 주세요."}</div>}
           {t.draft || manual ? (
             <>
               <div className="grid gap-3">
-                <div className="flex items-center gap-2.5 text-sm font-medium">{!manual && <AiMark />}{manual ? "담당자 작성 · 영어 답변" : `미발송 초안 · v${t.draftVersion || 1}`}{!manual && isEdited(t) && <Tag tone="amber">AI 초안에서 수정됨</Tag>}{busy && <small className="font-normal text-info">AI가 다시 만드는 중…</small>}</div>
-                <Textarea aria-label="영어 초안" disabled={busy} className="min-h-36 max-h-56 rounded-2xl border-0 bg-muted/60 px-5 py-4 text-base leading-[1.8]" value={t.draft} onChange={(e) => editDraft(t, e.target.value)} />
+                <div className="flex items-center gap-2.5 text-sm font-medium">{!manual && <AiMark />}{manual ? "담당자 작성 · 영어 답변" : `미발송 초안 · v${t.draftVersion || 1}`}{!manual && isEdited(t) && <Tag tone="amber">AI 초안에서 수정됨</Tag>}{busy && <small className="font-normal text-info">AI가 다시 만드는 중…</small>}
+                  {manual && <Button type="button" size="sm" variant="outline" className="ml-auto" disabled={busy || !!t.aiDrafting || expertWaiting} title={expertWaiting ? "전문부서 회신을 모두 등록한 뒤 만들 수 있습니다" : "처음 문의와 전문부서 회신을 바탕으로 영어 초안을 만듭니다"}
+                    onClick={() => { if (t.draft?.trim() && !window.confirm("작성 중인 내용을 AI 초안으로 바꿉니다. 계속할까요?")) return; void manualDraftViaApi(t); }}><AiMark className="size-3.5" />{t.aiDrafting ? "초안 작성 중…" : "AI 초안 작성"}</Button>}</div>
+                <Textarea aria-label="영어 초안" disabled={busy} className="field-sizing-fixed min-w-0 min-h-36 max-h-56 rounded-2xl border-0 bg-muted/60 px-5 py-4 text-base leading-[1.8]" value={t.draft} onChange={(e) => editDraft(t, e.target.value)} />
               </div>
               {!manual && <RewriteBox t={t} busy={busy} />}
               {hasCurrentReplyPreview(t) && <section className="grid gap-2 rounded-2xl bg-muted/60 p-5">
@@ -303,8 +361,11 @@ function Editor({ t }: { t: Ticket }) {
           {hasCurrentReplyPreview(t) ? (
             <Button size="lg" className="px-6" disabled={!canSend(t) || busy} onClick={() => canSend(t) && openModal("send", { id: t.id })}>발송하기</Button>
           ) : (
-            <Button variant="outline" size="lg" disabled={busy || t.translatingReply} onClick={() => void prepareCustomerReply(t)}>{t.translatingReply ? "변환 중…" : "고객 언어로 변환"}</Button>
+            <Button variant="outline" size="lg" disabled={busy || t.translatingReply || (!isRequestDraft && t.followupContextStale)} onClick={() => void prepareCustomerReply(t)}>{t.translatingReply ? "변환 중…" : "고객 언어로 변환"}</Button>
           )}
+        </div>}
+        {!t.draft && !manual && <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button size="lg" className="px-6" disabled={busy || t.expertDraftLoading} onClick={() => composeFromCopilot(t, isRequest ? "request" : "answer")}>{busy ? "작성 중…" : isRequest ? "질의서 작성" : "답변 초안 작성"}</Button>
         </div>}
       </div>
     </Card>
@@ -320,6 +381,7 @@ function RewriteBox({ t, busy }: { t: Ticket; busy: boolean }) {
   return (
     <section aria-label="AI에게 수정 요청" className="grid gap-3">
       <form className="flex items-center gap-3" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <AiMark />
         <Input aria-label="수정 지시" className="h-11 flex-1 rounded-full border-0 bg-muted/60 px-5 text-[15px]" disabled={busy} placeholder="AI에게 수정 요청 (예: 더 정중하게, 원인은 확정이 아니라고 분명히)" value={ask} onChange={(e) => setAsk(e.target.value)} />
         <Button type="submit" size="lg" variant="secondary" disabled={busy || !ask.trim()}>{busy ? "만드는 중…" : "다시 생성"}</Button>
       </form>
@@ -330,8 +392,13 @@ function RewriteBox({ t, busy }: { t: Ticket; busy: boolean }) {
     </section>
   );
 }
-function Sources({ c }: { c: any }) {
-  if (c.purpose === "request") return <div className="flex flex-wrap gap-2">{c.missingInfo.map((v: string) => <Tag key={v}>{v}</Tag>)}</div>;
+function Sources({ c, t }: { c: any; t: Ticket }) {
+  if (c.purpose === "request") {
+    const workflow = t.copilot?.workflow;
+    const fields = workflow?.mode === "customer_request"
+      ? workflow.request_fields.map((field: string) => t.fieldLabels?.[field] || field) : c.missingInfo;
+    return <div className="flex flex-wrap gap-2">{fields.map((v: string) => <Tag key={v}>{v}</Tag>)}</div>;
+  }
   if (!c.references.length) return null;
   return <Disclosure title={`사용한 근거 ${c.references.length}건`}><div className="flex flex-wrap gap-2">{c.references.map((r: any) => <Tag key={r.id}>{r.label}</Tag>)}</div></Disclosure>;
 }
@@ -346,21 +413,23 @@ function ExpertEditor({ t }: { t: Ticket }) {
         const d = new FormData(e.currentTarget);
         submitExpertRequest(t, { department: String(d.get("department")), channel: String(d.get("channel")), body: t.expertDraft || "", files: checked });
       }}>
-        <div className="flex items-center justify-between"><h2 className="text-lg font-bold">전문부서 요청서 작성 · 한국어</h2><Button type="button" size="sm" variant="ghost" onClick={() => closeComposer(t)}>닫기</Button></div>
+        <div className="flex items-center justify-between"><h2 className="flex items-center gap-2.5 text-lg font-bold">{t.source === "api" && <AiMark />}전문부서 요청서 작성 · 한국어</h2><Button type="button" size="sm" variant="ghost" onClick={() => closeComposer(t)}>닫기</Button></div>
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">대상 부서</span>
-            <NativeSelect disabled={t.specialistSaving} name="department" value={t.expertDraftDepartment || expertDepartments[0]} onChange={(e) => { t.expertDraftDepartment = e.target.value; commit(); if (t.source === "api") void escalationDraftViaApi(t, e.target.value); }}>{expertDepartments.map((n) => <option key={n}>{n}</option>)}</NativeSelect></label>
+            <NativeSelect disabled={t.specialistSaving || t.expertDraftLoading} name="department" value={t.expertDraftDepartment || expertDepartments[0]} onChange={(e) => { t.expertDraftDepartment = e.target.value; commit(); if (t.source === "api") void escalationDraftViaApi(t, e.target.value); }}>{expertDepartments.map((n) => <option key={n}>{n}</option>)}</NativeSelect></label>
           <label className="grid gap-1.5 text-sm"><span className="text-muted-foreground">전달 방식</span><NativeSelect disabled={t.specialistSaving} name="channel" defaultValue="이메일"><option>이메일</option><option>기업 메신저</option></NativeSelect></label>
         </div>
-        {t.expertDraftLoading && <small className="text-muted-foreground">AI가 요청서 초안을 쓰는 중이에요…</small>}
+        {t.expertDraftLoading && <small className="flex items-center gap-2 text-muted-foreground"><AiMark />AI가 요청서 초안을 쓰는 중이에요…</small>}
         <Textarea disabled={t.specialistSaving} aria-label="전문부서 요청서" required className="min-h-32 max-h-44 leading-relaxed" value={t.expertDraft || ""} onChange={(e) => { t.expertDraft = e.target.value; commit(); }} />
-        <fieldset className="grid gap-2 rounded-xl bg-background p-4"><legend className="px-1 text-sm text-muted-foreground">전달한 자료</legend>
+        <div role="group" aria-labelledby="expert-files-label" className="grid gap-1.5 text-sm"><span id="expert-files-label" className="text-muted-foreground">전달한 자료</span>
+          <div className="grid gap-2 rounded-xl border bg-background p-4">
           {files.length ? files.map((f) => (
             <label key={f} className="flex items-center gap-2 text-sm"><Checkbox checked={checked.includes(f)} onCheckedChange={(v) => { t.expertDraftFiles = v === true ? [...checked, f] : checked.filter((x) => x !== f); commit(); }} />{f}</label>
           )) : <small className="text-muted-foreground">등록된 첨부자료 없음</small>}
-        </fieldset>
+          </div>
+        </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" required className="size-4 accent-[var(--primary)]" />요청 내용과 전달 자료를 확인했습니다.</label>
-        <div className="flex items-center justify-between"><small className="text-muted-foreground">외부 전달 후 요청을 기록합니다.</small><Button type="submit" disabled={t.specialistSaving || t.expertDraftLoading}>{t.specialistSaving ? "저장 중…" : "검토 요청 기록"}</Button></div>
+        <div className="flex items-center justify-between"><small className="text-muted-foreground">외부 전달 후 요청을 기록합니다.</small><Button type="submit" disabled={t.specialistSaving || t.expertDraftLoading}>{t.specialistSaving ? "저장 중…" : "검토 요청"}</Button></div>
       </form>
     </Card>
   );
@@ -417,14 +486,27 @@ function Disclosure({ title, count, children, defaultOpen }: { title: ReactNode;
 
 const SECTION_TONE = { info: "bg-info/10 text-info", navy: "bg-[#003377]/10 text-[#003377]", success: "bg-success/10 text-success" } as const;
 /** Copilot 구역: 접지 않고 항상 보인다. 아이콘 색과 제목만 다르다. */
-function PanelBlock({ icon: Icon, tone, title, count, children }: { icon: LucideIcon; tone: keyof typeof SECTION_TONE; title: ReactNode; count?: ReactNode; children: ReactNode }) {
+function PanelBlock({ icon: Icon, tone, title, count, foldable, children }: { icon: LucideIcon; tone: keyof typeof SECTION_TONE; title: ReactNode; count?: ReactNode; foldable?: boolean; children: ReactNode }) {
+  const head = (
+    <>
+      <span className={cn("grid size-8 place-items-center rounded-full", SECTION_TONE[tone])}><Icon className="size-[18px]" aria-hidden /></span>{title}
+      {count && <span className="ml-auto text-sm font-normal text-muted-foreground">{count}</span>}
+      {foldable && <ChevronDown className={cn("size-4 text-muted-foreground transition-transform group-open/fold:rotate-180", !count && "ml-auto")} aria-hidden />}
+    </>
+  );
   return (
     <section aria-label={typeof title === "string" ? title : undefined} className="py-6">
-      <h3 className="mb-4 flex items-center gap-2.5 text-base font-semibold">
-        <span className={cn("grid size-8 place-items-center rounded-full", SECTION_TONE[tone])}><Icon className="size-[18px]" aria-hidden /></span>{title}
-        {count && <span className="ml-auto text-sm font-normal text-muted-foreground">{count}</span>}
-      </h3>
-      {children}
+      {foldable ? (
+        <details open className="group/fold">
+          <summary className="mb-4 flex cursor-pointer list-none items-center gap-2.5 text-base font-semibold [&::-webkit-details-marker]:hidden"><h3 className="contents">{head}</h3></summary>
+          {children}
+        </details>
+      ) : (
+        <>
+          <h3 className="mb-4 flex items-center gap-2.5 text-base font-semibold">{head}</h3>
+          {children}
+        </>
+      )}
     </section>
   );
 }
@@ -435,26 +517,23 @@ const LinkRow = ({ label, hint, onClick }: { label: ReactNode; hint?: ReactNode;
   </button>
 );
 
+
 /** AI Copilot: 오른쪽에 붙어서 따라 내려온다. 핵심만: 문의 요약 · 현재 판단(행동 버튼) · 전문부서 · 근거. */
 function Copilot({ t }: { t: Ticket }) {
-  const go = useGo();
+  const insight = useCopilot(t);
   const c = answerContext(t), sum = inquirySummary(t), j = judgment(t), next = nextAction(t);
   const requests = referralRows().filter((r) => r.ticket.id === t.id);
-  // 근거: 눌러서 이동하지 않고, 이름 아래에 핵심만 한두 줄로 보여 준다.
-  const evidence: { key: string; label: React.ReactNode; hint: string; summary: string }[] = [
-    ...Object.entries(c.analysis.fieldEvidence).map(([field, text]) => ({ key: `field:${field}`,
-      label: t.fieldLabels?.[field] || field,
-      hint: ["customer", "customer_form"].includes(c.analysis.fieldSources[field]) ? "고객 입력값" : c.analysis.fieldSources[field] === "staff" ? "담당자 확인" : "추출 근거",
-      summary: String(text) })),
-    ...Object.entries(c.analysis.unconfirmed).map(([field, reason]) => ({ key: `unconfirmed:${field}`,
-      label: t.fieldLabels?.[field] || field, hint: "미확인",
-      summary: [reason, t.apiExtraction?.unconfirmed_evidence?.[field]].filter(Boolean).join(" · ") })),
-    ...c.expertReferences.map((r: any) => ({ key: r.id, label: r.label, hint: "회신", summary: String(r.text || "") })),
-    ...c.technical.documents.map((d: any) => ({ key: d.id, label: d.label, hint: "기술문서", summary: String(d.text || "") })),
-    ...c.technical.similarCases.map((r: any) => ({ key: r.id, label: <>유사 사례 <Mono>{r.id}</Mono></>, hint: r.path ? "그래프 경로" : r.matches ? "조건 유사" : "조건 차이", summary: r.path ? `경로: ${r.path}` : r.text || `원인: ${r.cause} → 조치: ${r.action}` })),
-  ];
-  const open = t.stage !== 5 && !t.sent;
   const choice = branchChoice(t);
+  const presentation = copilotPresentation(t, choice);
+  const requestRows = presentation.requestRows;
+  const suggested = referralSuggestions(t);
+  const reason = presentation.showNextReason ? insight.data?.reading?.next_reason : null;
+  // Customer facts belong to the summary/request checklist; case comparisons have their own section.
+  // Only actual documents and specialist replies belong in the technical sources list.
+  const evidence = presentation.showTechnicalContext ? [
+    ...c.expertReferences.map((r: any) => ({ key: r.id, label: r.label, hint: "전문부서 회신", summary: String(r.text || "") })),
+    ...c.technical.documents.map((d: any) => ({ key: d.id, label: d.label, hint: "기술문서", summary: String(d.text || "") })),
+  ] : [];
   const BRANCH: Record<Choice, [string, () => void]> = {
     answer: [isManualReplyTicket(t) && !t.draft ? "담당자 답변 작성·검토" : "답변 초안 작성", () => composeFromCopilot(t, "answer")],
     expert: ["전문부서 요청서 작성", () => openExpertComposer(t)],
@@ -463,34 +542,59 @@ function Copilot({ t }: { t: Ticket }) {
   const branches = choice ? [choice, ...(["answer", "expert", "request"] as Choice[]).filter((x) => x !== choice)] : [];
   const showNext = !!next && next.label !== "영어 초안 검토하기"; // 작성 카드가 바로 옆에 있어 같은 곳으로 보내는 버튼은 뺀다
   return (
-    <aside aria-label="AI Copilot" className="m-4 ml-0 rounded-3xl bg-gradient-to-b from-[#026bb4]/[0.10] via-card via-[140px] to-card px-7 pb-3 pt-7 shadow-card max-[1359px]:mx-12 max-[1359px]:mb-12 max-[1359px]:mt-0 min-[1360px]:sticky min-[1360px]:top-4 min-[1360px]:max-h-[calc(100dvh-2rem)] min-[1360px]:overflow-y-auto">
+    <aside aria-label="AI Copilot" tabIndex={0} className="m-4 ml-0 min-h-0 min-w-0 rounded-3xl bg-gradient-to-b from-[#026bb4]/[0.10] via-card via-[140px] to-card px-7 pb-3 pt-7 shadow-card max-[1359px]:mx-12 max-[1359px]:mb-12 max-[1359px]:mt-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 min-[1360px]:h-[calc(100%-2rem)] min-[1360px]:overflow-y-auto min-[1360px]:overscroll-contain">
       <div className="mb-2 flex items-center gap-2.5"><AiMark /><h2 className="text-xl font-bold">AI Copilot</h2></div>
       <div className="divide-y">
-        <PanelBlock icon={FileText} tone="info" title="문의 요약">
-          <div className="grid gap-2.5 text-[15px] leading-[1.7]">{sum.lines.map((l, i) => <p key={i}>{l}</p>)}</div>
-          {t.apiExtraction?.safety_review_required && <p className="mt-2 text-sm text-warning-ink">안전 관련 담당자 검토가 필요합니다.</p>}
-          {!!c.analysis.issues.length && <p className="mt-2 break-words text-xs text-muted-foreground">분석 검토 항목: {c.analysis.issues.join(" · ")}</p>}
-        </PanelBlock>
-        <PanelBlock icon={Compass} tone="navy" title="현재 판단">
+        <PanelBlock icon={Compass} tone="navy" title="현재 할 일">
           <div className="rounded-2xl bg-[#003377]/[0.06] p-5">
             <p className="text-[17px] font-semibold leading-snug tracking-[-0.01em]">{j.title}</p>
             <p className="mt-1.5 text-[15px] leading-[1.65] text-muted-foreground">{j.task}</p>
+            {reason && <div className="mt-3 border-t border-border pt-3"><p className="mb-1 text-sm font-medium">{presentation.reasonTitle}</p><Statement value={reason} sources={insight.data!.sources} /></div>}
             {j.note && <p className="mt-2 flex items-center gap-1.5 text-sm text-warning-ink"><Clock className="size-4" aria-hidden />{j.note}</p>}
-            {j.missing.length > 0 && <ul className="mt-3 grid gap-1.5 text-[15px]">{j.missing.map((x) => <li key={x} className="flex items-center gap-2"><span aria-hidden className="size-1.5 rounded-full bg-warning" />{x}</li>)}</ul>}
-            {t.specialistFollowup?.confirmation && <p className="mt-2 text-sm text-success">{t.specialistFollowup.confirmation.reviewer} · 전문부서 검토 결과 확인 완료</p>}
+            {requestRows.length === 0 && j.missing.length > 0 && <ul className="mt-3 grid gap-1.5 text-[15px]">{j.missing.map((x) => <li key={x} className="flex items-center gap-2"><span aria-hidden className="size-1.5 rounded-full bg-warning" />{x}</li>)}</ul>}
+            {t.specialistFollowup?.confirmation && <p className="mt-2 text-xs font-bold text-success">{t.specialistFollowup.confirmation.reviewer} · 전문부서 검토 결과 확인 완료</p>}
             {(choice || showNext) && (
               <div className="mt-5 grid gap-2.5">
-                {choice ? branches.map((k, i) => <Button key={k} className="w-full" variant={i === 0 ? "default" : "outline"} onClick={BRANCH[k][1]}>{BRANCH[k][0]}</Button>)
+                {choice ? <>
+                  {t.draft && t.composerOpen && next ? <Button className="w-full" disabled={next.waiting || t.regenerating} onClick={next.run}>{next.label}</Button> : null}
+                  {branches.filter((k) => !(t.draft && t.composerOpen && next && k === choice)).map((k, i) => <Button key={k} className="w-full" title={k === "expert" && pendingCustomerInfo(t) > 0 ? "고객 정보 확인이 끝나야 전문부서에 요청할 수 있습니다" : undefined} disabled={t.regenerating || t.expertDraftLoading || (k === "expert" && pendingCustomerInfo(t) > 0)} variant={i === 0 && !(t.draft && t.composerOpen && next) ? "default" : "outline"} onClick={BRANCH[k][1]}>{BRANCH[k][0]}</Button>)}
+                </>
                   : next && <Button className="w-full" disabled={next.waiting} variant={next.waiting ? "outline" : "default"} onClick={next.run}>{next.label}</Button>}
               </div>
             )}
           </div>
         </PanelBlock>
-        {open && t.investigationInfo?.missing_fields?.length > 0 && requests.length === 0 && (
-          <PanelBlock icon={Paperclip} tone="info" title="이관 전 권장 자료">
-            <p className="text-sm text-muted-foreground">분석에 도움이 되는 자료입니다. 없는 자료는 확인 필요로 남기고 이관할 수 있습니다.</p>
-            <ul className="mt-2 grid gap-1 text-sm">{t.investigationInfo.missing_fields.map((field: string) => <li key={field}>• {t.fieldLabels?.[field] || field}</li>)}</ul>
-            {["READY_FOR_REVIEW", "ON_HOLD"].includes(t.apiStatus) && !t.manualReply && t.owner && t.customerRequestStatus !== "waiting" && <Button className="mt-3 w-full" variant="outline" disabled={t.regenerating} onClick={() => requestInvestigationInfo(t)}>권장 자료 요청문 작성</Button>}
+        {escalationRecommended(t) && t.activeComposer !== "expert" && (
+          <PanelBlock icon={Building2} tone="navy" title={pendingCustomerInfo(t) > 0 || t.customerRequestStatus === "waiting" ? "전문부서 이관 예상" : "전문부서 이관 권장"} count={t.escalationAdvice.source === "ai" ? "AI 판단" : "규칙"}>
+            <div className="grid gap-2 text-sm leading-relaxed">
+              <p className="font-medium">{DEPT_LABEL[t.escalationAdvice.to_dept] || t.escalationAdvice.to_dept}</p>
+              {t.escalationAdvice.reason && <p>{t.escalationAdvice.reason}</p>}
+              {t.escalationAdvice.quote && <p className="break-words text-muted-foreground">고객 문의: “{t.escalationAdvice.quote}”</p>}
+              {(pendingCustomerInfo(t) > 0 || t.customerRequestStatus === "waiting") && <p className="text-muted-foreground">고객 자료를 받으면 이관 여부를 다시 판단합니다.</p>}
+            </div>
+          </PanelBlock>
+        )}
+        {t.followupLink && !t.followupLink.dismissed && (
+          <PanelBlock icon={BookOpen} tone="info" title="이전 문의와의 연결 근거">
+            <FollowupEvidence link={t.followupLink} />
+          </PanelBlock>
+        )}
+        {requestRows.length > 0 && (
+          <PanelBlock icon={Paperclip} tone="info" title={presentation.reasonTitle}>
+            <RequestChecklist rows={requestRows} data={insight.data} />
+          </PanelBlock>
+        )}
+        <PanelBlock icon={FileText} tone="info" title="문의 요약">
+          {insight.data?.reading ? <ReadingSummary data={insight.data} showUnresolved={presentation.showUnresolved} omitChangedFields={requestRows.map((row: { field: string }) => row.field)} /> : <div className="grid gap-2.5 rounded-2xl bg-[#026bb4]/[0.06] p-4 text-[15px] leading-[1.7]">{sum.lines.slice(0, 2).map((l, i) => <p key={i}>{l}</p>)}</div>}
+          <InsightStatus busy={insight.busy} error={insight.error} retry={insight.retry} />
+          {t.apiExtraction?.safety_review_required && <p className="mt-2 text-sm text-warning-ink">안전 관련 담당자 검토가 필요합니다.</p>}
+          {!!c.analysis.issues.length && <p className="mt-2 break-words text-xs text-muted-foreground">분석 검토 항목: {c.analysis.issues.join(" · ")}</p>}
+        </PanelBlock>
+        {suggested.length > 0 && (
+          <PanelBlock icon={Paperclip} tone="info" title="이관 준비 · 추가로 확인할 자료">
+            <p className="text-sm text-muted-foreground">이관 요청서에 이미 확보한 정보는 포함되어 있습니다. 아직 받지 못한 권장 자료는 질의서에 기본 포함됩니다. 고객이 제공할 수 없는 자료는 사유를 남기고 이관할 수 있습니다.</p>
+            <ul className="mt-2 grid gap-1 text-sm">{suggested.map((row: { field: string; label: string }) => <li key={row.field}>• {row.label}</li>)}</ul>
+            {["READY_FOR_REVIEW", "ON_HOLD"].includes(t.apiStatus) && !t.manualReply && t.owner && t.customerRequestStatus !== "waiting" && <Button className="mt-3 w-full" variant="outline" disabled={t.regenerating} onClick={() => requestInvestigationInfo(t)}>필요한 자료 선택·요청문 작성</Button>}
           </PanelBlock>
         )}
         {requests.length > 0 && (
@@ -502,11 +606,25 @@ function Copilot({ t }: { t: Ticket }) {
             </ul>
           </PanelBlock>
         )}
+        {presentation.showTechnicalContext && !!insight.data?.reading?.cases.length && (
+          <PanelBlock icon={BookOpen} tone="info" title="비슷한 과거 문의">
+            <CaseComparisons data={insight.data} showHeading={false} />
+          </PanelBlock>
+        )}
+        {presentation.showTechnicalContext && !insight.data?.reading?.cases.length && c.technical.similarCases.length > 0 && (
+          <PanelBlock icon={BookOpen} tone="info" title="검색된 과거 문의">
+            <p className="mb-3 text-sm text-muted-foreground">현재 문의와의 조건 비교는 아직 확인되지 않았습니다.</p>
+            <ul className="grid gap-3 rounded-2xl bg-muted/60 p-4">{c.technical.similarCases.map((item: any) => <li key={item.id} className="min-w-0">
+              <p className="break-words text-sm font-semibold">{item.label || item.id}</p>
+              <details className="mt-2 text-sm text-muted-foreground"><summary className="cursor-pointer">사례 원문 보기</summary><p className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere]">{item.text}</p></details>
+            </li>)}</ul>
+          </PanelBlock>
+        )}
         {evidence.length > 0 && (
-          <PanelBlock icon={BookOpen} tone="success" title="근거" count={`${evidence.length}건`}>
-            <ul className="-mx-3 grid">{evidence.slice(0, 4).map((e) => <li key={e.key} className="grid gap-1 px-3 py-2.5">
-              <span className="flex items-center justify-between gap-3"><span className="min-w-0 truncate text-[15px] font-medium">{e.label}</span><span className="shrink-0 text-xs text-muted-foreground">{e.hint}</span></span>
-              {e.summary && <span className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{e.summary}</span>}
+          <PanelBlock icon={BookOpen} tone="success" title="참고한 자료" foldable count={`${evidence.length}건`}>
+            <ul className="grid min-w-0 rounded-2xl bg-muted/60 p-2">{evidence.slice(0, 4).map((e) => <li key={e.key} className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 px-3 py-2.5">
+              <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3"><span className="min-w-0 whitespace-normal text-[15px] font-medium [overflow-wrap:anywhere]">{e.label}</span><span className="max-w-20 whitespace-normal text-right text-xs text-muted-foreground [overflow-wrap:anywhere]">{e.hint}</span></span>
+              {e.summary && <span className="min-w-0 [overflow-wrap:anywhere] line-clamp-2 text-sm leading-relaxed text-muted-foreground">{e.summary}</span>}
             </li>)}</ul>
             {evidence.length > 4 && <p className="mt-1 px-3 text-xs text-muted-foreground">외 {evidence.length - 4}건</p>}
           </PanelBlock>

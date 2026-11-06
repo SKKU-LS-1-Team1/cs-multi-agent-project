@@ -17,9 +17,13 @@ export const FRONTLINE = "글로벌 C/S 센터";
 
 export const people: Person[] = [
   { name: "Minji Park", userId: ACCOUNTS.find((a) => a.name === "Minji Park")!.userId, rank: "과장", department: FRONTLINE, capacity: 6, available: true },
-  { name: "Doyeon Kim", userId: ACCOUNTS.find((a) => a.name === "Doyeon Kim")!.userId, rank: "팀장", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Doyeon Kim", userId: ACCOUNTS.find((a) => a.name === "Doyeon Kim")!.userId, rank: "팀장", department: FRONTLINE, capacity: 30, available: true },
   { name: "Jun Lee", userId: ACCOUNTS.find((a) => a.name === "Jun Lee")!.userId, rank: "대리", department: FRONTLINE, capacity: 6, available: true },
   { name: "Hana Choi", userId: ACCOUNTS.find((a) => a.name === "Hana Choi")!.userId, rank: "사원", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Sora Jung", userId: ACCOUNTS.find((a) => a.name === "Sora Jung")!.userId, rank: "대리", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Daniel Han", userId: ACCOUNTS.find((a) => a.name === "Daniel Han")!.userId, rank: "사원", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Yuna Kang", userId: ACCOUNTS.find((a) => a.name === "Yuna Kang")!.userId, rank: "사원", department: FRONTLINE, capacity: 6, available: true },
+  { name: "Minho Seo", userId: ACCOUNTS.find((a) => a.name === "Minho Seo")!.userId, rank: "사원", department: FRONTLINE, capacity: 6, available: true },
 ];
 
 const phraseMap: Record<string, string> = {
@@ -67,22 +71,24 @@ export const cases: CaseRow[] = caseCatalog.map((r) => ({
 export const openTickets = () => tickets.filter((t) => t.stage !== 5);
 export const ownedTickets = (owner = signedIn) => openTickets().filter((t) => t.owner === owner);
 export const scopeTickets = (scope: string): Ticket[] =>
-  scope === "내 담당" ? tickets.filter((t) => t.owner === signedIn) // 내가 완료한 것도 포함(목록의 "완료" 묶음에 나온다)
+  scope === "내 담당" ? ownedTickets() // 진행 중인 내 문의만. 완료한 건은 "완료 문의" 탭에서 본다.
   : scope === "답변 준비" ? openTickets().filter(awaitingReview)
-  : openTickets(); // "전체"는 진행 중인 문의만. 완료한 건은 "완료 문의" 탭(그리고 내 것은 "내 담당")에서 본다.
+  : openTickets(); // "전체"는 진행 중인 문의만. 완료한 건은 "완료 문의" 탭에서 본다.
 
 export function resource(p: Person, excludeId?: string) {
   const count = ownedTickets(p.name).filter((t) => t.id !== excludeId).length;
   return { count, capacity: p.capacity, free: Math.max(0, p.capacity - count), ratio: count / p.capacity };
 }
 // BACKEND: 담당자 배정
-// 규칙: 모든 담당자가 동등하게 응대할 수 있다고 보고 수용량(부하)만 확인한다. 가득 찬 담당자와 배정 제외 상태는 막고, 추천은 미완료 건수가 가장 적은 사람.
+// 규칙: 모든 담당자가 동등하게 응대할 수 있다고 보고 수용량(부하)만 확인한다. 가득 찬 담당자와 배정 제외 상태는 막는다.
+//       추천은 팀장이 수용량까지 먼저 받고(시연, 백엔드 agents.csv priority 와 같다), 그다음 부하가 가장 낮은 사람.
 // 필요: 담당자별 미완료 건수·수용량·배정 제외 여부 조회, 담당자 변경 API(되돌리기 포함). 지금: people 상수와 로컬 문의로 계산한다.
-/** 배정 가능한 담당자: 모두 동등하게 응대할 수 있다는 전제로, 배정 제외가 아니고 수용량에 여유가 있는 사람. 부하가 가장 낮은 순. */
+/** 배정 가능한 담당자: 배정 제외가 아니고 수용량에 여유가 있는 사람. 팀장이 먼저, 그다음 부하가 가장 낮은 순. */
 export function candidates(excludeId?: string) {
+  const lead = (p: Person) => (p.name === teamLead ? 0 : 1);
   return people
     .filter((p) => p.available && resource(p, excludeId).free > 0)
-    .sort((a, b) => resource(a, excludeId).ratio - resource(b, excludeId).ratio || a.name.localeCompare(b.name));
+    .sort((a, b) => lead(a) - lead(b) || resource(a, excludeId).ratio - resource(b, excludeId).ratio || a.name.localeCompare(b.name));
 }
 /** 배정 검증은 부하만 본다(제품 역량·언어·부서는 따지지 않는다). */
 export function checkAssign(t: Ticket, p: Person): { ok: boolean; reason?: string } {
@@ -148,15 +154,43 @@ export function record(t: Ticket, kind: string, text: string, extra: Record<stri
   save();
 }
 export const waitingReviews = (t: Ticket) => t.events.filter((e) => e.kind === "escalation" && (t.source !== "api" || e.source === "specialist-api") && !t.events.some((r) => r.kind === "expert" && r.requestId === e.id));
+/** 3단계(전문부서)의 하위 상태. 공이 누구에게 있는지로 나눈다: writing(우리: 요청서 작성) · waiting(전문부서: 회신 대기) · review(우리: 회신 검토) · done(반영 완료) · none(요청 없음).
+ *  C/S 는 한 번에 한 전문부서에만 요청한다(전제). 회신이 오면 review, 추가 질의는 같은 부서에 다시 요청해 writing → waiting 으로 돌아간다.
+ *  방어: 데이터에 요청이 여러 건이면 전부 회신이 와야 review 가 된다. */
+export type ExpertPhase = "none" | "writing" | "waiting" | "review" | "done";
+export function expertPhase(t: Ticket): ExpertPhase {
+  if (t.activeComposer === "expert") return "writing";
+  if (waitingReviews(t).length || t.legacyReviewPending) return "waiting";
+  const replies = t.events.filter((e) => e.kind === "expert" && (t.source !== "api" || e.source === "specialist-api"));
+  if (!replies.length) return "none";
+  const f = t.specialistFollowup;
+  const unreviewed = f ? f.status !== "confirmed" && !f.pending_replies : replies.some((e) => !e.reviewed);
+  return unreviewed && t.stage !== 5 && !t.sent ? "review" : "done";
+}
+/** 회신 검토 화면: 서버 분석(specialistFollowup)이 있으면 검토 결과 확인, 없으면 요청·회신 비교 화면. */
+export function expertReviewModal(t: Ticket): [string, Record<string, any>] | null {
+  if (t.specialistFollowup) return ["specialist-finding", { id: t.id }];
+  const r = referralRows().find((x) => x.ticket === t && x.response && !x.response.reviewed);
+  return r?.event ? ["department-review", { key: r.key }] : null;
+}
 export const ticketProgress = (t: Ticket) => (t.stage === 5 ? "완료" : t.owner ? "진행 중" : "미배정");
 /** 담당자가 아직 열어 보지 않은 고객 회신 수. 문의 상세를 열면 읽음 처리된다. */
 export const unreadReplies = (t: Ticket) =>
   t.stage === 5 ? 0 : t.events.filter((e) => ["customer", "customer-followup"].includes(e.kind) && (!t.seenAt || (e.createdAt && e.createdAt > t.seenAt))).length;
+/** 담당자가 마지막으로 바뀐(배정·인수된) 시각. 배정 이력이 없으면 빈 값. */
+export const lastAssignedAt = (t: Ticket): string => t.events.filter((e) => e.kind === "assignment").map((e) => e.createdAt || "").sort().at(-1) || "";
+/** 내가 새로 배정받았거나 중간에 인수했는데 아직 열어 보지 않은 문의(목록의 N 표시). 문의 상세를 열면 사라진다. */
+export const isNewAssignment = (t: Ticket): boolean => t.stage !== 5 && !!t.owner && t.owner === signedIn && !!lastAssignedAt(t) && lastAssignedAt(t) > (t.seenAt || "");
 export const latestCustomerReply = (t: Ticket): Ev | undefined => t.events.findLast((e) => ["customer", "customer-followup"].includes(e.kind));
 export const sourceInquiry = (t: Ticket) => t.body || (t.source !== "api" && t.id === "CSV1-000050" ? "The iS7 75kW trips with E.OC immediately at run command. Restarting did not resolve the issue." : t.title);
 
 // 전문부서 요청 대상 = 백엔드 이관 대상(agents/escalation.py ESCALATION_TARGETS)의 이름 (departments.csv)
 export const expertDepartments = ["자동화 기술지원", "저압기기 기술지원", "고압·배전반 기술지원", "변압기 기술지원", "에너지솔루션 기술지원", "현장 서비스", "품질보증/클레임", "펌웨어 개발", "인증·규격", "보증·RMA 데스크", "해외영업 운영", "주문·물류"];
+/** 협업 화면: 회신이 도착해 담당자가 확인할 요청. */
+export const isReviewReferral = (r: { ticket: Ticket; response?: Ev }) => !!r.response && !r.response.reviewed && r.ticket.stage !== 5 && expertPhase(r.ticket) === "review";
+/** 협업 화면: 아직 전문부서 쪽에 있는 요청. 회신 확인 단계로 넘어온 요청은 대기에 넣지 않는다 (한 건이 두 줄로 보이지 않게). */
+export const isWaitingReferral = (r: { ticket: Ticket; response?: Ev }) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5 && !isReviewReferral(r);
+
 export function referralRows() {
   const rows: any[] = [];
   for (const t of tickets) {
@@ -180,6 +214,12 @@ export function requiredInformation(t: Ticket): { id: string; label: string }[] 
 }
 export const informationAssessment = (t: Ticket) =>
   requiredInformation(t).map((item) => ({ ...item, ...(t.infoChecks?.[item.id] || {}), status: (t.infoChecks?.[item.id]?.status || "missing") as string, evidence: t.infoChecks?.[item.id]?.evidence as string | undefined }));
+/** 아직 확인되지 않은 필수 고객 정보 건수. 0이어야 전문부서로 요청할 수 있다(고객 정보 확인 → 전문부서 순서). */
+export function pendingCustomerInfo(t: Ticket): number {
+  if (t.stage === 5 || (t.source === "api" && !t.analysisReady)) return 0;
+  return informationAssessment(t).filter((x) => !["provided", "confirmed"].includes(x.status)
+    && !t.copilot?.request_plan?.some((r: any) => r.field === x.id && r.status === "unavailable")).length;
+}
 export function informationSummary(t: Ticket) {
   const items = informationAssessment(t), remaining = items.filter((x) => !["provided", "confirmed"].includes(x.status)).length;
   if (t.source === "api" && !t.analysisReady) return "필수정보 확인 대기";
@@ -227,7 +267,7 @@ export function answerContext(t: Ticket, purpose?: string): Ctx {
         .map((c) => ({ ...c, kind: "case", matches: c.raw.reference_section === "3.2", label: c.id + " · " + c.title }))
     : (t.apiEvidence || []).filter((e: any) => e.source === "cases").map((e: any) => ({
         id: e.section ? `${e.doc_id}#${e.section}` : e.doc_id, label: e.metadata?.title || e.doc_id,
-        text: e.text, kind: "case", matches: false,
+        text: e.text, kind: "case", matches: undefined, // API retrieval does not establish condition differences.
         path: e.metadata?.graph_path || "", // 지식 그래프 근거 경로 (CSA-73): 제품 → 에러코드 → 고장 → 사례 → 문서 절
       }));
   const refs: any[] = [
@@ -462,6 +502,12 @@ save();
 
 /** 아직 길이 정해지지 않은 문의의 세 갈래: 고객 질의서 · 전문부서 요청서 · 답변 초안. 이미 초안이 있거나 누구의 회신을 기다리는 중이면 갈래가 아니라 그 상태가 보인다. */
 export type Choice = "answer" | "expert" | "request";
+/** 접수 때 판단한 이관 권장이 아직 유효한가. 권장만 하고, 이관은 담당자가 요청서로 진행한다. */
+export function escalationRecommended(t: Ticket): boolean {
+  return t.escalationAdvice?.decision === "recommended" && !t.specialistRequests?.length
+    && ["READY_FOR_REVIEW", "ON_HOLD", "WAITING_CUSTOMER"].includes(t.apiStatus);
+}
+
 export function branchChoice(t: Ticket): Choice | null {
   // 백엔드 문의는 처음부터 AI 답변 초안이 있다. 고치기 전에는 전문부서 요청·고객 질의서로도 갈 수 있게 갈림길을 보인다 (CSA-61)
   if (investigationTask(t)) return null;
@@ -472,6 +518,9 @@ export function branchChoice(t: Ticket): Choice | null {
   if (t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting") return null;
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return null;
   if (waitingReviews(t).length || t.legacyReviewPending) return null;
+  if (escalationRecommended(t)) return pendingCustomerInfo(t) > 0 ||
+    (t.priority !== "P1" && t.investigationInfo?.missing_fields?.length > 0) ? "request" : "expert"; // 시나리오: 자료를 받고 이관
+  if (untouchedAiDraft && t.composerOpen) return "answer";
   if (c.missingInfo.length) return "request";
   if (!c.expertResponse && !c.availableReferences.length && ["불량", "설치", "펌웨어"].includes(t.type) && !(t.customerRequestStatus === "received" && reply)) return "expert";
   return "answer";

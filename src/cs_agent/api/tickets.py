@@ -97,10 +97,28 @@ def save_manual_reply(ticket_id: str, body: ManualReplyIn, tickets: Tickets) -> 
         return tickets.save_manual_reply(ticket_id, body)
 
 
+@router.post("/{ticket_id}/manual-draft")
+def suggest_manual_reply(ticket_id: str, tickets: Tickets, llm: LLM) -> dict:
+    with _errors():
+        return tickets.suggest_manual_reply(ticket_id, llm)
+
+
 @router.get("/{ticket_id}", response_model=TicketOut)
 def get_ticket(ticket_id: str, tickets: Tickets) -> TicketOut:
     with _errors():
         return tickets.get(ticket_id)
+
+
+@router.post("/{ticket_id}/followup/unlink", response_model=TicketOut)
+def unlink_followup(ticket_id: str, tickets: Tickets) -> TicketOut:
+    with _errors():
+        return tickets.unlink_followup(ticket_id)
+
+
+@router.post("/{ticket_id}/copilot")
+def refresh_copilot(ticket_id: str, tickets: Tickets, llm: LLM) -> dict:
+    with _errors():
+        return tickets.refresh_copilot(ticket_id, llm)
 
 
 @router.post("/{ticket_id}/reply-preview")

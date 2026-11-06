@@ -31,7 +31,7 @@ export default function Login() {
       <section className="grid place-items-center px-14 max-[900px]:hidden">
         <div className="w-full max-w-[340px]">
           <img src={logo} alt="LS ELECTRIC" width={2029} height={322} style={{ display: "block", width: "100%", height: "auto" }} />
-          <p className="mt-4 text-center text-base font-medium tracking-wide text-white/75">글로벌 고객지원</p>
+          <p className="mt-7 text-center text-base font-medium tracking-wide text-white/75">글로벌 고객지원</p>
         </div>
       </section>
 

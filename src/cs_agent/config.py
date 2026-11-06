@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # 데이터 경로
     ref_dir: Path = REPO_ROOT / "data" / "ref"  # 기준표
     raw_data_dir: Path = REPO_ROOT / "data" / "raw"  # 원천 데이터
+    # 문의 첨부 파일 (services/attachments.py)
+    attachments_dir: Path = REPO_ROOT / "data" / "attachments"
 
     # LLM (기획서 9.2). live: Jev + Gemini 호출 / fake: LLM 끔
     llm_provider: Literal["live", "fake"] = "fake"
@@ -39,6 +41,10 @@ class Settings(BaseSettings):
     jev_base_url: str = "https://api.typesafe.ai/v1"  # TypeSafe 공식 API
     jev_model: str = ""
     jev_min_confidence: float = 0.7  # 임시값. 시험 문의로 확정 (CSA-49)
+    # ⑧ 근거 확정 reranker (CSA-81, agents/retrieval.py). 판단 모델로 docs 후보 관련도를 다시 본다.
+    # LLM 이 꺼져 있으면(fake) 켜 둬도 규칙 정렬 그대로.
+    rerank_enabled: bool = True
+    rerank_weight: float = 0.5  # 관련도(0~1)에 곱해 규칙 점수에 더한다. --rerank 비교로 정한다
     # 같은 요청 캐시·분당 호출 제한 (CSA-45, cache/store.py). live 일 때만 켠다 (main.py)
     llm_cache_ttl_s: int = 86400  # 같은 단계·같은 프롬프트 응답을 하루 재사용. 0 이면 캐시 끔
     gemini_rpm: int = 0  # Gemini 분당 호출 상한 (판단·작성 합산). 0 이면 제한 없음
@@ -50,6 +56,8 @@ class Settings(BaseSettings):
     # (같은 뜻 한·영 유사도 0.744 → 0.749, 품질 차이 없음).
     embedding_model: str = "gemini-embedding-2"
     embedding_dim: int = 1536
+    web_demo_customer_id: str = "CUST-0557"  # Single demo profile, not customer authentication
+    customer_history_enabled: bool = True  # live + DB only; background indexing
 
     # Langfuse (CSA-48)
     langfuse_public_key: str = ""

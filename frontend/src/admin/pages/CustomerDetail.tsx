@@ -6,7 +6,8 @@ import { Button } from "@admin/components/ui/button";
 import { Textarea } from "@admin/components/ui/textarea";
 import { ActionButton, CareButtons } from "@admin/components/admin/CareButtons";
 import { CareTag, Ids, Mono, Tag, TierTag, useGo } from "@admin/components/admin/common";
-import { addNote, careStatus, recordOf, setPinned, useCare } from "@admin/lib/care";
+import { addNote, careStatus, deleteNote, editNote, recordOf, setPinned, useCare, type CareNote } from "@admin/lib/care";
+import { canAssign, signedIn } from "@admin/lib/logic";
 import { CATEGORY_KO, FAMILY_KO, flag, focusOf, isLate, lateText, PRIORITY_KO, SEGMENT_KO, STATUS_KO, useCustomers, type Customer } from "@admin/lib/customers";
 import { commit, findTicket, tickets, useStore } from "@admin/lib/store";
 
@@ -22,6 +23,27 @@ const Card = ({ title, aside, children, className }: { title: string; aside?: Re
 );
 const md = (iso: string) => iso.slice(5, 10).replace("-", ".");
 const hm = (iso: string) => new Date(iso).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+/** 내부 메모 한 줄. 작성자 본인과 팀장은 수정·삭제할 수 있다(삭제는 한 번 더 확인). */
+function NoteItem({ customerId, n }: { customerId: string; n: CareNote }) {
+  const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
+  const [text, setText] = useState(n.text);
+  const mine = n.by === signedIn || canAssign;
+  return (
+    <li className="grid gap-1.5">
+      {mode === "edit" ? (
+        <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) { editNote(customerId, n.id, text); setMode("view"); } }}>
+          <Textarea aria-label="내부 메모 수정" autoFocus className="min-h-20 leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} />
+          <div className="flex gap-2"><Button type="submit" size="sm" disabled={!text.trim() || text.trim() === n.text}>저장</Button><Button type="button" size="sm" variant="ghost" onClick={() => { setText(n.text); setMode("view"); }}>취소</Button></div>
+        </form>
+      ) : <p className="whitespace-pre-line text-[15px] leading-relaxed">{n.text}</p>}
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <small>{md(n.at)} {hm(n.at)} · {n.by}{n.editedAt && " · 수정됨"}</small>
+        {mine && mode === "view" && <span className="ml-auto flex gap-1"><button type="button" className="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground" onClick={() => { setText(n.text); setMode("edit"); }}>수정</button><button type="button" className="rounded px-1.5 py-0.5 hover:bg-muted hover:text-destructive" onClick={() => setMode("delete")}>삭제</button></span>}
+        {mode === "delete" && <span className="ml-auto flex items-center gap-1">이 메모를 삭제할까요?<button type="button" className="rounded px-1.5 py-0.5 font-medium text-destructive hover:bg-destructive/10" onClick={() => deleteNote(customerId, n.id)}>삭제</button><button type="button" className="rounded px-1.5 py-0.5 hover:bg-muted" onClick={() => setMode("view")}>취소</button></span>}
+      </div>
+    </li>
+  );
+}
 /** 타임라인 한 줄. 문의(회색)와 대응(남색)을 라벨로 구분한다. */
 type Item = { key: string; at: string; type: "문의" | "대응"; title: React.ReactNode; sub: React.ReactNode; onOpen?: () => void; tags?: React.ReactNode };
 
@@ -34,6 +56,9 @@ export default function CustomerDetail() {
   const [note, setNote] = useState("");
   const [openError, setOpenError] = useState("");
   const openTicket = async (id: string) => {
+    const local = findTicket(id);
+    if (local?.dummy) { setOpenError(""); go.ticket(id); return; } // 로컬 더미 문의는 서버에 없다
+    if (customerId?.startsWith("CUST-D")) { setOpenError("더미 고객의 오래된 이력은 상세가 없습니다."); return; }
     try {
       const row = await api.ticket(id), old = findTicket(id);
       const t = apply(old, row);
@@ -49,7 +74,7 @@ export default function CustomerDetail() {
   const items: Item[] = [
     ...rec.actions.map((a): Item => ({ key: a.id, at: a.at, type: "대응", title: <Ids text={a.text} />, sub: <>{a.by}</> })),
     ...c.t.map(([id, date, subject, cat, fam, pri, st, sla]): Item => ({ key: id, at: date, type: "문의", title: subject, onOpen: () => { void openTicket(id); }, sub: <>{CATEGORY_KO[cat] || cat} · {FAMILY_KO[fam] || fam}</>,
-      tags: <><Tag tone={pri === "P1" ? "red" : pri === "P2" ? "amber" : ""}>{pri} {PRIORITY_KO[pri]}</Tag>{sla === "BREACHED" && <Tag tone="red">SLA 초과</Tag>}<span className={cn("text-sm", ["IN_PROGRESS", "ESCALATED", "NEW", "WAITING_CUSTOMER"].includes(st) && "font-medium")}>{findTicket(id)?.specialistFollowup?.status === "in_progress" && !["WAITING_CUSTOMER", "RESOLVED", "CLOSED", "REJECTED", "APPROVED"].includes(st) ? "사내 분석 중" : STATUS_KO[st] || st}</span></> })),
+      tags: <><Tag tone={pri === "P1" ? "red" : pri === "P2" ? "amber" : ""}>{pri} {PRIORITY_KO[pri]}</Tag>{sla === "BREACHED" && <Tag tone="red">SLA 초과</Tag>}<span className={cn("text-sm", ["IN_PROGRESS", "ESCALATED", "NEW", "WAITING_CUSTOMER"].includes(st) && "font-medium")}>{findTicket(id)?.specialistFollowup?.status === "in_progress" && !["WAITING_CUSTOMER", "RESOLVED", "CLOSED", "REJECTED", "APPROVED"].includes(st) ? "전문부서 분석 중" : STATUS_KO[st] || st}</span></> })),
   ].sort((a, b) => b.at.localeCompare(a.at));
 
   return (
@@ -71,9 +96,6 @@ export default function CustomerDetail() {
 
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-start gap-6">
         <div className="grid gap-6">
-          {c.safety.length > 0 && <Card title="안전 검토 문의" aside={<ActionButton c={c} kind="notice" />}>
-            <ul className="grid gap-3">{c.safety.map(([id, title]) => <li key={id}><button className="text-left text-info" onClick={() => { void openTicket(id); }}>{title} · <Mono>{id}</Mono></button></li>)}</ul>
-          </Card>}
           {c.urgent.length > 0 && (
             <Card title="지연·임박 문의" aside={<ActionButton c={c} kind="notice" />}>
               <ul className="-my-2 divide-y">
@@ -94,7 +116,7 @@ export default function CustomerDetail() {
             </form>
             {(rec.notes || []).length > 0 && (
               <ul className="mt-5 grid gap-4 border-t pt-5">
-                {rec.notes!.map((n) => <li key={n.id} className="grid gap-0.5"><p className="whitespace-pre-line text-[15px] leading-relaxed">{n.text}</p><small className="text-muted-foreground">{md(n.at)} {hm(n.at)} · {n.by}</small></li>)}
+                {rec.notes!.map((n) => <NoteItem key={n.id} customerId={c.id} n={n} />)}
               </ul>
             )}
           </Card>

@@ -321,3 +321,31 @@ def test_staff_review_refreshes_retrieval_and_writer_without_reclassification():
     assert "substation" in calls["retrieve"][-1]
     assert calls["write"][-1].field_values["application"] == "substation"
     assert reviewed.draft_information_reviewed_at == reviewed.information_review.checked_at
+
+
+def test_staff_review_preserves_referral_material_collection(client):
+    from test_investigation_info import referral_state
+
+    ticket = conversation(client)
+    service = client.app.state.tickets
+    state = referral_state()
+    state["inquiry"] = service._state(ticket.ticket_id).values["inquiry"]
+    service.graph.update_state(service._config(ticket.ticket_id), state, as_node="ready")
+    body = review_body(
+        ticket,
+        {
+            "cable_length": {
+                "status": "confirmed",
+                "value": "20 m",
+                "evidence": "고객 제공 케이블 길이 20 m 확인",
+            }
+        },
+    )
+    response = client.post(f"/api/tickets/{ticket.ticket_id}/information-review", json=body)
+    assert response.status_code == 200, response.text
+    row = response.json()
+    assert row["route"] == "info_request"
+    requested = service._state(ticket.ticket_id).values["info_request_fields"]
+    assert "load_type" in requested
+    assert "cable_length" not in requested
+    assert row["copilot"]["workflow"]["request_fields"] == requested

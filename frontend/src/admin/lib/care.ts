@@ -5,7 +5,7 @@ import type { ProgressNotice } from "../../api/client";
 
 export type CareKind = "notice" | "notice_draft" | "close"; // close = 결과 확인 후 종결(시스템이 남기는 기록)
 export type CareAction = { id: string; kind: CareKind; text: string; at: string; by: string; ticketIds?: string[]; language?: string; noticeId?: string; originalText?: string; finalText?: string };
-export type CareNote = { id: string; text: string; at: string; by: string };
+export type CareNote = { id: string; text: string; at: string; by: string; editedAt?: string };
 export type CareRecord = { actions: CareAction[]; followUp?: string; resolved?: boolean; pinned?: boolean; notes?: CareNote[] };
 export type CareStatus = "none" | "acted" | "due" | "resolved";
 
@@ -65,6 +65,17 @@ export function setPinned(customerId: string, pinned: boolean) {
 export function addNote(customerId: string, text: string) {
   const cur = state[customerId] || { actions: [] };
   state[customerId] = { ...cur, notes: [{ id: crypto.randomUUID(), text: text.trim(), at: new Date().toISOString(), by: signedIn }, ...(cur.notes || [])] };
+  emit();
+}
+/** 내부 메모 수정. 작성 시각은 그대로 두고 수정 시각만 남긴다. */
+export function editNote(customerId: string, noteId: string, text: string) {
+  const cur = state[customerId]; if (!cur?.notes || !text.trim()) return;
+  state[customerId] = { ...cur, notes: cur.notes.map((n) => (n.id === noteId ? { ...n, text: text.trim(), editedAt: new Date().toISOString() } : n)) };
+  emit();
+}
+export function deleteNote(customerId: string, noteId: string) {
+  const cur = state[customerId]; if (!cur?.notes) return;
+  state[customerId] = { ...cur, notes: cur.notes.filter((n) => n.id !== noteId) };
   emit();
 }
 export function resolveCare(customerId: string, resolved: boolean) {

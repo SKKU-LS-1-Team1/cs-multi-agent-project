@@ -7,6 +7,7 @@ import { api, type InquiryForm as FormDraft } from "../../api/client";
 import { getCountry, getLang } from "../../lib/lang";
 import { newThreadRef, rememberInquiry } from "../../lib/myInquiries";
 import { CATEGORY_KO, FIELD_HINT, fieldLabel } from "./labels";
+import { customer } from "../../home/lib/inquiry.js";
 
 type Props = { draft: FormDraft; onDone: () => void };
 
@@ -34,6 +35,7 @@ export default function InquiryForm({ draft, onDone }: Props) {
       const threadRef = newThreadRef(); // 추가정보 요청에 회신할 때 같은 문의로 이어진다
       const ticket = await api.createInquiry({
         channel: "WEB_FORM",
+        customer_id: customer.customer_id,
         category: draft.category,
         product_code: draft.product_code,
         subject: subject.trim() || draft.subject,

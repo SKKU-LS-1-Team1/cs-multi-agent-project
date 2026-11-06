@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   answerContext, buildExpertRequest, canAssign, checkAssign, composeAnswer, composerKey, composerLanguage, contextIsNew, contextKey, customerLanguage, FRONTLINE, isEdited, needsLocalization, runChecks, translateText,
   informationAssessment, people, recommend, record, requiredInformation, resourceReason, signedIn, storeComposer, ticketProgress,
-  waitingReviews, latestCustomerReply, ownedTickets, departmentRank, slaMinutes, branchChoice,
+  waitingReviews, expertPhase, expertReviewModal, latestCustomerReply, ownedTickets, departmentRank, slaMinutes, branchChoice, escalationRecommended, pendingCustomerInfo,
 } from "./logic";
 import { closeModal, commit, openModal, setUi, tickets } from "./store";
 import type { Ticket } from "./types";
@@ -36,7 +36,10 @@ function applyGeneratedAnswer(t: Ticket, c: any, draft: string) {
 export function generate(t: Ticket, purpose?: string) {
   if (isManualReplyTicket(t)) return restoreAiDraft(t);
   if (isApiTicket(t)) { // 백엔드 티켓: 답변은 AI 초안, 추가정보 요청문은 백엔드가 만든다 (CSA-61)
-    if ((purpose ?? t.composerPurpose) === "request" && !t.apiInfoRequest) { void infoRequestViaApi(t); return; }
+    if ((purpose ?? t.composerPurpose) === "request" && !t.apiInfoRequest) {
+      if (t.copilot) openModal("request-plan", { id: t.id }); else void infoRequestViaApi(t);
+      return;
+    }
     return restoreAiDraft(t);
   }
   const full = answerContext(t, purpose);
@@ -56,6 +59,14 @@ export function generate(t: Ticket, purpose?: string) {
 }
 
 export function composeFromCopilot(t: Ticket, purpose: string) {
+  if (t.regenerating || t.expertDraftLoading) return;
+  if (purpose === "answer" && isApiTicket(t) && !isManualReplyTicket(t) && (t.apiInfoRequest || t.apiEscalationRequest)) {
+    storeComposer(t);
+    setUi({ tab: "문의·답변" });
+    void rewriteViaApi(t, "Write a customer answer using the current inquiry and available evidence. Preserve uncertainties; do not reuse the information request as the answer.", "answer");
+    return;
+  }
+  if (purpose === "request" && isApiTicket(t) && t.copilot) { openModal("request-plan", { id: t.id }); return; }
   setUi({ tab: "문의·답변" });
   t.composerOpen = true;
   switchComposer(t, purpose);
@@ -64,15 +75,39 @@ export function composeFromCopilot(t: Ticket, purpose: string) {
 }
 /** 권장 자료도 기존 질의서 작성기를 사용하며 이관 자체는 막지 않는다. */
 export function requestInvestigationInfo(t: Ticket) {
+  if (isApiTicket(t) && t.copilot) { openModal("request-plan", { id: t.id }); return; }
   setUi({ tab: "문의·답변" }); t.composerOpen = true; switchComposer(t, "request");
   void infoRequestViaApi(t); scrollToEditor();
 }
 export function openExpertComposer(t: Ticket) {
+  if (t.regenerating || t.expertDraftLoading) return;
+  if (expertPhase(t) === "waiting") { toast.error(`이미 ${waitingReviews(t).at(-1)?.department || "전문부서"}에 요청했습니다. 회신을 받은 뒤 요청할 수 있습니다.`); return; } // 전문부서는 한 번에 한 곳에만 요청한다
+  const left = pendingCustomerInfo(t);
+  if (left > 0) { toast.error(`고객 정보를 먼저 확인해야 전문부서에 요청할 수 있습니다. 남은 자료 ${left}건`); return; }
   setUi({ tab: "문의·답변" });
   t.activeComposer = "expert"; t.reviewed = false;
-  if (isApiTicket(t) && !t.expertDraft) { commit(); scrollToEditor(); void escalationDraftViaApi(t); return; } // AI 요청서 초안 (CSA-55)
+  if (isApiTicket(t) && (!t.expertDraft || !t.apiEscalationRequest)) { commit(); scrollToEditor(); void escalationDraftViaApi(t); return; } // AI 요청서 초안 (CSA-55)
   t.expertDraft ??= buildExpertRequest(t);
   commit(); scrollToEditor();
+}
+/* ───────── 전문부서 회신 검토 (3단계 C: 회신 도착 → 담당자가 확인) ───────── */
+/** 회신 검토 화면을 연다. 서버 분석(specialistFollowup)이 있는 문의는 기존 검토 결과 확인 화면을, 그 외에는 요청·회신 비교 화면을 연다. */
+export function openExpertReview(t: Ticket) { const m = expertReviewModal(t); if (m) openModal(m[0], m[1]); }
+/** 담당자가 회신을 확인했다고 남긴다. next: answer(반영하고 답변 작성) · followup(같은 부서에 추가 질의) · customer(고객 자료 추가 요청). */
+export function confirmExpertReview(t: Ticket, next: "answer" | "followup" | "customer") {
+  const replies = t.events.filter((e) => e.kind === "expert" && !e.reviewed);
+  if (next === "followup") {
+    const dept = replies.at(-1)?.department;
+    openExpertComposer(t);
+    if (t.activeComposer !== "expert") return; // 고객 정보 확인이 먼저인 경우 등
+    if (dept) t.expertDraftDepartment = dept;
+  }
+  const at = new Date().toISOString();
+  replies.forEach((e) => { e.reviewed = true; e.reviewedBy = signedIn; e.reviewedAt = at; });
+  t.reviewed = false;
+  closeModal(); commit();
+  if (next === "customer") composeFromCopilot(t, "request");
+  else if (next === "answer") toast("회신을 반영했습니다. 답변을 작성하세요.");
 }
 export function closeComposer(t: Ticket) { t.activeComposer = null; t.composerOpen = false; commit(); }
 
@@ -84,7 +119,7 @@ export function applyPendingAnswer(t: Ticket) {
   if (isApiTicket(t) && p.apiSpecialistRevision !== undefined) {
     Object.assign(t, { draft: p.draft, draftContext: p.context, draftContextKey: contextKey(p.context),
       draftSpecialistRevision: p.apiSpecialistRevision, draftCustomerRevision: p.apiCustomerRevision ?? 0, draftInformationReviewedAt: p.apiInformationReviewedAt ?? null, draftCited: p.cited || [], reviewed: false,
-      draftVersion: (t.draftVersion || 1) + 1, purpose: "answer", composerPurpose: "answer" });
+      draftVersion: (t.draftVersion || 1) + 1, purpose: p.context?.purpose || "answer", composerPurpose: p.context?.purpose || "answer", activeComposer: "customer", composerOpen: true });
     commit();
     return;
   }
@@ -170,6 +205,10 @@ export function toggleReference(t: Ticket, id: string, checked: boolean) {
 }
 
 export async function prepareCustomerReply(t: Ticket) {
+  if (t.purpose !== "request" && t.followupContextStale) {
+    toast.error("이전 문의 연결을 제외하고 답변 초안을 재작성해 주세요.");
+    return false;
+  }
   if (isApiTicket(t)) return prepareReplyViaApi(t);
   if (!t.draft?.trim()) return false;
   const text = needsLocalization(t) ? translateText(t.draft, "English", customerLanguage(t)) : t.draft;
@@ -182,6 +221,7 @@ export async function prepareCustomerReply(t: Ticket) {
 
 export function canSend(t: Ticket) {
   if (t.purpose !== "request" && t.specialistFollowup?.status === "in_progress") return false;
+  if (t.purpose !== "request" && t.followupContextStale) return false;
   if (t.translatingReply || !hasCurrentReplyPreview(t)) return false;
   if (isApiTicket(t) && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return false;
   if (isApiTicket(t) && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return false;
@@ -395,7 +435,7 @@ export function bulkAssign(ids: string[], owner: string) {
   else toast(`${done}건을 ${owner}에게 배정했습니다.`);
 }
 
-/** 문의 상세를 열면 고객 회신을 읽은 것으로 표시한다. */
+/** 문의 상세를 열면 고객 회신과 새 배정(N 표시)을 읽은 것으로 표시한다. */
 export function markSeen(t: Ticket) {
   t.seenAt = new Date().toISOString();
   commit();
@@ -412,17 +452,18 @@ export function nextAction(t: Ticket): Next | null {
   const reply = latestCustomerReply(t), c = answerContext(t);
   const investigation = investigationTask(t);
   if (investigation && !(t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey)) {
-    if (investigation.kind === "request") return { label: "고객 질의서 작성", run: () => {
-      setUi({ tab: "문의·답변" }); t.composerOpen = true; switchComposer(t, "request");
-      void infoRequestViaApi(t); scrollToEditor();
-    } };
+    if (investigation.kind === "request") return { label: "고객 질의서 작성", run: () => requestInvestigationInfo(t) };
     if (investigation.kind === "confirm") return { label: "검토 결과 확인", run: () => openModal("specialist-finding", { id: t.id }) };
     if (investigation.kind === "analyze" || investigation.kind === "review") return { label: "회신 확인하기", run: () => openModal("specialist-finding", { id: t.id }) };
     if (t.apiCustomerId && t.apiLanguage) return { label: "진행상황 안내 작성", externalWaiting: true, run: () => openModal("care", { customerId: t.apiCustomerId, ticketId: t.id, kind: "notice" }) };
-    return { label: "사내 분석 중", waiting: true };
+    return { label: "전문부서 분석 중", waiting: true };
   }
   if (t.customerRequestStatus === "waiting") return { label: "고객 회신 대기 중", waiting: true };
+  const advised = escalationRecommended(t) ? branchChoice(t) : null;
+  if (advised === "expert") return { label: "전문부서 요청서 작성", run: () => openExpertComposer(t) };
+  if (advised === "request") return { label: "고객 질의서 작성", run: () => composeFromCopilot(t, "request") };
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return { label: "수신 자료 확인", run: () => openModal("review-customer", { id: t.id }) };
+  if (expertPhase(t) === "review" && t.purpose !== "request") return { label: "전문부서 회신 검토", run: () => openExpertReview(t) };
   if (t.draft && t.purpose !== "request" && (waitingReviews(t).length || t.legacyReviewPending)) return { label: "전문부서 회신 등록", externalWaiting: true, run: () => openModal("expert-receive", { id: t.id }) };
   // 사람 검토 문의는 초안이 없으면 아래(자료 요청 → 전문부서 회신 → 직접 작성) 순서를 일반 문의와 똑같이 따른다
   if (isManualReplyTicket(t) && t.draft && ((t.draftSpecialistRevision ?? 0) !== (t.specialistRevision ?? 0)
@@ -431,6 +472,8 @@ export function nextAction(t: Ticket): Next | null {
     return { label: "담당자 답변 작성·검토", run: () => composeFromCopilot(t, "answer") };
   }
   if (t.draft) {
+    if (t.purpose !== "request" && t.followupContextStale) return {
+      label: "답변 초안 재작성", run: () => { void rewriteViaApi(t, "이전 문의 연결을 제외하고 현재 문의와 확인된 근거로 다시 작성해 주세요.", "answer"); } };
     if (t.source === "api" && (t.draftInformationReviewedAt ?? null) !== (t.informationReviewedAt ?? null)) return {
       label: "확인된 자료 반영해 재작성", run: () => regenerateDraft(t, "Reflect the latest staff-confirmed information and remove withdrawn facts.") };
     if (t.source === "api" && (t.draftCustomerRevision ?? 0) !== (t.customerRevision ?? 0)) return {
@@ -466,6 +509,7 @@ export function judgment(t: Ticket): Judgment {
     title: "담당자 검토 필요", task: "문의와 근거를 확인하고 영어 답변을 직접 작성하세요.",
     note: "", reason: "작성한 답변은 고객 언어 변환과 최종 점검을 거칩니다.", missing: none,
   };
+  if (expertPhase(t) === "review" && t.purpose !== "request" && !t.sent && t.stage !== 5 && !t.specialistFollowup) return { title: "전문부서 회신 도착", task: "회신이 요청에 맞는지 확인하고, 답변에 반영하세요.", note: "", reason: "확인하기 전에는 고객 답변을 쓰지 않습니다. 부족하면 추가 질의나 고객 자료 요청으로 돌아갈 수 있습니다.", missing: none };
   const reply0 = latestCustomerReply(t);
   // nextAction 과 같은 순서: 고객 회신을 기다리거나 확인할 일이 있으면 초안이 있어도 그 일이 먼저다.
   const customerFirst = t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting" || (t.customerRequestStatus === "received" && !!reply0 && requiredInformation(t).length > 0 && reply0.id !== t.reviewedReplyKey);
@@ -474,6 +518,7 @@ export function judgment(t: Ticket): Judgment {
     const lang = customerLanguage(t), isRequest = t.purpose === "request", pending = waitingReviews(t).length || (t.legacyReviewPending ? 1 : 0);
     if (!isRequest && pending) return { title: "전문부서 회신 대기", task: "회신을 등록하면 고객 답변을 작성할 수 있습니다.", note: `전문부서 회신 ${pending}건 대기 중`, reason: "답변은 전문부서 회신을 확인한 뒤 작성합니다.", missing: none };
     const what = isRequest ? "고객 질의서" : "고객 답변";
+    if (!isRequest && t.followupContextStale) return { title: "답변 초안 재작성 필요", task: "이전 문의 연결을 제외하고 답변을 다시 작성해 주세요.", note: "", reason: "연결 해제 전에 작성된 답변에는 이전 문의 내용이 남아 있을 수 있습니다.", missing: none };
     const [task, why] = !hasCurrentReplyPreview(t)
       ? ["영어 초안을 검토하고, 필요하면 고쳐 주세요.", "초안은 영어로 작성됩니다. 검토 후 고객 언어로 변환 버튼을 눌러 주세요."]
       : [t.reviewed ? `${lang} 발송용 문구를 확인한 뒤 발송하세요.` : "영어 초안과 변환된 문구를 확인하고 검토 완료에 체크해 주세요.", "발송하면 영어 원본과 발송본이 함께 이력에 남습니다."];
@@ -491,6 +536,7 @@ export function judgment(t: Ticket): Judgment {
   else if (t.customerOutcome === "needs-support") { title = "후속 문의 · 재검토 필요"; task = "이전 조치와 고객의 새 증상을 함께 확인하세요."; reason = "이전 완료 결과는 현재 해결 근거로 확정하지 않습니다."; }
   else if (t.customerRequestStatus === "waiting") { title = "고객 회신 대기"; task = "고객이 요청 자료를 제출하기를 기다리고 있습니다."; reason = "회신이 들어오면 같은 문의에서 내용을 확인합니다."; }
   else if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) { title = "고객 자료 수신 · 확인 필요"; task = "수신된 내용과 첨부자료를 확인하세요."; reason = "회신 수신만으로 필요한 자료가 충족된 것은 아닙니다."; }
+  else if (choice && escalationRecommended(t)) { const expert = choice === "expert"; title = expert ? "전문부서 이관 권장" : "이관 예상 · 고객 자료 먼저 요청"; task = expert ? "이관 이유를 확인하고 전문부서 요청서를 작성하세요." : "고객에게 아래 자료를 먼저 요청하세요. 자료를 받으면 이관 여부를 다시 판단합니다."; reason = "권장 내용입니다. 이관 여부는 담당자가 결정합니다."; }
   else if (missing) { title = t.customerRequestStatus === "received" ? "회신 수신 · 추가정보 미충족" : "추가정보 필요 · 원인 미확정"; task = t.customerRequestStatus === "received" ? "아직 충족되지 않은 자료만 추가로 요청하세요." : "고객에게 아래 자료를 요청하세요."; reason = "이 자료가 있어야 원인 후보를 좁히고 정확한 답변을 쓸 수 있습니다."; }
   else if (t.customerRequestStatus === "received" && reply && !expertPending) { title = "고객 회신 수신"; task = "회신 내용을 확인하고 고객 답변을 작성하세요."; reason = "회신 내용은 고객 소통에서 볼 수 있습니다."; }
   else if (expertPending) { title = "전문부서 회신 대기"; task = "검토 결과를 받으면 해당 요청에 등록하세요."; reason = "회신을 확인한 뒤 고객 답변에 활용합니다."; }
@@ -499,7 +545,7 @@ export function judgment(t: Ticket): Judgment {
   else if (choice === "expert") { title = "근거 부족 · 전문부서 확인 권장"; task = "연결된 참고 근거가 없어 전문부서 검토를 요청하는 것이 좋습니다."; reason = "일반 안내로 바로 답변하거나, 고객에게 자료를 요청할 수도 있습니다."; }
   else { title = "답변 작성 가능"; task = "추가 자료 없이 답변을 작성할 수 있습니다."; reason = "연결된 참고 근거가 없어 초안은 일반 안내 수준입니다. 전문 판단이 필요하면 전문부서에 요청하세요."; }
   const open = !t.sent && t.stage !== 5;
-  const note = open && manual ? "안전 등 사람 검토 문의 · AI 초안 없음" : open && t.draft && choice && choice !== "answer" ? "AI 답변 초안은 준비되어 있습니다" : "";
+  const note = open && manual ? "안전 등 사람 검토 문의 · AI 초안 없음" : open && t.draft && choice && choice !== "answer" && !escalationRecommended(t) ? "AI 답변 초안은 준비되어 있습니다" : "";
   return { title, task, note, reason, missing: (missing > 0 && t.stage !== 5 ? c.missingInfo : none) };
 }
 

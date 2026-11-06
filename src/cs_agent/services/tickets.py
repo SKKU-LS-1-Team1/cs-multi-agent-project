@@ -46,7 +46,7 @@ from cs_agent.followup_schemas import FollowupConfirmation
 from cs_agent.llm.router import LLMRouter
 from cs_agent.llm.tracing import ticket_scope
 from cs_agent.rules.engine import apply_rules
-from cs_agent.rules.investigation import investigation_info
+from cs_agent.rules.investigation import investigation_info, referral_request_fields
 from cs_agent.rules.sla import due_at, elapsed_hours, is_at_risk
 from cs_agent.rules.tables import load_tables
 from cs_agent.schemas import (
@@ -112,12 +112,14 @@ class TicketService:
         *,
         escalation_writer: Callable[..., EscalationRequest] | None = None,
         specialist_reader: Callable | None = None,
+        history_matcher: Callable | None = None,
     ) -> None:
         self.graph = graph
         self.records = records if records is not None else MemoryRecords()
         self.roster = list(roster or [])  # 담당자 명단 (data/ref/agents.csv). 비면 배정 안 함
         self.escalation_writer = escalation_writer
         self.specialist_reader = specialist_reader
+        self.history_matcher = history_matcher
 
     @staticmethod
     def _config(ticket_id: str) -> dict:
@@ -184,7 +186,7 @@ class TicketService:
         self._state(ticket_id)  # 없는 문의면 TicketNotFound
         return self.records.assignments(ticket_id)
 
-    def submit(self, inquiry: InquiryIn) -> TicketOut:
+    def submit(self, inquiry: InquiryIn, *, match_history: bool = True) -> TicketOut:
         if inquiry.thread_ref and (existing := self.records.find_thread(inquiry.thread_ref)):
             return self.reply(existing, inquiry)
         if not inquiry.language:  # 웹 문의서는 언어를 보내지 않는다 → 회신이 영어로 나가지 않게
@@ -193,12 +195,25 @@ class TicketService:
             )
         ticket_id = f"T-{uuid.uuid4().hex[:12].upper()}"
         self.records.add_ticket(ticket_id, inquiry)
+        link = None
+        if match_history and self.history_matcher and inquiry.customer_id:
+            try:
+                with ticket_scope(ticket_id):
+                    link = self.history_matcher(ticket_id, inquiry)
+            except Exception:
+                # Optional relationship must never block intake or overwrite analysis.
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Customer history unavailable for %s", ticket_id
+                )
         self._run(
             ticket_id,
             {
                 "ticket_id": ticket_id,
                 "inquiry": inquiry,
                 "followups": 0,
+                "followup_link": link,
                 "customer_messages": [self._customer_message(inquiry, "initial")],
                 "customer_revision": 0,
             },
@@ -601,6 +616,7 @@ class TicketService:
             if extraction.urgency == Urgency.SAFETY
             else Route.INFO_REQUEST
             if rules.missing_blocking
+            or referral_request_fields({**values, "extraction": extraction, "rules": rules}, tables)
             else Route.DRAFT
         )
         updates = {
@@ -695,6 +711,60 @@ class TicketService:
         return self.get(ticket_id)
 
     @_serialized
+    def suggest_manual_reply(self, ticket_id: str, llm: LLMRouter) -> dict:
+        """사람 검토 문의의 영어 답변 초안을 처음 문의와 전문부서 회신으로 만들어 보여 준다.
+
+        저장하거나 보내지 않는다. 담당자가 고쳐서 manual-reply 로 저장해야 검토 흐름에 들어간다.
+        """
+        requests = self._sync_specialists(ticket_id)
+        snapshot = self._state(ticket_id)
+        state = snapshot.values
+        if state.get("status") != TicketStatus.HUMAN_QUEUE and not (
+            state.get("manual_reply") and "review" in snapshot.next
+        ):
+            raise InvalidAction("사람 검토 문의에서만 AI 초안을 만들 수 있습니다")
+        if any(r["reply"] is None for r in requests):
+            raise InvalidAction("전문부서 회신을 모두 확인한 뒤 초안을 만들어 주세요")
+        classification, extraction = state.get("classification"), state.get("extraction")
+        if classification is None or extraction is None:
+            raise InvalidAction("문의 분석 결과가 없어 AI 초안을 만들 수 없습니다. 직접 작성하세요")
+        replies = state.get("specialist_replies", [])
+        evidence = [e for e in state.get("evidence", []) if e.source != "specialist"]
+        evidence += drafting.specialist_evidence(replies)
+        current = followup.current_followup(state, requests)
+        confirmation = current.get("confirmation") if current else None
+        feedback = (
+            "Staff-confirmed specialist finding (preserve scope and conditions): "
+            + confirmation["finding"]["evidence"]
+            if confirmation
+            else None
+        )
+        inquiry = state["inquiry"]
+        with ticket_scope(ticket_id):
+            try:
+                evidence = drafting.prepare_evidence(
+                    classification.category,
+                    extraction,
+                    evidence,
+                    secondary_category=classification.secondary_category,
+                    raw_dir=llm.settings.raw_data_dir,
+                )
+                draft = drafting.write_draft(
+                    classification.category,
+                    extraction,
+                    evidence,
+                    f"{inquiry.subject}\n{inquiry.body}".strip(),
+                    llm,
+                    reviewer_feedback=feedback,
+                    secondary_category=classification.secondary_category,
+                    specialist_replies=replies,
+                    followup_link=state.get("followup_link"),
+                )
+            except drafting.DraftingError as error:
+                raise InvalidAction(str(error)) from error
+        return {"text": draft.text}
+
+    @_serialized
     def prepare_reply(self, ticket_id: str, text: str, llm: LLMRouter) -> dict:
         """Translate for staff inspection without approving or sending anything."""
         self._sync_specialists(ticket_id)
@@ -702,6 +772,8 @@ class TicketService:
         if "review" not in snapshot.next:
             raise InvalidAction("상담원 검토 대기 상태에서만 변환할 수 있습니다")
         state = snapshot.values
+        if state.get("followup_context_stale") and state.get("pending") == "draft":
+            raise InvalidAction("이전 문의 연결이 해제되었습니다. 답변 초안을 재작성해 주세요")
         if state.get("pending") != "info_request":
             self._require_confirmed_investigation(ticket_id)
         previous = state.get("reply_preview") or {}
@@ -731,10 +803,54 @@ class TicketService:
 
     @_serialized
     def act(self, ticket_id: str, review: ReviewIn) -> TicketOut:
+        current = self._state(ticket_id).values
+        if (
+            current.get("followup_context_stale")
+            and current.get("pending") == "draft"
+            and review.action in {ReviewAction.APPROVE, ReviewAction.EDIT_APPROVE}
+        ):
+            raise InvalidAction(
+                "이전 문의 연결이 해제되었습니다. 답변 초안을 재작성한 뒤 진행해 주세요"
+            )
+        if review.draft_purpose is not None and review.action != ReviewAction.REWRITE:
+            raise InvalidAction("작성 대상은 재작성 요청에서만 지정할 수 있습니다")
         if review.acknowledged_failures and not review.reviewer.strip():
             raise InvalidAction("점검 실패를 확인하고 승인하려면 담당자 이름이 필요합니다")
         requests = self._sync_specialists(ticket_id)
         snapshot = self._state(ticket_id)
+        if (
+            review.action == ReviewAction.REWRITE
+            and review.draft_purpose != "answer"
+            and snapshot.values.get("pending") == "info_request"
+            and snapshot.values.get("info_request_fields")
+        ):
+            from cs_agent.agents import copilot
+
+            plan = copilot.view(snapshot.values, load_tables())["request_plan"]
+            allowed = {row["field"] for row in plan if row["status"] in {"missing", "clarify"}}
+            rules = snapshot.values.get("rules")
+            selected = snapshot.values.get("info_request_fields") or (
+                (rules.missing_blocking or rules.missing_info) if rules else []
+            )
+            remaining = [field for field in selected if field in allowed]
+            if not remaining:
+                raise InvalidAction(
+                    "선택한 정보가 모두 확인되었습니다. 답변 작성으로 진행해 주세요"
+                )
+            review = review.model_copy(update={"info_items": remaining})
+        if review.action == ReviewAction.INFO_REQUEST and review.info_plan_key is not None:
+            from cs_agent.agents import copilot
+
+            current = copilot.view(snapshot.values, load_tables())
+            allowed = {
+                row["field"]
+                for row in current["request_plan"]
+                if row["status"] in {"missing", "clarify"}
+            }
+            if current["context_key"] != review.info_plan_key:
+                raise InvalidAction("확인된 정보가 변경되었습니다. 요청 항목을 다시 선택해 주세요")
+            if not review.info_items or not set(review.info_items) <= allowed:
+                raise InvalidAction("미확인 요청 항목만 선택해 주세요")
         if (
             review.expected_customer_revision is not None
             and review.expected_customer_revision != snapshot.values.get("customer_revision", 0)
@@ -877,6 +993,53 @@ class TicketService:
                 recovered.append(ticket_id)
         return recovered
 
+    def refresh_copilot(self, ticket_id: str, llm: LLMRouter) -> dict:
+        from cs_agent.agents import copilot
+        from cs_agent.services.progress import ProgressService
+
+        snapshot = self._state(ticket_id)
+        ProgressService._save_node(snapshot)  # 실행 중인 그래프의 다음 노드를 변경하지 않는다
+        tables = load_tables()
+        current = copilot.view(snapshot.values, tables)
+        if current["reading"]:
+            return current
+        try:
+            with ticket_scope(ticket_id):
+                result = copilot.generate(snapshot.values, tables, llm)
+        except ValueError as exc:
+            raise InvalidAction(str(exc)) from None
+        with self.records.ticket_locks([ticket_id]):
+            latest = self._state(ticket_id)
+            if copilot.context(latest.values, tables)[0] != result["context_key"]:
+                raise InvalidAction("문의 내용이 변경되었습니다. 최신 정보로 다시 확인해 주세요")
+            self.graph.update_state(
+                self._config(ticket_id),
+                {"copilot_insight": result},
+                as_node=ProgressService._save_node(latest),
+            )
+            self.records.save_state(ticket_id, self._state(ticket_id).values)
+        return copilot.view(self._state(ticket_id).values, tables)
+
+    @_serialized
+    def unlink_followup(self, ticket_id: str) -> TicketOut:
+        state = self._state(ticket_id).values
+        link = state.get("followup_link")
+        if not link or link.get("dismissed"):
+            return self.get(ticket_id)
+        updates = {
+            "followup_link": {**link, "dismissed": True},
+            "followup_context_stale": bool(state.get("draft"))
+            and not state.get("manual_reply")
+            and state.get("status") not in CLOSED,
+            "reply_preview": None,
+            "approval_checks_key": None,
+            "copilot_insight": None,
+            "escalation_request": None,
+        }
+        self.graph.update_state(self._config(ticket_id), updates)
+        self.records.save_state(ticket_id, self._state(ticket_id).values)
+        return self.get(ticket_id)
+
     def get(self, ticket_id: str) -> TicketOut:
         v = self._state(ticket_id).values
         rules = v.get("rules")
@@ -890,7 +1053,12 @@ class TicketService:
             draft = draft.model_copy(
                 update={"text": drafting.customer_text(draft.text, references)}
             )
+        from cs_agent.agents import copilot
+
         return TicketOut(
+            copilot=copilot.view(v, load_tables()),
+            followup_link=v.get("followup_link"),
+            followup_context_stale=v.get("followup_context_stale", False),
             ticket_id=ticket_id,
             inquiry=v.get("inquiry"),
             body_ko=v.get("body_ko"),
@@ -913,6 +1081,8 @@ class TicketService:
                 if rules
                 else None
             ),
+            sla_first_response_h=rules.sla_first_response_h if rules else None,
+            sla_resolution_h=rules.sla_resolution_h if rules else None,
             draft=draft,
             info_request=v.get("info_request"),
             escalation_request=v.get("escalation_request"),
@@ -936,6 +1106,7 @@ class TicketService:
             evidence=v.get("evidence", []),
             specialist_requests=specialist_requests,
             investigation_info=investigation_info(v),
+            escalation_advice=v.get("escalation_advice"),
             specialist_followup=self._followup(ticket_id, state=v, requests=specialist_requests),
             specialist_revision=len(specialist_requests)
             + sum(r["reply"] is not None for r in specialist_requests),
