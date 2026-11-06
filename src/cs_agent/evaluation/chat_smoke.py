@@ -1,4 +1,4 @@
-# 챗봇 실전 점검 (배포·시연 전에 돌린다)
+# 챗봇 실전 점검 (.github/workflows/chat-smoke.yml 이 매일·배포 뒤 돌린다. 시연 전에는 직접)
 #
 # 실제 서버(POST /api/chat)에 data/eval/chat_smoke.json 의 대화를 보내고, 상담원 전환 여부·
 # 화면 이동·답변에 들어가야 할 값을 확인한다. 하나라도 틀리면 종료 코드 1.
@@ -6,8 +6,9 @@
 #   uv run python -m cs_agent.evaluation.chat_smoke http://localhost:8000
 #   uv run python -m cs_agent.evaluation.chat_smoke https://luckystar-global-cs.com
 #
-# 실제 LLM 을 부르므로 한 번에 Gemini 호출이 수십 번 든다 (대화 20개, 동시에 4개씩, 몇 분).
-# 운영에서 고객이 겪은 문제는 이 파일에 대화로 더해 둔다 (같은 문제가 다시 나오지 않게).
+# 실제 LLM 을 부르므로 한 번에 Gemini 호출이 수십 번 든다 (동시에 4개씩, 몇 분).
+# 운영에서 고객이 겪은 문제는 chat_smoke.json 에 대화로 더해 둔다 (같은 문제가 다시 나오지 않게).
+# 챗봇 동작을 일부러 바꾸면 기대값도 같이 고친다. 형식·사고 사례 검사: tests/test_chat_smoke.py
 import argparse
 import json
 import sys

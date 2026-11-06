@@ -1,0 +1,41 @@
+name: Chat smoke
+
+# 운영 서버 챗봇에 data/eval/chat_smoke.json 의 대화를 보내 확인한다 (CSA-32).
+# 실제 LLM 을 부르므로 PR 마다 돌리지 않는다: 매일 09:00 KST · 배포 성공 뒤 · 필요할 때 직접.
+# 배포를 손으로 하는 동안(DEPLOY_ENABLED=false)에는 매일 도는 실행이 운영 상태를 잡아 준다.
+# 서버 주소: 실행 입력 → 저장소 변수 CHAT_SMOKE_URL → 기본값(고객 도메인)
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_run:
+    workflows: [Deploy]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "점검할 서버 주소 (비우면 운영)"
+        required: false
+
+concurrency:
+  group: chat-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE_URL: ${{ inputs.base_url || vars.CHAT_SMOKE_URL || 'https://luckystar-global-cs.com' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - name: Wait for server
+        run: curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$BASE_URL/api/health"
+      - name: Run chat smoke
+        run: python src/cs_agent/evaluation/chat_smoke.py "$BASE_URL"
