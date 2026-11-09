@@ -407,8 +407,98 @@ def test_measure_hybrid_counts_off_and_on(monkeypatch) -> None:
         "reference_doc_id": "TG-INV-A",
         "reference_section": "3.4",
     }
-    result = measure_hybrid([row], vector, weights=(1.0,), keyword=keyword_docs(CHUNKS))
+    result = measure_hybrid([row], vector, weights=(0.0, 1.0), keyword=keyword_docs(CHUNKS))
     assert result["total"] == 1
     assert result["base"] == {"k3": 0, "pool": 0}
+    assert result["hybrid"][0.0] == {"k3": 0, "pool": 1}  # 점수 가산 없이 후보만 추가
     assert result["hybrid"][1.0] == {"k3": 1, "pool": 1}
-    assert result["by_group"]["language"]["en"] == {"n": 1, "off": 0, "1.0": 1}
+    assert result["by_group"]["language"]["en"] == {"n": 1, "off": 0, "0.0": 0, "1.0": 1}
+
+
+def test_hybrid_zero_weight_adds_candidates_without_score_bonus(monkeypatch):
+    _hybrid_settings(monkeypatch, enabled=True, weight=0.0)
+    vector = _VectorDocs([_doc("DS-INV-A", "2.1", 0.8)], {("TG-INV-A", "3.4"): 0.6})
+    result = first_pass(vector, None, "deceleration time")
+    assert {(e.doc_id, e.section): e.score for e in result} == {
+        ("DS-INV-A", "2.1"): 0.8,
+        ("TG-INV-A", "3.4"): 0.6,
+    }
+
+
+@pytest.mark.parametrize("failure", ["keyword", "score_sections"])
+def test_hybrid_failure_reuses_successful_vector_search(monkeypatch, failure):
+    from cs_agent.agents import retrieval
+
+    _hybrid_settings(monkeypatch, enabled=True)
+
+    class Once(_VectorDocs):
+        calls = 0
+
+        def search(self, *args, **kwargs):
+            self.calls += 1
+            assert self.calls == 1, "성공한 벡터 검색을 다시 호출하면 안 됨"
+            return super().search(*args, **kwargs)
+
+        def score_sections(self, *args):
+            raise TimeoutError("DB scoring unavailable")
+
+    vector = Once([_doc("DS-INV-A", "2.1", 0.8)], {})
+    if failure == "keyword":
+
+        def broken(*args, **kwargs):
+            raise RuntimeError("keyword index unavailable")
+
+        monkeypatch.setattr(retrieval, "keyword_scores", broken)
+    found = first_pass(vector, None, "deceleration time")
+    assert found == vector.ranked
+    assert vector.calls == 1
+
+
+def test_hybrid_does_not_mutate_vector_scores_or_keep_wrong_product(monkeypatch):
+    _hybrid_settings(monkeypatch, enabled=True)
+    original = _doc("DS-INV-A", "2.1", 0.8, product_code="INV-A", doc_type="DS")
+    vector = _VectorDocs([original], {})
+    found = first_pass(vector, None, "rated output")
+    assert found[0].score > original.score
+    assert original.score == 0.8 and "keyword" not in original.metadata
+    assert finalize_evidence(found, Extraction(product_code="PLC-B")) == []
+    assert vector.search("rated output")[0].score == 0.8  # 챗봇 직접 검색은 원래 점수
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_measure_hybrid_includes_reranker_and_actual_body_language(monkeypatch, failed):
+    from cs_agent.agents.retrieval import measure_hybrid
+
+    _hybrid_settings(monkeypatch, enabled=False)
+    vector = _VectorDocs(RERANK_CANDIDATES, {})
+    llm = _RerankLLM(RERANK_YES, fail=failed)
+    row = {
+        "inquiry_subject": "Ratings",
+        "inquiry_body": "help",
+        "product_code": "INV-A",
+        "product_family": "DRIVE",
+        "error_code_reported": "",
+        "category_code": "TECH_SPEC",
+        "language": "fr",
+        "body_language": "en",
+        "reference_doc_id": "DS-INV-A",
+        "reference_section": "6.3",
+    }
+    result = measure_hybrid([row], vector, weights=(0.3,), keyword=keyword_docs([]), llm=llm)
+    assert result["base"]["k3"] == 0
+    assert result["reranked"] == {"off": int(not failed), "0.3": int(not failed)}
+    assert result["rerank_failures"] == {"off": int(failed), "0.3": int(failed)}
+    assert "en" in result["by_group"]["language"]
+    assert "fr" not in result["by_group"]["language"]
+    if not failed:
+        assert len(llm.calls) == 4  # 동일한 문의·절 판단을 두 비교군이 공유
+
+
+@pytest.mark.parametrize("weight", [-1, 1.1, float("nan"), float("inf")])
+def test_invalid_hybrid_weight_rejected(weight):
+    from pydantic import ValidationError
+
+    from cs_agent.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, hybrid_weight=weight)

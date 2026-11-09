@@ -1,0 +1,482 @@
+{
+  "date": "2026-11-09",
+  "split": "valid",
+  "dataset": "synthetic_v1",
+  "dataset_sha256": "c370a047df2a812b3cce7b92a6244e135aee5aa3c9907b7271cec0384aa857b3",
+  "base_main": "95a71fe56ec43b044e8eca940f7e1c174c4506c9",
+  "original_pr_head": "71ab183d94e530a44c6f6998af3dc0ae4db500e8",
+  "document_chunks": 813,
+  "document_hashes_match_current_input": true,
+  "embedding_model": "gemini-embedding-2",
+  "embedding_dim": 1536,
+  "rerank_models": {
+    "jev-1.14.0": 4429,
+    "gemini-3.8-flash": 1100
+  },
+  "rerank_weight": 0.5,
+  "hybrid_weight": 0.0,
+  "retrieval_only": true,
+  "oracle_metadata": [
+    "category_code",
+    "product_code",
+    "product_family",
+    "error_code_reported"
+  ],
+  "comparison": "Same query embeddings and same recorded live relevance judgements for both modes; judgement API cache reused within this evaluation.",
+  "cli_replay_matches": true,
+  "results": {
+    "total": 589,
+    "base": {
+      "k3": 435,
+      "pool": 479
+    },
+    "hybrid": {
+      "0.0": {
+        "k3": 469,
+        "pool": 522
+      },
+      "0.1": {
+        "k3": 462,
+        "pool": 521
+      },
+      "0.2": {
+        "k3": 464,
+        "pool": 520
+      },
+      "0.3": {
+        "k3": 465,
+        "pool": 518
+      }
+    },
+    "by_group": {
+      "category": {
+        "INSTALL": {
+          "n": 68,
+          "off": 17,
+          "off_rerank": 25,
+          "0.0": 17,
+          "0.0_rerank": 26,
+          "0.1": 16,
+          "0.1_rerank": 26,
+          "0.2": 15,
+          "0.2_rerank": 26,
+          "0.3": 15,
+          "0.3_rerank": 24
+        },
+        "TECH_SPEC": {
+          "n": 90,
+          "off": 90,
+          "off_rerank": 90,
+          "0.0": 90,
+          "0.0_rerank": 90,
+          "0.1": 90,
+          "0.1_rerank": 90,
+          "0.2": 90,
+          "0.2_rerank": 90,
+          "0.3": 90,
+          "0.3_rerank": 90
+        },
+        "QUOTE": {
+          "n": 45,
+          "off": 13,
+          "off_rerank": 13,
+          "0.0": 31,
+          "0.0_rerank": 31,
+          "0.1": 31,
+          "0.1_rerank": 31,
+          "0.2": 31,
+          "0.2_rerank": 31,
+          "0.3": 31,
+          "0.3_rerank": 31
+        },
+        "COMPLIANCE": {
+          "n": 53,
+          "off": 52,
+          "off_rerank": 53,
+          "0.0": 52,
+          "0.0_rerank": 53,
+          "0.1": 53,
+          "0.1_rerank": 53,
+          "0.2": 52,
+          "0.2_rerank": 53,
+          "0.3": 52,
+          "0.3_rerank": 53
+        },
+        "MANUAL": {
+          "n": 46,
+          "off": 31,
+          "off_rerank": 40,
+          "0.0": 31,
+          "0.0_rerank": 41,
+          "0.1": 35,
+          "0.1_rerank": 42,
+          "0.2": 40,
+          "0.2_rerank": 41,
+          "0.3": 40,
+          "0.3_rerank": 42
+        },
+        "RETURN": {
+          "n": 53,
+          "off": 34,
+          "off_rerank": 34,
+          "0.0": 45,
+          "0.0_rerank": 45,
+          "0.1": 45,
+          "0.1_rerank": 45,
+          "0.2": 45,
+          "0.2_rerank": 45,
+          "0.3": 45,
+          "0.3_rerank": 45
+        },
+        "ORDER_LEAD": {
+          "n": 53,
+          "off": 49,
+          "off_rerank": 49,
+          "0.0": 49,
+          "0.0_rerank": 49,
+          "0.1": 49,
+          "0.1_rerank": 49,
+          "0.2": 49,
+          "0.2_rerank": 49,
+          "0.3": 49,
+          "0.3_rerank": 49
+        },
+        "DEFECT": {
+          "n": 83,
+          "off": 77,
+          "off_rerank": 79,
+          "0.0": 77,
+          "0.0_rerank": 80,
+          "0.1": 75,
+          "0.1_rerank": 80,
+          "0.2": 74,
+          "0.2_rerank": 80,
+          "0.3": 75,
+          "0.3_rerank": 80
+        },
+        "FW_UPDATE": {
+          "n": 53,
+          "off": 34,
+          "off_rerank": 42,
+          "0.0": 34,
+          "0.0_rerank": 42,
+          "0.1": 25,
+          "0.1_rerank": 37,
+          "0.2": 25,
+          "0.2_rerank": 37,
+          "0.3": 25,
+          "0.3_rerank": 36
+        },
+        "WARRANTY": {
+          "n": 45,
+          "off": 38,
+          "off_rerank": 38,
+          "0.0": 43,
+          "0.0_rerank": 43,
+          "0.1": 43,
+          "0.1_rerank": 43,
+          "0.2": 43,
+          "0.2_rerank": 43,
+          "0.3": 43,
+          "0.3_rerank": 43
+        }
+      },
+      "language": {
+        "en": {
+          "n": 383,
+          "off": 278,
+          "off_rerank": 300,
+          "0.0": 309,
+          "0.0_rerank": 332,
+          "0.1": 312,
+          "0.1_rerank": 333,
+          "0.2": 315,
+          "0.2_rerank": 332,
+          "0.3": 315,
+          "0.3_rerank": 332
+        },
+        "ja": {
+          "n": 6,
+          "off": 3,
+          "off_rerank": 3,
+          "0.0": 5,
+          "0.0_rerank": 5,
+          "0.1": 4,
+          "0.1_rerank": 5,
+          "0.2": 4,
+          "0.2_rerank": 5,
+          "0.3": 4,
+          "0.3_rerank": 5
+        },
+        "de": {
+          "n": 5,
+          "off": 1,
+          "off_rerank": 1,
+          "0.0": 1,
+          "0.0_rerank": 1,
+          "0.1": 1,
+          "0.1_rerank": 1,
+          "0.2": 1,
+          "0.2_rerank": 2,
+          "0.3": 1,
+          "0.3_rerank": 2
+        },
+        "pt": {
+          "n": 9,
+          "off": 6,
+          "off_rerank": 7,
+          "0.0": 6,
+          "0.0_rerank": 7,
+          "0.1": 5,
+          "0.1_rerank": 7,
+          "0.2": 6,
+          "0.2_rerank": 7,
+          "0.3": 6,
+          "0.3_rerank": 7
+        },
+        "es": {
+          "n": 41,
+          "off": 28,
+          "off_rerank": 31,
+          "0.0": 28,
+          "0.0_rerank": 31,
+          "0.1": 27,
+          "0.1_rerank": 30,
+          "0.2": 26,
+          "0.2_rerank": 30,
+          "0.3": 26,
+          "0.3_rerank": 29
+        },
+        "vi": {
+          "n": 13,
+          "off": 9,
+          "off_rerank": 9,
+          "0.0": 9,
+          "0.0_rerank": 9,
+          "0.1": 9,
+          "0.1_rerank": 9,
+          "0.2": 9,
+          "0.2_rerank": 10,
+          "0.3": 9,
+          "0.3_rerank": 10
+        },
+        "it": {
+          "n": 26,
+          "off": 20,
+          "off_rerank": 21,
+          "0.0": 20,
+          "0.0_rerank": 22,
+          "0.1": 19,
+          "0.1_rerank": 22,
+          "0.2": 19,
+          "0.2_rerank": 21,
+          "0.3": 19,
+          "0.3_rerank": 21
+        },
+        "ru": {
+          "n": 15,
+          "off": 12,
+          "off_rerank": 12,
+          "0.0": 12,
+          "0.0_rerank": 12,
+          "0.1": 10,
+          "0.1_rerank": 12,
+          "0.2": 10,
+          "0.2_rerank": 12,
+          "0.3": 10,
+          "0.3_rerank": 11
+        },
+        "ar": {
+          "n": 11,
+          "off": 9,
+          "off_rerank": 10,
+          "0.0": 9,
+          "0.0_rerank": 10,
+          "0.1": 8,
+          "0.1_rerank": 9,
+          "0.2": 7,
+          "0.2_rerank": 8,
+          "0.3": 7,
+          "0.3_rerank": 8
+        },
+        "pl": {
+          "n": 7,
+          "off": 6,
+          "off_rerank": 6,
+          "0.0": 6,
+          "0.0_rerank": 6,
+          "0.1": 6,
+          "0.1_rerank": 6,
+          "0.2": 6,
+          "0.2_rerank": 6,
+          "0.3": 6,
+          "0.3_rerank": 6
+        },
+        "th": {
+          "n": 16,
+          "off": 14,
+          "off_rerank": 14,
+          "0.0": 15,
+          "0.0_rerank": 15,
+          "0.1": 14,
+          "0.1_rerank": 14,
+          "0.2": 14,
+          "0.2_rerank": 14,
+          "0.3": 14,
+          "0.3_rerank": 14
+        },
+        "tr": {
+          "n": 9,
+          "off": 9,
+          "off_rerank": 9,
+          "0.0": 9,
+          "0.0_rerank": 9,
+          "0.1": 9,
+          "0.1_rerank": 9,
+          "0.2": 9,
+          "0.2_rerank": 9,
+          "0.3": 9,
+          "0.3_rerank": 9
+        },
+        "zh": {
+          "n": 15,
+          "off": 14,
+          "off_rerank": 14,
+          "0.0": 14,
+          "0.0_rerank": 14,
+          "0.1": 14,
+          "0.1_rerank": 14,
+          "0.2": 14,
+          "0.2_rerank": 14,
+          "0.3": 14,
+          "0.3_rerank": 14
+        },
+        "id": {
+          "n": 15,
+          "off": 13,
+          "off_rerank": 13,
+          "0.0": 13,
+          "0.0_rerank": 14,
+          "0.1": 11,
+          "0.1_rerank": 12,
+          "0.2": 11,
+          "0.2_rerank": 12,
+          "0.3": 12,
+          "0.3_rerank": 12
+        },
+        "fr": {
+          "n": 18,
+          "off": 13,
+          "off_rerank": 13,
+          "0.0": 13,
+          "0.0_rerank": 13,
+          "0.1": 13,
+          "0.1_rerank": 13,
+          "0.2": 13,
+          "0.2_rerank": 13,
+          "0.3": 13,
+          "0.3_rerank": 13
+        }
+      }
+    },
+    "reranked": {
+      "off": 463,
+      "0.0": 500,
+      "0.1": 496,
+      "0.2": 495,
+      "0.3": 493
+    },
+    "rerank_failures": {
+      "off": 0,
+      "0.0": 0,
+      "0.1": 0,
+      "0.2": 0,
+      "0.3": 0
+    }
+  },
+  "weight_sweep": {
+    "off": {
+      "k3": 435,
+      "pool": 479
+    },
+    "union": {
+      "k3": 469,
+      "pool": 522
+    },
+    "0.1": {
+      "k3": 462,
+      "pool": 521
+    },
+    "0.2": {
+      "k3": 464,
+      "pool": 520
+    },
+    "0.3": {
+      "k3": 465,
+      "pool": 518
+    },
+    "0.5": {
+      "k3": 453,
+      "pool": 512
+    },
+    "1.0": {
+      "k3": 424,
+      "pool": 481
+    }
+  },
+  "paired_reranked": {
+    "gained": 37,
+    "lost": 0,
+    "gained_ticket_ids": [
+      "CSV1-000020",
+      "CSV1-000083",
+      "CSV1-000205",
+      "CSV1-000302",
+      "CSV1-000313",
+      "CSV1-000353",
+      "CSV1-000568",
+      "CSV1-000618",
+      "CSV1-000915",
+      "CSV1-000929",
+      "CSV1-001180",
+      "CSV1-001242",
+      "CSV1-001253",
+      "CSV1-001260",
+      "CSV1-001359",
+      "CSV1-001377",
+      "CSV1-001464",
+      "CSV1-001668",
+      "CSV1-001682",
+      "CSV1-001707",
+      "CSV1-001961",
+      "CSV1-002254",
+      "CSV1-002524",
+      "CSV1-002697",
+      "CSV1-002713",
+      "CSV1-003033",
+      "CSV1-003109",
+      "CSV1-003194",
+      "CSV1-003388",
+      "CSV1-003551",
+      "CSV1-003569",
+      "CSV1-003571",
+      "CSV1-003612",
+      "CSV1-003696",
+      "CSV1-003814",
+      "CSV1-003815",
+      "CSV1-003941"
+    ],
+    "lost_ticket_ids": []
+  },
+  "local_keyword_and_extra_sql_ms": {
+    "mean": 4.193520802942837,
+    "p95": 5.807417001051363,
+    "max": 16.015208999306196
+  },
+  "limitations": [
+    "Synthetic validation data; no held-out test run.",
+    "Oracle category/product/error metadata; not classification/extraction or end-to-end accuracy.",
+    "Extra SQL timing only; not end-to-end K1 latency or cold model latency.",
+    "Per-language small samples and per-category regressions require review."
+  ]
+}

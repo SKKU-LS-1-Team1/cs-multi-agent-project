@@ -160,6 +160,35 @@ def db():
 
 
 @needs_db
+def test_hybrid_scores_only_requested_embedded_sections(db):
+    from cs_agent.agents.retrieval import PgVectorRetriever
+
+    engine, Session = db
+    near = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
+    far = [0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2)
+    with Session.begin() as session:
+        session.add_all(
+            [
+                DocChunk(id="D1#1", doc_id="D1", section="1", text="first", embedding=near),
+                DocChunk(id="D1#1:2", doc_id="D1", section="1", text="second", embedding=far),
+                DocChunk(id="D2", doc_id="D2", section=None, text="whole", embedding=near),
+                DocChunk(id="D3", doc_id="D3", section="1", text="not indexed"),
+                DocChunk(id="D4", doc_id="D4", section="1", text="not requested", embedding=near),
+            ]
+        )
+    docs = PgVectorRetriever("doc_chunks", engine=engine, embed_fn=lambda _: near)
+    hits = docs.score_sections("query", [("D1", "1"), ("D2", None), ("D3", "1")])
+    assert {(e.doc_id, e.section, e.text) for e in hits} == {
+        ("D1", "1", "first"),
+        ("D1", "1", "second"),
+        ("D2", None, "whole"),
+    }
+    assert [e.score for e in hits] == [1.0, 1.0, 0.0]
+    assert docs.score_sections("query", [("D1' OR true --", "1")]) == []
+    assert docs.score_sections("query", []) == []
+
+
+@needs_db
 def test_sql_records_keep_extracted_values_in_existing_draft_slots(db):
     from cs_agent.services.records import SqlRecords
 
