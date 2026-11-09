@@ -541,10 +541,11 @@ function SpecialistFinding({ t }: { t: Ticket }) {
 
 function RequestPlan({ t }: { t: Ticket }) {
   const [plan] = useState(() => t.copilot as import("../../../api/client").CopilotInsight);
-  const items = plan.request_plan.filter((r) => r.status !== "confirmed" &&
+  const items = plan.request_plan.filter((r) => ["missing", "clarify"].includes(r.status) &&
     (r.origin !== "recommended" || t.activeComposer === "expert" || plan.workflow?.request_fields.includes(r.field)));
   const known = plan.request_plan.filter((r) => r.status === "confirmed");
-  const [selected, setSelected] = useState(() => items.filter((r) => r.origin !== "recommended").map((r) => r.field));
+  const unavailable = plan.request_plan.filter((r) => r.status === "unavailable");
+  const [selected, setSelected] = useState(() => items.map((r) => r.field));
   const [busy, setBusy] = useState(false);
   const stale = plan.context_key !== t.copilot?.context_key;
   const reasons = new Map(plan.reading?.request_reasons.map((r) => [r.field, r.text]));
@@ -560,6 +561,10 @@ function RequestPlan({ t }: { t: Ticket }) {
       {!!known.length && <section aria-label="이미 받은 정보" className="rounded-xl bg-muted/60 p-4">
         <h3 className="mb-2 text-sm font-semibold">이미 받은 정보 · {known.length}건</h3>
         <dl className="grid gap-2 text-sm">{known.map((r) => <div key={r.field} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3"><dt className="break-words text-muted-foreground">{r.label}</dt><dd className="break-words font-medium">{r.value}</dd></div>)}</dl>
+      </section>}
+      {!!unavailable.length && <section aria-label="고객이 제공할 수 없는 자료" className="rounded-xl bg-muted/60 p-4">
+        <h3 className="mb-2 text-sm font-semibold">미확보 사유 확인 · 재요청 제외</h3>
+        <ul className="grid gap-2 text-sm">{unavailable.map((r) => <li key={r.field} className="break-words">{r.label}: {r.evidence}</li>)}</ul>
       </section>}
       <div className="grid gap-3">{items.map((r) => <label key={r.field} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border p-4">
       <Checkbox className="mt-1 shrink-0" checked={selected.includes(r.field)} disabled={busy || stale}

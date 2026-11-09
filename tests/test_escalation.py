@@ -742,3 +742,18 @@ def test_regular_question_rewrite_preserves_document_kind_without_plan_key(clien
     assert result.json()["draft"] is None
     assert result.json()["copilot"]["workflow"]["mode"] == "customer_request"
     assert result.json()["copilot"]["workflow"]["request_fields"] == ["photos"]
+
+
+def test_unavailable_referral_material_is_forwarded_with_customer_reason(llm):
+    from test_investigation_info import referral_state
+
+    state = referral_state()
+    state["extraction"].unconfirmed_fields["carrier_frequency"] = "UNAVAILABLE"
+    state["extraction"].unconfirmed_evidence["carrier_frequency"] = (
+        "We cannot check the carrier frequency."
+    )
+    result = write_escalation_request(state, llm, to_dept="FIELD_SVC")
+    assert "We cannot check the carrier frequency." in result.fields["investigation_unavailable"]
+    assert "고객이 제공할 수 없는 자료와 사유" in result.text
+    assert "We cannot check the carrier frequency." in result.text
+    assert "carrier_frequency" not in result.fields

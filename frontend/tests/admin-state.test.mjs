@@ -882,7 +882,7 @@ function nextActionFixture(rows) {
       requiredInformation: t => t.required || [],
       answerContext: () => ({ missingInfo: [] }),
       waitingReviews: t => t.waiting ? [{}] : [], expertPhase: () => 'none', referralRows: () => [],
-      contextIsNew: () => false,
+      contextIsNew: () => false, escalationRecommended: () => false,
     },
     './store': { openModal: (...args) => opened.push(args) },
     './api-sync': api,
@@ -1422,4 +1422,64 @@ test('follow-up evidence keeps reasoning visible and only folds deduplicated, es
   assert.ok(!html.includes('<script>') && !html.includes('<details open'));
   assert.equal(renderToStaticMarkup(jsxRuntime.jsx(FollowupEvidence, { link: { ...link, dismissed: true } })), '');
   assert.equal(renderToStaticMarkup(jsxRuntime.jsx(FollowupEvidence, {})), '');
+});
+
+test('referral preparation asks for missing recommended materials but never unavailable or received items', () => {
+  const { copilotPresentation, referralSuggestions } = load('lib/investigation.ts', {});
+  const t = { apiStatus: 'READY_FOR_REVIEW', purpose: 'request', draft: 'Please send materials',
+    copilot: { workflow: { mode: 'customer_request', request_fields: ['load_type'] }, request_plan: [
+      { field: 'load_type', origin: 'recommended', status: 'missing' },
+      { field: 'logs', origin: 'required', status: 'unavailable' },
+      { field: 'cable_length', origin: 'recommended', status: 'confirmed' },
+      { field: 'carrier_frequency', origin: 'recommended', status: 'unavailable' },
+    ] } };
+  assert.deepEqual(Array.from(copilotPresentation(t).requestRows, r => r.field), ['load_type']);
+  t.activeComposer = 'expert';
+  assert.deepEqual(Array.from(referralSuggestions(t), r => r.field), ['load_type']);
+});
+
+test('referral choice collects optional materials without making them a hard referral blocker', () => {
+  const logic = fullLogicFixture();
+  const { mod } = apiFixture();
+  const t = mod.apply(undefined, apiRow({
+    classification: { category: 'DEFECT' }, extraction: {},
+    rules: { required_info: [], missing_info: [], missing_blocking: [] },
+    escalation_advice: { decision: 'recommended' },
+    investigation_info: { missing_fields: ['load_type'] },
+  }));
+  Object.assign(t, { owner: 'tester', analysisReady: true, priority: 'P3', draft: '', aiDraft: '' });
+  assert.equal(logic.branchChoice(t), 'request');
+  assert.equal(logic.pendingCustomerInfo(t), 0); // staff may refer before optional materials arrive
+  t.investigationInfo.missing_fields = [];
+  assert.equal(logic.branchChoice(t), 'expert');
+  t.investigationInfo.missing_fields = ['load_type']; t.priority = 'P1';
+  assert.equal(logic.branchChoice(t), 'expert');
+});
+
+test('customer-declared unavailable material does not prevent referral, while a blocking field still does', () => {
+  const logic = fullLogicFixture();
+  const t = { source: 'api', analysisReady: true, requiredInformation: [{ id: 'logs' }, { id: 'serial_no' }],
+    infoChecks: { logs: { status: 'unusable' }, serial_no: { status: 'missing' } },
+    copilot: { request_plan: [{ field: 'logs', status: 'unavailable' }, { field: 'serial_no', status: 'clarify' }] } };
+  assert.equal(logic.pendingCustomerInfo(t), 1);
+  t.infoChecks.serial_no.status = 'confirmed';
+  assert.equal(logic.pendingCustomerInfo(t), 0);
+});
+
+test('referral is counted once: arrived reply is review only, unanswered request is waiting only', () => {
+  const reply = { kind: 'expert', id: 'p1', requestId: 'r1', source: 'specialist-api' };
+  const request = { kind: 'escalation', id: 'r1', source: 'specialist-api', department: 'QA' };
+  const base = { source: 'api', stage: 0, sent: false, activeComposer: null };
+  const arrived = { ...base, id: 'A', events: [request, reply],
+    specialistFollowup: { status: 'in_progress', pending_replies: false } };
+  const asked = { ...base, id: 'B', events: [{ ...request, id: 'r2' }],
+    specialistFollowup: { status: 'in_progress', pending_replies: true } };
+  const confirmed = { ...base, id: 'C', events: [{ ...request, id: 'r3' }, { ...reply, id: 'p3', requestId: 'r3' }],
+    specialistFollowup: { status: 'confirmed', pending_replies: false } };
+  const closed = { ...arrived, id: 'D', stage: 5 };
+  const logic = fullLogicFixture([arrived, asked, confirmed, closed]);
+  const rows = logic.referralRows();
+  const ids = (ok) => rows.filter(ok).map((r) => r.ticket.id).join('');
+  assert.equal(ids(logic.isReviewReferral), 'A');
+  assert.equal(ids(logic.isWaitingReferral), 'B');
 });

@@ -71,7 +71,7 @@ export type CopilotStatement = { text: string; references: { source_id: string; 
 export type CopilotInsight = {
   workflow?: { mode: string; next_action: string; request_fields: string[] };
   context_key: string;
-  request_plan: { field: string; label: string; status: "confirmed" | "clarify" | "missing"; origin: "required" | "specialist" | "recommended" | "selected"; blocking: boolean; value: string; reason: string; evidence: string }[];
+  request_plan: { field: string; label: string; status: "confirmed" | "clarify" | "missing" | "unavailable"; origin: "required" | "specialist" | "recommended" | "selected"; blocking: boolean; value: string; reason: string; evidence: string }[];
   reading: { request: CopilotStatement; confirmed: CopilotStatement[]; unresolved: CopilotStatement[]; next_reason: CopilotStatement | null;
     request_reasons: (CopilotStatement & { field: string })[];
     cases: { case_id: string; matches: CopilotStatement[]; differences: CopilotStatement[]; unknowns: CopilotStatement[]; use_limit: CopilotStatement }[] } | null;
@@ -126,7 +126,7 @@ export type Ticket = {
   draft_information_reviewed_at?: string | null;
   information_review?: InformationReview | null;
   information_reviews?: InformationReview[];
-  investigation_info?: { recommended_fields: string[]; provided_fields: string[]; missing_fields: string[]; note: string } | null;
+  investigation_info?: { recommended_fields: string[]; provided_fields: string[]; missing_fields: string[]; unavailable_fields?: Record<string, string>; note: string } | null;
   escalation_advice?: { decision: "recommended" | "not_needed"; source: "rule" | "ai"; to_dept: string; condition: string; reason: string; quote: string; model: string } | null;
   specialist_followup?: SpecialistFollowup | null;
   specialist_requests?: SpecialistRequest[];

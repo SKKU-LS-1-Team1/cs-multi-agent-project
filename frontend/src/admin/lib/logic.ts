@@ -186,6 +186,11 @@ export const sourceInquiry = (t: Ticket) => t.body || (t.source !== "api" && t.i
 
 // 전문부서 요청 대상 = 백엔드 이관 대상(agents/escalation.py ESCALATION_TARGETS)의 이름 (departments.csv)
 export const expertDepartments = ["자동화 기술지원", "저압기기 기술지원", "고압·배전반 기술지원", "변압기 기술지원", "에너지솔루션 기술지원", "현장 서비스", "품질보증/클레임", "펌웨어 개발", "인증·규격", "보증·RMA 데스크", "해외영업 운영", "주문·물류"];
+/** 협업 화면: 회신이 도착해 담당자가 확인할 요청. */
+export const isReviewReferral = (r: { ticket: Ticket; response?: Ev }) => !!r.response && !r.response.reviewed && r.ticket.stage !== 5 && expertPhase(r.ticket) === "review";
+/** 협업 화면: 아직 전문부서 쪽에 있는 요청. 회신 확인 단계로 넘어온 요청은 대기에 넣지 않는다 (한 건이 두 줄로 보이지 않게). */
+export const isWaitingReferral = (r: { ticket: Ticket; response?: Ev }) => (!r.response || r.ticket.specialistFollowup?.status === "in_progress") && r.ticket.stage !== 5 && !isReviewReferral(r);
+
 export function referralRows() {
   const rows: any[] = [];
   for (const t of tickets) {
@@ -212,7 +217,8 @@ export const informationAssessment = (t: Ticket) =>
 /** 아직 확인되지 않은 필수 고객 정보 건수. 0이어야 전문부서로 요청할 수 있다(고객 정보 확인 → 전문부서 순서). */
 export function pendingCustomerInfo(t: Ticket): number {
   if (t.stage === 5 || (t.source === "api" && !t.analysisReady)) return 0;
-  return informationAssessment(t).filter((x) => !["provided", "confirmed"].includes(x.status)).length;
+  return informationAssessment(t).filter((x) => !["provided", "confirmed"].includes(x.status)
+    && !t.copilot?.request_plan?.some((r: any) => r.field === x.id && r.status === "unavailable")).length;
 }
 export function informationSummary(t: Ticket) {
   const items = informationAssessment(t), remaining = items.filter((x) => !["provided", "confirmed"].includes(x.status)).length;
@@ -512,7 +518,8 @@ export function branchChoice(t: Ticket): Choice | null {
   if (t.customerOutcome === "needs-support" || t.customerRequestStatus === "waiting") return null;
   if (t.customerRequestStatus === "received" && reply && requiredInformation(t).length && reply.id !== t.reviewedReplyKey) return null;
   if (waitingReviews(t).length || t.legacyReviewPending) return null;
-  if (escalationRecommended(t)) return pendingCustomerInfo(t) > 0 ? "request" : "expert"; // 시나리오: 자료를 받고 이관
+  if (escalationRecommended(t)) return pendingCustomerInfo(t) > 0 ||
+    (t.priority !== "P1" && t.investigationInfo?.missing_fields?.length > 0) ? "request" : "expert"; // 시나리오: 자료를 받고 이관
   if (untouchedAiDraft && t.composerOpen) return "answer";
   if (c.missingInfo.length) return "request";
   if (!c.expertResponse && !c.availableReferences.length && ["불량", "설치", "펌웨어"].includes(t.type) && !(t.customerRequestStatus === "received" && reply)) return "expert";

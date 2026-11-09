@@ -53,7 +53,7 @@ export function referralSuggestions(t: Ticket) {
   // Merely having a defect, a potential department, or a draft customer answer isn't referral intent.
   if (t.activeComposer !== "expert" || copilotMode(t) !== "specialist_prepare"
     || t.specialistRequests?.length || !["READY_FOR_REVIEW", "ON_HOLD"].includes(t.apiStatus)) return [];
-  return (t.copilot?.request_plan || []).filter((r: any) => r.origin === "recommended" && r.status !== "confirmed");
+  return (t.copilot?.request_plan || []).filter((r: any) => r.origin === "recommended" && ["missing", "clarify"].includes(r.status));
 }
 
 
@@ -76,9 +76,9 @@ export function copilotPresentation(t: Ticket, choice: string | null = null) {
   const workflow = t.copilot?.workflow;
   const requestFields = mode !== "customer_request" ? [] : workflow?.mode === mode
     ? workflow.request_fields
-    : plan.filter((row: any) => row.origin !== "recommended" && row.status !== "confirmed").map((row: any) => row.field);
+    : plan.filter((row: any) => row.origin !== "recommended" && ["missing", "clarify"].includes(row.status)).map((row: any) => row.field);
   const rows = requestFields.map((field: string) => plan.find((row: any) => row.field === field))
-    .filter((row: any) => row && row.status !== "confirmed");
+    .filter((row: any) => row && ["missing", "clarify"].includes(row.status));
   return {
     mode,
     requestRows: rows,

@@ -592,7 +592,7 @@ function Copilot({ t }: { t: Ticket }) {
         </PanelBlock>
         {suggested.length > 0 && (
           <PanelBlock icon={Paperclip} tone="info" title="이관 준비 · 추가로 확인할 자료">
-            <p className="text-sm text-muted-foreground">이관 요청서에 이미 확보한 정보는 포함되어 있습니다. 아래 자료는 필요한 경우에만 고객에게 요청하며, 없어도 이관할 수 있습니다.</p>
+            <p className="text-sm text-muted-foreground">이관 요청서에 이미 확보한 정보는 포함되어 있습니다. 아직 받지 못한 권장 자료는 질의서에 기본 포함됩니다. 고객이 제공할 수 없는 자료는 사유를 남기고 이관할 수 있습니다.</p>
             <ul className="mt-2 grid gap-1 text-sm">{suggested.map((row: { field: string; label: string }) => <li key={row.field}>• {row.label}</li>)}</ul>
             {["READY_FOR_REVIEW", "ON_HOLD"].includes(t.apiStatus) && !t.manualReply && t.owner && t.customerRequestStatus !== "waiting" && <Button className="mt-3 w-full" variant="outline" disabled={t.regenerating} onClick={() => requestInvestigationInfo(t)}>필요한 자료 선택·요청문 작성</Button>}
           </PanelBlock>

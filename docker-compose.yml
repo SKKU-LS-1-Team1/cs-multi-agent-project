@@ -78,6 +78,10 @@ services:
   redis:
     restart: unless-stopped
     image: redis:7-alpine
+    # 이 컴퓨터(127.0.0.1)에서만 접속 가능. 6379 는 다른 프로젝트와 겹치기 쉬워 다른 포트로 연다.
+    # 로컬 개발: docker compose up -d redis → .env 의 REDIS_URL 로 uv run 서버가 붙는다.
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-56379}:6379"
 
   # 사례 학습 지식 그래프 (CSA-69). 벡터 함수(vector.similarity.cosine)가 있는 5.18 이상으로 고정.
   # Postgres 처럼 이 컴퓨터(127.0.0.1)에서만 열린다: Browser http://localhost:7474 · Bolt 7687

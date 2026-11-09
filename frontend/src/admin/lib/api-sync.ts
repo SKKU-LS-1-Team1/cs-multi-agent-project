@@ -623,7 +623,17 @@ export async function infoRequestViaApi(t: Ticket, selected?: string[], planKey?
   t.regenerating = true;
   commit();
   try {
-    const row = await api.act(t.id, { action: "info_request", reviewer: signedIn, info_plan_key: planKey, info_items: selected ?? [...new Set([...(t.specialistFollowup?.missing_fields || []), ...(t.investigationInfo?.missing_fields || []), ...(t.requiredInformation || []).filter((item: { id: string }) => !["provided", "confirmed"].includes(t.infoChecks?.[item.id]?.status)).map((item: { id: string }) => item.id)])] });
+    const fields = selected ?? (t.copilot
+      ? t.copilot.request_plan.filter((r: any) => ["missing", "clarify"].includes(r.status)
+        && (r.origin !== "recommended" || t.activeComposer === "expert"
+          || t.copilot.workflow?.request_fields.includes(r.field))).map((r: any) => r.field)
+      : [...new Set([...(t.specialistFollowup?.missing_fields || []),
+        ...(t.investigationInfo?.missing_fields || []),
+        ...(t.requiredInformation || []).filter((item: { id: string }) =>
+          !["provided", "confirmed"].includes(t.infoChecks?.[item.id]?.status)).map((item: { id: string }) => item.id)])]);
+    if (!fields.length) { toast("현재 요청할 미확인 항목이 없습니다."); return false; }
+    const row = await api.act(t.id, { action: "info_request", reviewer: signedIn,
+      info_plan_key: planKey ?? t.copilot?.context_key, info_items: fields });
     if (!row.info_request || !["ON_HOLD", "READY_FOR_REVIEW"].includes(row.status) ||
       (row.draft_customer_revision ?? 0) !== (row.customer_revision ?? 0) ||
       (row.customer_revision ?? 0) < (t.customerRevision ?? 0) ||
