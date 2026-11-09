@@ -317,3 +317,188 @@ def test_measure_rerank_compares_off_and_on() -> None:
     result = measure_rerank([row], Fixed(), None, _RerankLLM(RERANK_YES), weights=(0.5,))
 
     assert (result["base"], result["pool"], result["rerank"][0.5]) == (0, 1, 1)
+
+
+# 하이브리드 (멘토링 개선안 4) --------------------------------------------------------------------
+
+
+class _VectorDocs:
+    """pgvector docs 대역: search 는 정해 둔 순서, score_sections 는 정해 둔 벡터 점수."""
+
+    calibrated = True
+
+    def __init__(self, ranked: list[Evidence], scores: dict[tuple[str, str], float]):
+        self.ranked, self.scores = ranked, scores
+        self.asked: list[tuple[str, str]] = []
+
+    def search(self, query, k=5, where=None):
+        found = [
+            e
+            for e in self.ranked
+            if not where or all(e.metadata.get(c) == v for c, v in where.items())
+        ]
+        return found[:k]
+
+    def score_sections(self, query, keys):
+        self.asked.extend(keys)
+        return [
+            _doc(doc_id, section, self.scores[(doc_id, section)], doc_type=doc_id.split("-")[0])
+            for doc_id, section in keys
+            if (doc_id, section) in self.scores
+        ]
+
+
+def _hybrid_settings(monkeypatch, enabled: bool, weight: float = 0.3) -> None:
+    from cs_agent.agents import retrieval
+
+    settings = SimpleNamespace(hybrid_enabled=enabled, hybrid_weight=weight)
+    monkeypatch.setattr(retrieval, "get_settings", lambda: settings)
+    monkeypatch.setattr(retrieval, "_keyword_index", lambda: keyword_docs(CHUNKS))
+
+
+def test_first_pass_hybrid_adds_keyword_sections(monkeypatch) -> None:
+    _hybrid_settings(monkeypatch, enabled=True)
+    vector = _VectorDocs([_doc("DS-INV-A", "2.1", 0.8, doc_type="DS")], {("TG-INV-A", "3.4"): 0.6})
+    found = first_pass(vector, None, "deceleration time keeps tripping")
+    by_key = {(e.doc_id, e.section): e for e in found}
+    # 벡터 top 밖이던 TG 3.4 가 키워드로 들어오고, 벡터 점수 + 키워드 점수 × 0.3
+    assert ("TG-INV-A", "3.4") in vector.asked
+    assert by_key[("TG-INV-A", "3.4")].score > 0.6
+    assert by_key[("TG-INV-A", "3.4")].metadata["keyword"]
+    assert by_key[("DS-INV-A", "2.1")].score == 0.8  # 키워드에 안 걸린 근거는 그대로
+
+
+def test_first_pass_hybrid_off_is_vector_only(monkeypatch) -> None:
+    _hybrid_settings(monkeypatch, enabled=False)
+    vector = _VectorDocs([_doc("DS-INV-A", "2.1", 0.8, doc_type="DS")], {("TG-INV-A", "3.4"): 0.6})
+    found = first_pass(vector, None, "deceleration time keeps tripping")
+    assert [(e.doc_id, e.section) for e in found] == [("DS-INV-A", "2.1")]
+    assert vector.asked == []
+
+
+def test_first_pass_hybrid_skips_keyword_retriever(monkeypatch) -> None:
+    # 로컬 대체 구현(키워드 검색)이면 섞을 벡터가 없으니 그대로
+    _hybrid_settings(monkeypatch, enabled=True)
+    found = first_pass(keyword_docs(CHUNKS), None, "deceleration time")
+    assert all("keyword" not in e.metadata for e in found)
+
+
+def test_measure_hybrid_counts_off_and_on(monkeypatch) -> None:
+    from cs_agent.agents.retrieval import measure_hybrid
+
+    _hybrid_settings(monkeypatch, enabled=False)
+    vector = _VectorDocs(
+        [
+            _doc("DS-INV-A", "2.1", 0.9, doc_type="DS", product_code="INV-A"),
+            _doc("TG-INV-A", "3.1", 0.85, doc_type="TG", product_code="INV-A"),
+            _doc("DS-PLC-B", "2.1", 0.8, doc_type="DS", product_code="PLC-B"),
+        ],
+        {("TG-INV-A", "3.4"): 0.5},
+    )
+    row = {
+        "ticket_id": "T-1",
+        "inquiry_subject": "Over-voltage",
+        "inquiry_body": "deceleration time",
+        "product_code": "",
+        "product_family": "",
+        "error_code_reported": "",
+        "category_code": "MANUAL",
+        "language": "en",
+        "reference_doc_id": "TG-INV-A",
+        "reference_section": "3.4",
+    }
+    result = measure_hybrid([row], vector, weights=(0.0, 1.0), keyword=keyword_docs(CHUNKS))
+    assert result["total"] == 1
+    assert result["base"] == {"k3": 0, "pool": 0}
+    assert result["hybrid"][0.0] == {"k3": 0, "pool": 1}  # 점수 가산 없이 후보만 추가
+    assert result["hybrid"][1.0] == {"k3": 1, "pool": 1}
+    assert result["by_group"]["language"]["en"] == {"n": 1, "off": 0, "0.0": 0, "1.0": 1}
+
+
+def test_hybrid_zero_weight_adds_candidates_without_score_bonus(monkeypatch):
+    _hybrid_settings(monkeypatch, enabled=True, weight=0.0)
+    vector = _VectorDocs([_doc("DS-INV-A", "2.1", 0.8)], {("TG-INV-A", "3.4"): 0.6})
+    result = first_pass(vector, None, "deceleration time")
+    assert {(e.doc_id, e.section): e.score for e in result} == {
+        ("DS-INV-A", "2.1"): 0.8,
+        ("TG-INV-A", "3.4"): 0.6,
+    }
+
+
+@pytest.mark.parametrize("failure", ["keyword", "score_sections"])
+def test_hybrid_failure_reuses_successful_vector_search(monkeypatch, failure):
+    from cs_agent.agents import retrieval
+
+    _hybrid_settings(monkeypatch, enabled=True)
+
+    class Once(_VectorDocs):
+        calls = 0
+
+        def search(self, *args, **kwargs):
+            self.calls += 1
+            assert self.calls == 1, "성공한 벡터 검색을 다시 호출하면 안 됨"
+            return super().search(*args, **kwargs)
+
+        def score_sections(self, *args):
+            raise TimeoutError("DB scoring unavailable")
+
+    vector = Once([_doc("DS-INV-A", "2.1", 0.8)], {})
+    if failure == "keyword":
+
+        def broken(*args, **kwargs):
+            raise RuntimeError("keyword index unavailable")
+
+        monkeypatch.setattr(retrieval, "keyword_scores", broken)
+    found = first_pass(vector, None, "deceleration time")
+    assert found == vector.ranked
+    assert vector.calls == 1
+
+
+def test_hybrid_does_not_mutate_vector_scores_or_keep_wrong_product(monkeypatch):
+    _hybrid_settings(monkeypatch, enabled=True)
+    original = _doc("DS-INV-A", "2.1", 0.8, product_code="INV-A", doc_type="DS")
+    vector = _VectorDocs([original], {})
+    found = first_pass(vector, None, "rated output")
+    assert found[0].score > original.score
+    assert original.score == 0.8 and "keyword" not in original.metadata
+    assert finalize_evidence(found, Extraction(product_code="PLC-B")) == []
+    assert vector.search("rated output")[0].score == 0.8  # 챗봇 직접 검색은 원래 점수
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_measure_hybrid_includes_reranker_and_actual_body_language(monkeypatch, failed):
+    from cs_agent.agents.retrieval import measure_hybrid
+
+    _hybrid_settings(monkeypatch, enabled=False)
+    vector = _VectorDocs(RERANK_CANDIDATES, {})
+    llm = _RerankLLM(RERANK_YES, fail=failed)
+    row = {
+        "inquiry_subject": "Ratings",
+        "inquiry_body": "help",
+        "product_code": "INV-A",
+        "product_family": "DRIVE",
+        "error_code_reported": "",
+        "category_code": "TECH_SPEC",
+        "language": "fr",
+        "body_language": "en",
+        "reference_doc_id": "DS-INV-A",
+        "reference_section": "6.3",
+    }
+    result = measure_hybrid([row], vector, weights=(0.3,), keyword=keyword_docs([]), llm=llm)
+    assert result["base"]["k3"] == 0
+    assert result["reranked"] == {"off": int(not failed), "0.3": int(not failed)}
+    assert result["rerank_failures"] == {"off": int(failed), "0.3": int(failed)}
+    assert "en" in result["by_group"]["language"]
+    assert "fr" not in result["by_group"]["language"]
+    if not failed:
+        assert len(llm.calls) == 4  # 동일한 문의·절 판단을 두 비교군이 공유
+
+
+@pytest.mark.parametrize("weight", [-1, 1.1, float("nan"), float("inf")])
+def test_invalid_hybrid_weight_rejected(weight):
+    from pydantic import ValidationError
+
+    from cs_agent.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, hybrid_weight=weight)

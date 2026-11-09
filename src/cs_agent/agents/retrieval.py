@@ -57,6 +57,14 @@
 #   위에 둔다.
 #   RERANK_ENABLED=false · 라우터 없음 · LLM 꺼짐(fake) · 호출 실패면 지금 규칙 정렬 그대로.
 #   비교: uv run python -m cs_agent.agents.retrieval --split valid --rerank (끔/켬 K3 를 같이 출력)
+# - 하이브리드 (멘토링 개선안 4): HYBRID_ENABLED=true 이고 docs 가 pgvector 면 first_pass 가
+#   벡터 top-8 에 키워드 검색(KeywordRetriever, data/raw/docs) top-HYBRID_K 를 더한다.
+#   벡터 top-8 밖의 키워드 후보는 같은 질문 임베딩으로 벡터 점수를 따로 구하고(score_sections),
+#   기본은 후보만 합친 뒤 기존 벡터 점수·규칙·reranker로 정렬한다 (hybrid_weight=0).
+#   양수 가중치면 키워드 점수도 가산할 수 있지만 valid에서 펌웨어 성능이 하락해 기본은 0이다.
+#   valid 실측: docs/results/hybrid_retrieval_valid.md.
+#   챗봇의 docs.search 점수(문의 전환 기준값 0.70)는 건드리지 않는다 — first_pass 에서만 섞는다.
+#   비교: uv run python -m cs_agent.agents.retrieval --split valid --hybrid (끔/켬 K3·위 8 안 비율)
 import argparse
 import contextvars
 import csv
@@ -87,6 +95,8 @@ RERANK_TASK = "rerank"
 RERANK_POOL = 8  # 규칙 정렬 위 몇 개를 판단 모델에 다시 묻는가 (first_pass docs top-8 과 같게)
 RERANK_WORKERS = 8
 RERANK_TEXT_CHARS = 1500  # 절 본문은 앞부분만 (긴 절 = 같은 절 조각 중 점수 높은 것)
+HYBRID_K = 8  # 키워드 후보 수 (벡터 top-8 과 같게)
+HYBRID_WEIGHTS = (0.0, 0.1, 0.2, 0.3, 0.5, 1.0)  # 0도 키워드 후보는 추가 (끔과 다름)
 
 # 유형별로 먼저 볼 문서. "DS" 는 doc_type, "POL-ORDER" 처럼 '-' 가 있으면 doc_id
 PREFERRED_DOCS: dict[Category, tuple[str, ...]] = {
@@ -177,9 +187,14 @@ def keyword_docs(chunks: Iterable[Any] | None = None) -> KeywordRetriever:
 
 
 @lru_cache(maxsize=1)
+def _keyword_index() -> KeywordRetriever:
+    return keyword_docs()
+
+
+@lru_cache(maxsize=1)
 def _sections_by_doc() -> dict[str, tuple[Evidence, ...]]:
     sections: dict[str, list[Evidence]] = {}
-    for evidence, _ in keyword_docs().items:
+    for evidence, _ in _keyword_index().items:
         sections.setdefault(evidence.doc_id, []).append(evidence)
     return {doc_id: tuple(items) for doc_id, items in sections.items()}
 
@@ -299,6 +314,27 @@ class PgVectorRetriever:
             rows = conn.execute(sql, params).mappings().all()
         return [self._evidence(row) for row in rows]
 
+    def score_sections(self, query: str, keys: Sequence[tuple[str, str | None]]) -> list[Evidence]:
+        """정해진 절들의 벡터 점수 (하이브리드: 벡터 top-k 밖에서 키워드로 찾은 절)."""
+        import sqlalchemy as sa
+
+        if self.config["source"] != "docs" or not keys:
+            return []
+        conditions = " OR ".join(
+            f"(doc_id = :d{i} AND section IS NOT DISTINCT FROM :s{i})" for i in range(len(keys))
+        )
+        sql = sa.text(
+            f"SELECT {self.config['columns']}, embedding <=> CAST(:query AS vector) AS distance "
+            f"FROM {self.table} WHERE {self.config['extra_where']} AND ({conditions}) "
+            "ORDER BY distance"
+        )
+        params: dict[str, Any] = {"query": str(list(self.embed_fn(query)))}
+        for i, (doc_id, section) in enumerate(keys):
+            params[f"d{i}"], params[f"s{i}"] = doc_id, section
+        with (self.engine or _engine()).connect() as conn:
+            rows = conn.execute(sql, params).mappings().all()
+        return [self._evidence(row) for row in rows]
+
     def _evidence(self, row: Any) -> Evidence:
         score = round(1 - float(row["distance"]), 4)
         if self.config["source"] == "docs":
@@ -386,11 +422,79 @@ def _merge(groups: Iterable[list[Evidence]]) -> list[Evidence]:
     return sorted(best.values(), key=lambda e: e.score, reverse=True)
 
 
+def hybrid_weight(docs: Retriever | None) -> float | None:
+    """꺼짐·벡터 검색 불가면 None. 0이면 키워드 후보만 추가하고 점수는 가산하지 않는다."""
+    settings = get_settings()
+    if not settings.hybrid_enabled or docs is None or not hasattr(docs, "score_sections"):
+        return None
+    return settings.hybrid_weight
+
+
+def keyword_scores(
+    query: str, k: int = HYBRID_K, keyword: Retriever | None = None
+) -> dict[tuple[str, str | None], float]:
+    """키워드 검색 위 k 개 절의 점수 (0~1, 질문 단어 idf 중 맞은 비율)."""
+    best: dict[tuple[str, str | None], float] = {}
+    for evidence in (keyword or _keyword_index()).search(query, k):
+        key = (evidence.doc_id, evidence.section)
+        best[key] = max(best.get(key, 0.0), evidence.score)
+    return best
+
+
+def hybrid_candidates(
+    docs: Retriever,
+    query: str,
+    k: int = DOCS_K,
+    keyword: Retriever | None = None,
+    *,
+    vector: list[Evidence] | None = None,
+) -> tuple[list[Evidence], list[Evidence], dict[tuple[str, str | None], float]]:
+    """(벡터 top-k, 키워드로만 찾은 절의 벡터 점수 근거, 키워드 점수)."""
+    if vector is None:
+        vector = docs.search(query, k)
+    scores = keyword_scores(query, HYBRID_K, keyword)
+    seen = {(e.doc_id, e.section) for e in vector}
+    missing = [key for key in scores if key not in seen]
+    extra = docs.score_sections(query, missing) if missing else []  # type: ignore[attr-defined]
+    return vector, extra, scores
+
+
+def add_keyword_scores(
+    evidence: Iterable[Evidence], scores: dict[tuple[str, str | None], float], weight: float
+) -> list[Evidence]:
+    """벡터 점수 + 키워드 점수 × weight. 키워드에 안 걸린 근거는 그대로."""
+    out = []
+    for e in evidence:
+        keyword = scores.get((e.doc_id, e.section))
+        if keyword is None:
+            out.append(e)
+            continue
+        out.append(
+            e.model_copy(
+                update={
+                    "score": round(e.score + weight * keyword, 4),
+                    "metadata": {**e.metadata, "keyword": f"{keyword:.3f}"},
+                }
+            )
+        )
+    return out
+
+
 def first_pass(docs: Retriever, cases: Retriever, text: str, k: int = DOCS_K) -> list[Evidence]:
-    """④ 원문 기반 1차 검색."""
+    """④ 원문 기반 1차 검색. HYBRID_ENABLED 면 docs 에 키워드 후보·점수를 섞는다."""
     groups = []
     if docs is not None:
-        groups.append(docs.search(text, k))
+        vector = docs.search(text, k)
+        weight = hybrid_weight(docs)
+        if weight is not None:
+            try:
+                vector, extra, scores = hybrid_candidates(docs, text, k, vector=vector)
+                groups.append(add_keyword_scores(vector + extra, scores, weight))
+            except Exception:  # 키워드 쪽 실패 → 벡터만 (처리 흐름은 멈추지 않는다)
+                _LOGGER.exception("하이브리드 검색 실패 → 벡터 검색만")
+                groups.append(vector)
+        else:
+            groups.append(vector)
         for code in find_error_codes(text):  # 에러코드가 있으면 TG 절을 따로 더 찾는다
             groups.append(docs.search(f"{code} {text}", ERROR_CODE_K, {"doc_type": "TG"}))
     if cases is not None:
@@ -668,11 +772,114 @@ def measure_rerank(
     }
 
 
+def measure_hybrid(
+    tickets: Iterable[dict[str, str]],
+    docs: Retriever,
+    weights: Sequence[float] = HYBRID_WEIGHTS,
+    k: int = 3,
+    keyword: Retriever | None = None,
+    *,
+    llm: Any = None,
+) -> dict[str, Any]:
+    """하이브리드 끔/켬 K3 비교. 같은 벡터·키워드 결과로 가중치만 바꿔 본다 (검색은 문의당 1번).
+
+    pool = 정답 절이 근거 확정 위 RERANK_POOL 안 (reranker 가 올릴 수 있는 상한).
+    llm을 주면 동일한 모델 판단을 재사용해 reranker 포함 결과도 비교한다.
+    정답 유형·제품을 사용한 검색 단독 평가이며 전체 업무 정확도는 아니다.
+    """
+    total = 0
+    base = {"k3": 0, "pool": 0}
+    hits = {w: {"k3": 0, "pool": 0} for w in weights}
+    reranked = {"off": 0, **{str(w): 0 for w in weights}}
+    failures = dict.fromkeys(reranked, 0)
+    by_group: dict[str, dict[str, dict[str, int]]] = {"category": {}, "language": {}}
+    for row in tickets:
+        if not row["reference_doc_id"]:
+            continue
+        text = f"{row['inquiry_subject']}\n{row['inquiry_body']}"
+        extraction = Extraction(
+            product_code=row["product_code"] or None,
+            product_family=row["product_family"] or None,
+            error_code=row["error_code_reported"] or None,
+        )
+        category = Category(row["category_code"])
+        ref = (row["reference_doc_id"], row["reference_section"])
+        vector, extra, scores = hybrid_candidates(docs, text, DOCS_K, keyword)
+        rest = [
+            docs.search(f"{code} {text}", ERROR_CODE_K, {"doc_type": "TG"})
+            for code in find_error_codes(text)
+        ]
+
+        total += 1
+        mains = {"off": vector}
+        for w in weights:
+            mains[str(w)] = add_keyword_scores(vector + extra, scores, w)
+        results = {}
+        judgement_cache: dict[tuple[str, str | None, str], float] = {}
+        for name, main in mains.items():
+            pool = [
+                e
+                for e in finalize_evidence(
+                    _merge([main, *rest]), extraction, k=RERANK_POOL, category=category
+                )
+                if e.source == "docs"
+            ]
+            results[name] = (k3_hit(pool[:k], *ref), k3_hit(pool, *ref))
+            if llm is not None:
+                keys = [(e.doc_id, e.section, e.text) for e in pool]
+                unseen = [
+                    e for e, key in zip(pool, keys, strict=True) if key not in judgement_cache
+                ]
+                scores = relevance(llm, text, unseen)
+                if scores is None:
+                    failures[name] += 1
+                    after = pool  # 운영과 동일하게 판단 실패 시 규칙 순서로 집계
+                else:
+                    judgement_cache.update(
+                        ((e.doc_id, e.section, e.text), score)
+                        for e, score in zip(unseen, scores, strict=True)
+                    )
+                    pinned = {
+                        (e.doc_id, e.section)
+                        for e in pool
+                        if _has_error_code(e, extraction.error_code, category)
+                    }
+                    after = rerank(
+                        pool,
+                        text,
+                        llm,
+                        pinned=pinned,
+                        scores=[judgement_cache[key] for key in keys],
+                    )
+                reranked[name] += k3_hit(after[:k], *ref)
+                results[name + "_rerank"] = (k3_hit(after[:k], *ref), k3_hit(pool, *ref))
+        base["k3"] += results["off"][0]
+        base["pool"] += results["off"][1]
+        for w in weights:
+            hits[w]["k3"] += results[str(w)][0]
+            hits[w]["pool"] += results[str(w)][1]
+        for group, value in (
+            ("category", row["category_code"]),
+            ("language", row.get("body_language") or row["language"]),
+        ):
+            counts = by_group[group].setdefault(value, {"n": 0})
+            counts["n"] += 1
+            for name, (hit, _) in results.items():
+                counts[name] = counts.get(name, 0) + hit
+    result = {"total": total, "base": base, "hybrid": hits, "by_group": by_group}
+    if llm is not None:
+        result.update(reranked=reranked, rerank_failures=failures)
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="근거 일치율 K3 측정")
     parser.add_argument("--split", default="valid", choices=("train", "valid", "test"))
     parser.add_argument(
         "--rerank", action="store_true", help="reranker 끔/켬 비교 (LLM_PROVIDER=live 필요, CSA-81)"
+    )
+    parser.add_argument(
+        "--hybrid", action="store_true", help="키워드+벡터 하이브리드 끔/켬 비교 (pgvector 필요)"
     )
     parser.add_argument("--limit", type=int, default=0, help="앞 N건만 (0 이면 전부)")
     args = parser.parse_args()
@@ -686,6 +893,49 @@ def main() -> None:
     if args.limit:
         rows = rows[: args.limit]
     print(f"retriever={type(docs).__name__} split={args.split}")
+    if args.hybrid:
+        if not hasattr(docs, "score_sections"):
+            raise SystemExit("--hybrid 는 pgvector docs 가 필요하다 (DB 적재 + GEMINI_API_KEY)")
+        llm = None
+        weights = HYBRID_WEIGHTS
+        if args.rerank:
+            from cs_agent.llm.router import get_router
+
+            llm = get_router()
+            if not llm.enabled:
+                raise SystemExit("--hybrid --rerank 는 LLM_PROVIDER=live 가 필요하다")
+            weights = (get_settings().hybrid_weight,)
+        result = measure_hybrid(rows, docs, weights=weights, llm=llm)
+        n = result["total"]
+        if not n:
+            raise SystemExit("평가할 정답 근거가 있는 문의가 없습니다")
+        base = result["base"]
+        print(
+            f"끔            K3 {base['k3']}/{n} ({base['k3'] / n:.1%})  "
+            f"위 {RERANK_POOL} 안 {base['pool']}/{n} ({base['pool'] / n:.1%})"
+        )
+        for w, hit in result["hybrid"].items():
+            print(
+                f"켬 weight={w:<4} K3 {hit['k3']}/{n} ({hit['k3'] / n:.1%}) "
+                f"{hit['k3'] - base['k3']:+d}  위 {RERANK_POOL} 안 {hit['pool']}/{n} "
+                f"({hit['pool'] / n:.1%}) {hit['pool'] - base['pool']:+d}"
+            )
+        for group, values in result["by_group"].items():
+            label = "본문 언어" if group == "language" else "유형"
+            print(f"{label}별 K3 (끔 → weight {' / '.join(map(str, weights))})")
+            for value, c in sorted(values.items(), key=lambda item: -item[1]["n"]):
+                after = " ".join(str(c[str(w)]) for w in weights)
+                print(f"  {value:<11} n={c['n']:<4} 끔 {c['off']:<4} 켬 {after}")
+                if llm is not None:
+                    after = " ".join(str(c[str(w) + "_rerank"]) for w in weights)
+                    print(f"    reranker 포함: 끔 {c['off_rerank']} 켬 {after}")
+        if llm is not None:
+            for name, hit in result["reranked"].items():
+                print(
+                    f"reranker 포함 {name}: K3 {hit}/{n} ({hit / n:.1%}), "
+                    f"판단 실패 {result['rerank_failures'][name]}건"
+                )
+        return
     if not args.rerank:
         result = measure_k3(rows, docs, cases)
         print(f"K3 = {result['hits']}/{result['total']} ({result['k3']:.1%})")

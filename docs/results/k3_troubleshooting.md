@@ -78,8 +78,12 @@ K3 **73.9% (435/589)**, 문서만 맞으면 인정하는 기준으로는 85.4% (
 저장소 코드는 바꾸지 않았다.
 
 ```python
-ROUTE = {"ORDER_LEAD": "POL-ORDER", "QUOTE": "POL-ORDER",
-         "RETURN": "POL-RETURN", "WARRANTY": "POL-WARRANTY"}
+ROUTE = {
+    "ORDER_LEAD": "POL-ORDER",
+    "QUOTE": "POL-ORDER",
+    "RETURN": "POL-RETURN",
+    "WARRANTY": "POL-WARRANTY",
+}
 candidates = first_pass(docs, cases, text)
 routed = _merge([candidates, docs.search(text, 3, {"doc_id": ROUTE[category]})])
 evidence = finalize_evidence(routed, extraction, category=Category(category))

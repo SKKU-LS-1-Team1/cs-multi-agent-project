@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # LLM 이 꺼져 있으면(fake) 켜 둬도 규칙 정렬 그대로.
     rerank_enabled: bool = True
     rerank_weight: float = 0.5  # 관련도(0~1)에 곱해 규칙 점수에 더한다. --rerank 비교로 정한다
+    # ④ 1차 검색 키워드+벡터 하이브리드 (멘토링 개선안 4, agents/retrieval.py). pgvector docs
+    # 후보에 키워드 후보(모델명·에러코드·규격명)를 더하고 키워드 점수 × weight 를 가산한다.
+    # valid 589건에서 후보만 추가하는 방식이 가장 좋아 기본을 켠다 (점수 가산은 0).
+    # 0은 후보 추가 유지, false는 기존 벡터 검색만. docs/results/hybrid_retrieval_valid.md 참고.
+    # 비교: uv run python -m cs_agent.agents.retrieval --split valid --hybrid
+    hybrid_enabled: bool = True
+    hybrid_weight: float = Field(default=0.0, ge=0, le=1, allow_inf_nan=False)
     # 같은 요청 캐시·분당 호출 제한 (CSA-45, cache/store.py). live 일 때만 켠다 (main.py)
     llm_cache_ttl_s: int = 86400  # 같은 단계·같은 프롬프트 응답을 하루 재사용. 0 이면 캐시 끔
     gemini_rpm: int = 0  # Gemini 분당 호출 상한 (판단·작성 합산). 0 이면 제한 없음
